@@ -10,8 +10,8 @@ export const LASHINGS = {
   parallel: { he: 'כפיתה מקבילה', short: 'מקבילה' },
   tripod:   { he: 'כפיתת חצובה',  short: 'חצובה' },
   // special lashing used only to fix a guy line to its stake (Omer);
-  // the real name is still to come, this one is a placeholder
-  guy:      { he: 'כפיתת יתר לבז״נט', short: 'יתר לבז״נט' },
+  // (Omer: it is called קיבוע)
+  guy:      { he: 'קיבוע', short: 'קיבוע' },
 };
 // The four lashings the picker offers on poles, as on the mockup Omer
 // confirmed: מרובעת, אלכסונית, מקבילה, חצובה.

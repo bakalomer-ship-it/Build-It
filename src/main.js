@@ -90,6 +90,7 @@ const people = {
   pull1: makePerson(0), pull2: makePerson(1),
   baseL: makePerson(2), baseR: makePerson(3),
   lift1: makePerson(1), lift2: makePerson(0),
+  tier: makePerson(3),
 };
 for (const g of GUYS) people['guy' + g.id] = makePerson(GUYS.indexOf(g) + 2);
 for (const k in people) { people[k].visible = false; scene.add(people[k]); }
@@ -264,14 +265,18 @@ function updateCamera(dt) {
   controls.update();
 }
 // short close-up of a lashing being tied, then back to where the player was
-function lashCloseup(pos, onTied, hold = 700) {
+function lashCloseup(pos, onTied, hold = 700, withTier = true) {
   const P = new THREE.Vector3(...pos);
   const back = { pos: camera.position.clone(), target: controls.target.clone() };
-  const dir = camera.position.clone().sub(P).normalize();
-  const near = P.clone().addScaledVector(dir, 0.85);
-  closeup = { phase: 'in' };
+  // come in low and from the side, so both the coils and the scout tying them are in view
+  const dir = camera.position.clone().sub(P); dir.y = 0;
+  if (dir.lengthSq() < 1e-6) dir.set(0, 0, -1);
+  dir.normalize();
+  const near = P.clone().addScaledVector(dir, withTier ? 1.6 : 0.9).add(new THREE.Vector3(0, withTier ? 0.75 : 0.6, 0));
+  const look = withTier ? P.clone().add(new THREE.Vector3(0, 0.5, 0)).addScaledVector(dir, -0.15) : P;
+  closeup = { phase: 'in', tier: withTier ? pos : null };
   camTween = {
-    t: 0, dur: 0.35, fromPos: back.pos.clone(), fromTarget: back.target.clone(), toPos: near, toTarget: P,
+    t: 0, dur: 0.35, fromPos: back.pos.clone(), fromTarget: back.target.clone(), toPos: near, toTarget: look,
     onDone: () => {
       closeup.phase = 'tie';
       onTied();
@@ -900,7 +905,7 @@ function useHint(s) {
   reopenForFixes();
   flashHint(t ? '<b>רמז:</b> הכפיתה כאן מסוג לא נכון' : '<b>רמז:</b> כאן חסרה כפיתה');
   flashUntil = performance.now() + 4000;
-  lashCloseup(pos, () => {}, 2000);
+  lashCloseup(pos, () => {}, 2000, false);
 }
 function restart() {
   closeModal();
@@ -972,7 +977,7 @@ function openFolder(tab = 'drawing') {
       <li>דופקים בז״נט ליד כל רגל, במקום שבו הרגליים יעמדו.</li>
       <li>כופתים 4 יתרים לראשי הרגליים. אין חבל שנכפת לאמצע סנדה.</li>
       <li>מרימים: המרימים מגביהים את הראש, והמושכים מושכים ביתרים הקדמיים לאט ובשליטה עד שהקלף ניצב. מחזיקי היתרים האחוריים עוצרים אותו באנך.</li>
-      <li>דופקים בז״נטי יתרים כגובה הקלף מהרגליים (45°) ומקבעים אליהם את היתרים בכפיתת יתר לבז״נט.</li>
+      <li>דופקים בז״נטי יתרים כגובה הקלף מהרגליים (45°) ומקבעים אליהם את היתרים בקיבוע.</li>
       <li>כופתים כל רגל לבז״נט שלה בשתי כפיתות.</li>
       <li>בדיקת יציבות: עוזבים ודוחפים מכל הכיוונים.</li></ol>`;
   } else {
@@ -981,7 +986,7 @@ function openFolder(tab = 'drawing') {
       <tr><td>סנדות בזווית אחרת (אלכסון על רגל, מרכז האיקס)</td><td>כפיתה אלכסונית</td></tr>
       <tr><td>סנדות זו לצד זו (רגל לבז״נט)</td><td>כפיתה מקבילה</td></tr>
       <tr><td>שלוש סנדות כפותות בראש</td><td>כפיתת חצובה</td></tr>
-      <tr><td>יתר אל הבז״נט שלו</td><td>כפיתת יתר לבז״נט (שם זמני)</td></tr></tbody></table>
+      <tr><td>יתר אל הבז״נט שלו</td><td>קיבוע</td></tr></tbody></table>
       <p class="note">כפיתה מסוג לא נכון לא מפילה את המבנה, אבל מורידה ניקוד.</p>`;
   }
   $('folder').hidden = false;
@@ -1085,6 +1090,26 @@ function drawCrew() {
     }
   }
 }
+// a scout steps in to tie each lashing, during its close-up
+function drawTier() {
+  const p = people.tier;
+  if (!closeup || !closeup.tier) { p.visible = false; return; }
+  const J = closeup.tier;
+  if (!closeup.stand) {
+    const d = new THREE.Vector3(camera.position.x - J[0], 0, camera.position.z - J[2]);
+    if (d.lengthSq() < 1e-6) d.set(0, 0, -1);
+    d.normalize();
+    // beside the joint, seen side-on, so the lean and the reaching arms read clearly
+    const side = new THREE.Vector3(-d.z, 0, d.x);
+    closeup.stand = [J[0] + side.x * 0.5 - d.x * 0.15, 0, J[2] + side.z * 0.5 - d.z * 0.15];
+  }
+  const st = closeup.stand;
+  const yaw = Math.atan2(J[0] - st[0], J[2] - st[2]);
+  const low = J[1] < 0.6; // joints near the ground: bend down to them
+  const reach = low ? 0.9 : Math.min(Math.PI * 0.85, 0.6 + J[1] * 0.7);
+  const wiggle = closeup.phase === 'tie' ? 0.15 * Math.sin(performance.now() / 70) : 0;
+  place(p, low ? [st[0], -0.32, st[2]] : st, yaw, low ? 0.6 : 0.1, reach + wiggle); // kneel for low joints
+}
 function jointPosOf(sid, s) {
   const id = G.sim.findParticle(sid, s); if (id == null) return null;
   return add3(G.sim.pos(id), visNormal(), layerOff(slotById(sid)));
@@ -1131,7 +1156,7 @@ function frame(now) {
   const op = blueprint.material.opacity + (showPlan ? 1 : -1) * dt / 0.8;
   blueprint.material.opacity = Math.max(0, Math.min(1, op));
   blueprint.visible = blueprint.material.opacity > 0.01;
-  drawPoles(); drawLashings(); drawStakes(); drawCrew(); drawGauge(); drawPushArrow(push);
+  drawPoles(); drawLashings(); drawStakes(); drawCrew(); drawTier(); drawGauge(); drawPushArrow(push);
   updateMallet(dt);
   collectTargets();
   updateCamera(dt);
