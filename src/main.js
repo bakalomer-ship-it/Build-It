@@ -1,9 +1,9 @@
 // Level 1 prototype: build a 2x2 klaf on its drawing, drive the stakes,
-// raise it with the rope, anchor it, and pass the push test.
+// raise it by the guy lines, anchor it, and pass the push test.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { SLOTS, JOINTS, STAKE_JOINTS, LEG_STAKES, GUYS, GUY_DIST, LASHINGS, LASHING_ORDER, LEVEL } from './level1.js';
-import { KlafSim, TUNING, jointReachable, slotById, slotParam, slotPoint, klafToWorld } from './klafSim.js';
+import { SLOTS, JOINTS, STAKE_JOINTS, LEG_STAKES, GUYS, GUY_DIST, LASHINGS, LASHING_ORDER, GUY_LASHING_ORDER, LEVEL } from './level1.js';
+import { KlafSim, TUNING, PULL_HAND, jointReachable, slotById, slotParam, slotPoint, klafToWorld } from './klafSim.js';
 import {
   R, makeRenderer, makeWorld, makeBlueprintMesh, drawBlueprint, BP, makePoleMesh, placeCylinder,
   makeLashing, placeLashing, placeParallelLashing, RopeViz, makeStake, makeMallet, makePerson, posePerson,
@@ -27,7 +27,8 @@ let G;
 function freshState() {
   return {
     stage: 'build',
-    build: { poles: {}, joints: {}, stakes: {}, guyTop: {}, anchors: {}, stakeJoints: {} },
+    build: { poles: {}, joints: {}, stakes: {}, guyTop: {}, anchors: {}, stakeJoints: {}, guyTies: {} },
+    tying: null,
     selected: null,
     sim: null,
     raisedOnce: false, uprightFor: 0,
@@ -36,6 +37,7 @@ function freshState() {
     result: null,
     startedAt: null, endedAt: null,
     lastLength: 2.0,
+    hintsUsed: 0,
   };
 }
 G = freshState();
@@ -55,7 +57,9 @@ controls.maxDistance = 16;
 controls.target.set(0, 1, 0.4);
 controls.enabled = false;
 
-scene.add(makeBlueprintMesh(JOINTS));
+const blueprint = makeBlueprintMesh(JOINTS);
+blueprint.material.transparent = true;
+scene.add(blueprint);
 
 // poles: two meshes per slot (diagonals can bow at their centre)
 const poleMeshes = {};
@@ -80,8 +84,7 @@ for (const g of GUYS) { const m = makeStake(ANCHOR_LEN); m.visible = false; scen
 const mallet = makeMallet(); scene.add(mallet);
 
 const guyRopes = {}; for (const g of GUYS) guyRopes[g.id] = new RopeViz(scene);
-const pullRope = new RopeViz(scene, 0.014, 0xc9a35c, 16);
-Object.values(guyRopes).forEach(r => r.show(false)); pullRope.show(false);
+Object.values(guyRopes).forEach(r => r.show(false));
 
 const people = {
   pull1: makePerson(0), pull2: makePerson(1),
@@ -186,7 +189,7 @@ function stageDone(id) {
   if (id === 'build') return SLOTS.every(s => b.poles[s.id]) && JOINTS.every(j => b.joints[j.id]);
   if (id === 'stakes') return LEG_STAKES.every(s => (b.stakes[s.id] || 0) >= LEG_STAKE_HITS);
   if (id === 'raise') return G.raisedOnce;
-  if (id === 'anchor') return G.sim && GUYS.every(g => G.sim.guys[g.id]?.tied) && STAKE_JOINTS.every(s => b.stakeJoints[s.id]);
+  if (id === 'anchor') return G.sim && GUYS.every(g => b.guyTies[g.id]) && STAKE_JOINTS.every(s => b.stakeJoints[s.id]);
   if (id === 'check') return !!G.result;
   return false;
 }
@@ -210,7 +213,7 @@ function goStage(id) {
   $('tray').hidden = id !== 'build';
   $('rope-panel').hidden = id !== 'raise';
   if (id !== 'build') $('length-panel').hidden = true;
-  setCameraMode(id === 'build' ? 'top' : 'orbit');
+  setCameraMode(id === 'build' ? 'buildView' : 'orbit');
   refreshChips(); refreshActions(); refreshHint();
 }
 function startSim() {
@@ -219,61 +222,75 @@ function startSim() {
 }
 function lowerKlaf() {
   G.sim = null; G.raisedOnce = false; G.check = null; G.result = null;
-  G.build.stakeJoints = {};
+  G.build.stakeJoints = {}; G.build.guyTies = {};
   pushArrow.visible = false;
 }
 
 // ---------------- camera ----------------
-let camMode = 'top', camTween = null;
-function topCamPose() {
-  const w = window.innerWidth, h = window.innerHeight, aspect = w / h;
-  const t = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  const usable = Math.max(0.4, (w - 250) / w);
-  const needH = 3.5, needW = 3.0;
-  const dist = Math.max(needH / (2 * t), needW / (usable * aspect * 2 * t));
-  return { pos: new THREE.Vector3(0.0, dist, 1.1), target: new THREE.Vector3(0.0, 0, 1.1), up: new THREE.Vector3(0, 0, 1) };
+// Everything happens in 3D on the plaza. Each stage has a starting view;
+// the player can always orbit, pan and zoom.
+let camMode = null, camTween = null, closeup = null;
+function stagePose(mode) {
+  const aspect = window.innerWidth / window.innerHeight;
+  const far = aspect < 1.6 ? 1.25 : 1; // narrower screens step back a little
+  if (mode === 'buildView') return { target: new THREE.Vector3(0, 0.15, 1.0), pos: new THREE.Vector3(0.7 * far, 3.3 * far, -1.9 * far) };
+  return { target: new THREE.Vector3(0, 0.95, 0.3), pos: new THREE.Vector3(3.6, 2.6, -5.4) };
 }
 function setCameraMode(mode) {
   if (mode === camMode && camTween == null) return;
-  const from = { pos: camera.position.clone(), q: camera.quaternion.clone() };
-  let to;
-  if (mode === 'top') {
-    const p = topCamPose();
-    const tmp = new THREE.PerspectiveCamera(); tmp.position.copy(p.pos); tmp.up.copy(p.up); tmp.lookAt(p.target);
-    to = { pos: p.pos, q: tmp.quaternion.clone() };
-    controls.enabled = false;
-  } else {
-    controls.target.set(0, 0.95, 0.3);
-    const pos = new THREE.Vector3(3.6, 2.6, -5.4);
-    const tmp = new THREE.PerspectiveCamera(); tmp.position.copy(pos); tmp.up.set(0, 1, 0); tmp.lookAt(controls.target);
-    to = { pos, q: tmp.quaternion.clone() };
-  }
+  const p = stagePose(mode);
   camMode = mode;
-  camTween = { t: 0, from, to, mode };
+  camTween = { t: 0, fromPos: camera.position.clone(), fromTarget: controls.target.clone(), toPos: p.pos, toTarget: p.target, dur: 0.7 };
+  controls.enabled = false;
 }
+const ease = t => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 function updateCamera(dt) {
-  if (camTween) {
-    camTween.t = Math.min(1, camTween.t + dt / 0.7);
-    const k = camTween.t < 0.5 ? 2 * camTween.t ** 2 : 1 - (-2 * camTween.t + 2) ** 2 / 2;
-    camera.position.lerpVectors(camTween.from.pos, camTween.to.pos, k);
-    camera.quaternion.slerpQuaternions(camTween.from.q, camTween.to.q, k);
-    if (camTween.t >= 1) {
-      if (camTween.mode === 'orbit') { camera.up.set(0, 1, 0); controls.enabled = true; controls.update(); }
+  const tw = camTween;
+  if (tw) {
+    tw.t = Math.min(1, tw.t + dt / tw.dur);
+    const k = ease(tw.t);
+    camera.position.lerpVectors(tw.fromPos, tw.toPos, k);
+    controls.target.lerpVectors(tw.fromTarget, tw.toTarget, k);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(controls.target);
+    if (tw.t >= 1) {
       camTween = null;
+      if (tw.onDone) tw.onDone();
+      else { controls.enabled = true; controls.update(); }
     }
     return;
   }
-  if (camMode === 'orbit') controls.update();
+  if (closeup) return;
+  controls.update();
+}
+// short close-up of a lashing being tied, then back to where the player was
+function lashCloseup(pos, onTied, hold = 700) {
+  const P = new THREE.Vector3(...pos);
+  const back = { pos: camera.position.clone(), target: controls.target.clone() };
+  const dir = camera.position.clone().sub(P).normalize();
+  const near = P.clone().addScaledVector(dir, 0.85);
+  closeup = { phase: 'in' };
+  camTween = {
+    t: 0, dur: 0.35, fromPos: back.pos.clone(), fromTarget: back.target.clone(), toPos: near, toTarget: P,
+    onDone: () => {
+      closeup.phase = 'tie';
+      onTied();
+      setTimeout(() => {
+        camTween = { t: 0, dur: 0.35, fromPos: camera.position.clone(), fromTarget: controls.target.clone(), toPos: back.pos, toTarget: back.target,
+          onDone: () => { closeup = null; controls.enabled = true; controls.update(); } };
+      }, hold);
+    },
+  };
+  controls.enabled = false;
 }
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h; camera.updateProjectionMatrix();
-  if (camMode === 'top' && !camTween) { const p = topCamPose(); camera.position.copy(p.pos); camera.up.copy(p.up); camera.lookAt(p.target); }
 }
 window.addEventListener('resize', resize);
 resize();
-{ const p = topCamPose(); camera.position.copy(p.pos); camera.up.copy(p.up); camera.lookAt(p.target); }
+{ const p = stagePose('buildView'); camera.position.copy(p.pos); controls.target.copy(p.target); camera.lookAt(p.target); }
 
 // ---------------- screen picking ----------------
 function toScreen(p) {
@@ -340,7 +357,7 @@ function collectTargets() {
     s.position.set(...t.pos);
     s.material.map = t.kind === 'stake' || t.kind === 'anchor' ? markerTex.stake : (t.kind === 'guyTop' || t.kind === 'guyTie') ? markerTex.guy : markerTex.lash;
     const pulse = 1 + 0.12 * Math.sin(performance.now() / 260);
-    const base = camMode === 'top' ? 0.055 : 0.05;
+    const base = 0.05;
     s.scale.setScalar(base * pulse);
     if (picker.target && picker.target.id === t.id) s.scale.setScalar(base * 1.5);
   }
@@ -383,7 +400,7 @@ canvas.addEventListener('pointerup', e => {
   down = null;
 });
 function onTap(x, y) {
-  if (G.falling) return;
+  if (G.falling || closeup) return;
   const t = pickTarget(x, y);
   if (t) return onTarget(t, x, y);
   if (G.stage === 'build') {
@@ -416,10 +433,7 @@ function onTarget(t, x, y) {
       sfx.lash();
       break;
     }
-    case 'guyTie': {
-      G.sim.tieGuy(t.id); sfx.lash();
-      break;
-    }
+    case 'guyTie': return openPicker(t, x, y);
   }
   refreshChips(); refreshActions(); refreshHint();
 }
@@ -431,25 +445,32 @@ const lashIcon = {
   cross: '<svg viewBox="0 0 26 22"><path d="M4 2l18 18M22 2L4 20" stroke="currentColor" stroke-width="3"/><path d="M8 11l5-5 5 5-5 5z" fill="none" stroke="#e0a93b" stroke-width="2"/></svg>',
   parallel: '<svg viewBox="0 0 26 22"><path d="M9 1v20M17 1v20" stroke="currentColor" stroke-width="3"/><path d="M6 8h14M6 12h14" stroke="#e0a93b" stroke-width="2"/></svg>',
   running: '<svg viewBox="0 0 26 22"><path d="M1 5h24" stroke="currentColor" stroke-width="3"/><path d="M5 2v18M11 2v18M17 2v18M23 2v18" stroke="currentColor" stroke-width="2"/><path d="M2 9l22 0" stroke="#e0a93b" stroke-width="2"/></svg>',
-  tripod: '<svg viewBox="0 0 26 22"><path d="M13 2L4 21M13 2v19M13 2l9 19" stroke="currentColor" stroke-width="3"/><circle cx="13" cy="5" r="3.5" fill="none" stroke="#e0a93b" stroke-width="2"/></svg>',
+  guy: '<svg viewBox="0 0 26 22"><path d="M4 21V6" stroke="currentColor" stroke-width="4"/><path d="M4 9L24 2" stroke="#e0a93b" stroke-width="2"/><circle cx="4" cy="9" r="3.5" fill="none" stroke="#e0a93b" stroke-width="2"/></svg>',
 };
-for (const id of LASHING_ORDER) {
-  const btn = document.createElement('button');
-  btn.type = 'button'; btn.dataset.type = id;
-  btn.innerHTML = lashIcon[id] + `<span>${LASHINGS[id].he}</span>`;
-  btn.addEventListener('click', () => chooseLashing(id));
-  $('picker-opts').appendChild(btn);
-}
+// tutorial only: describe the meeting point, without naming the lashing
+const TUTORIAL_TIP = {
+  square: 'שתי סנדות נפגשות בזווית ישרה',
+  cross: 'סנדות נפגשות בזווית אלכסונית',
+  parallel: 'שתי סנדות צמודות זו לצד זו',
+  guy: 'יתר שנקשר לבז״נט',
+};
+$('picker').insertBefore(Object.assign(document.createElement('div'), { id: 'picker-tip', className: 'picker-tip' }), $('picker-opts'));
 $('picker-untie').addEventListener('click', () => {
   const t = picker.target; if (!t) return;
   if (t.kind === 'lashed') delete G.build.joints[t.id];
   closePicker(); refreshAll();
 });
 function jointLabel(t) {
+  if (t.kind === 'guyTie') return GUYS.find(g => g.id === t.id).he + ' אל הבז״נט';
   if (t.kind.startsWith('stake')) { const sj = STAKE_JOINTS.find(s => s.id === t.id); return `${slotById(sj.leg).he} אל הבז״נט`; }
   const j = JOINTS.find(q => q.id === t.id);
   const name = id => slotById(id).he.replace(/ \(.*\)/, '');
   return `${name(j.a)} × ${name(j.b)}`;
+}
+function correctFor(t) {
+  if (t.kind === 'guyTie') return 'guy';
+  if (t.kind.startsWith('stake')) return STAKE_JOINTS.find(s => s.id === t.id).correct;
+  return JOINTS.find(j => j.id === t.id).correct;
 }
 function openPicker(t, x, y) {
   picker.target = t;
@@ -457,7 +478,17 @@ function openPicker(t, x, y) {
   el.hidden = false;
   const cur = t.kind === 'lashed' ? G.build.joints[t.id] : t.kind === 'stakeLashed' ? G.build.stakeJoints[t.id] : null;
   $('picker-title').textContent = (cur ? 'החלפת כפיתה · ' : 'בחרו כפיתה · ') + jointLabel(t);
-  for (const btn of $('picker-opts').children) btn.classList.toggle('cur', btn.dataset.type === cur);
+  const opts = $('picker-opts'); opts.innerHTML = '';
+  for (const id of t.kind === 'guyTie' ? GUY_LASHING_ORDER : LASHING_ORDER) {
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.dataset.type = id; btn.className = id === cur ? 'cur' : '';
+    btn.innerHTML = lashIcon[id] + `<span>${LASHINGS[id].he}</span>`;
+    btn.addEventListener('click', () => chooseLashing(id));
+    opts.appendChild(btn);
+  }
+  const tip = LEVEL.tutorial ? TUTORIAL_TIP[correctFor(t)] : '';
+  $('picker-tip').textContent = tip ? 'הדרכה: ' + tip : '';
+  $('picker-tip').hidden = !tip;
   $('picker-untie').hidden = !(t.kind === 'lashed' && G.stage === 'build');
   const w = el.offsetWidth, h = el.offsetHeight;
   const W = window.innerWidth, H = window.innerHeight;
@@ -468,18 +499,28 @@ function openPicker(t, x, y) {
 }
 function closePicker() { picker.el.hidden = true; picker.target = null; }
 function chooseLashing(type) {
-  const t = picker.target; if (!t) return;
+  const t = picker.target; if (!t || closeup) return;
   const b = G.build;
-  if (t.kind === 'joint' || t.kind === 'lashed') {
-    b.joints[t.id] = type;
-    G.sim?.addJoint(JOINTS.find(j => j.id === t.id));
-  } else {
-    const fresh = !b.stakeJoints[t.id];
-    b.stakeJoints[t.id] = type;
-    if (fresh) G.sim?.tieStakeJoint(STAKE_JOINTS.find(s => s.id === t.id));
-  }
-  sfx.lash();
-  closePicker(); refreshAll();
+  closePicker();
+  const tie = () => {
+    if (t.kind === 'joint' || t.kind === 'lashed') {
+      b.joints[t.id] = type;
+      G.sim?.addJoint(JOINTS.find(j => j.id === t.id));
+    } else if (t.kind === 'guyTie') {
+      b.guyTies[t.id] = type;
+      G.sim?.tieGuy(t.id);
+    } else {
+      const fresh = !b.stakeJoints[t.id];
+      b.stakeJoints[t.id] = type;
+      if (fresh) G.sim?.tieStakeJoint(STAKE_JOINTS.find(s => s.id === t.id));
+    }
+    G.tying = { id: t.id, t: 0 };
+    sfx.lash();
+    refreshAll();
+  };
+  // changing the type of a lashing already tied needs no close-up
+  if (t.kind === 'lashed' || t.kind === 'stakeLashed') return tie();
+  lashCloseup(t.pos, tie);
 }
 
 // ---------------- pole tray (drag a pole onto the drawing) ----------------
@@ -597,6 +638,7 @@ function changeLength(steps) {
     if (!on || !G.sim || G.falling) return;
     const dy = e.clientY - lastY; lastY = e.clientY;
     if (dy <= 0) return;
+    if (!G.sim.canPull()) { flashHint('המושכים מושכים ב<b>יתרים הקדמיים</b>: קשרו אותם קודם לראש הקלף'); return; }
     ropeOff += dy;
     $('rp-rope').style.backgroundPosition = `0 ${ropeOff}px`;
     G.sim.pullTo(G.sim.target + dy * 0.16);
@@ -661,8 +703,8 @@ function hintText() {
       if (!sim) return '';
       const ang = sim.angle();
       const g = GUYS.filter(q => b.guyTop[q.id]).length;
-      if (ang < 6 && g < 4) return `קשרו <b>יתרים</b> לראש הקלף: הקישו על הטבעות בראשי הרגליים · יתרים ${g}/4`;
-      if (ang < 6) return 'החליקו את החבל <b>למטה</b> כדי למשוך. לאט ובשליטה';
+      if (ang < 6 && g < 4) return `קשרו <b>4 יתרים</b> לראש הקלף (הקישו על הטבעות). בשני הקדמיים המושכים ירימו את הקלף · ${g}/4`;
+      if (ang < 6) return 'החליקו את היתרים <b>למטה</b> כדי למשוך. לאט ובשליטה';
       if (ang < 80) return 'ממשיכים למשוך, לאט ובשליטה…';
       if (ang <= 97) return '<b>עצרו!</b> הקלף ניצב';
       return '<b>הקלף עובר את האנך!</b>';
@@ -670,7 +712,7 @@ function hintText() {
     case 'anchor': {
       if (!G.raisedOnce) return 'קודם מרימים את הקלף (שלב 3)';
       const a = GUYS.filter(q => (b.anchors[q.id] || 0) >= ANCHOR_HITS).length;
-      const t = GUYS.filter(q => sim?.guys[q.id]?.tied).length;
+      const t = GUYS.filter(q => b.guyTies[q.id]).length;
       const s = STAKE_JOINTS.filter(q => b.stakeJoints[q.id]).length;
       return `עגנו את הקלף: בז״נטי יתרים ${a}/4 · יתרים קשורים ${t}/4 · כפיתות רגל לבז״נט ${s}/4`;
     }
@@ -786,7 +828,8 @@ function explain(kind) {
 // ---------------- results ----------------
 function score() {
   const b = G.build;
-  const all = [...JOINTS.map(j => [j, b.joints[j.id]]), ...STAKE_JOINTS.map(j => [j, b.stakeJoints[j.id]])];
+  const all = [...JOINTS.map(j => [j, b.joints[j.id]]), ...STAKE_JOINTS.map(j => [j, b.stakeJoints[j.id]]),
+    ...GUYS.map(g => [{ ...g, correct: 'guy', guy: true }, b.guyTies[g.id]])];
   const total = all.length;
   const tied = all.filter(([, t]) => t).length;
   const correct = all.filter(([j, t]) => t === j.correct).length;
@@ -800,10 +843,15 @@ function score() {
   // where the missing joints are: drawing sheet and height band, never the joint itself
   const groups = {};
   for (const [j, t] of all) if (!t) {
-    const key = j.leg ? 'מפת בסיסים (רגליים לבז״נטים)' : `שרטוט הקלף, ${j.at[1] < 1.0 ? 'גובה 0–1 מ׳' : 'גובה 1–2 מ׳'}`;
+    const key = j.guy ? 'מפת יתרים' : j.leg ? 'מפת בסיסים (רגליים לבז״נטים)' : `שרטוט הקלף, ${j.at[1] < 1.0 ? 'גובה 0–1 מ׳' : 'גובה 1–2 מ׳'}`;
     groups[key] = (groups[key] || 0) + 1;
   }
-  return { total, tied, correct, polesOk, accuracy, bonus, sec, sum: accuracy + bonus, stars, groups, wrong: tied - correct };
+  // hints: one per 10 lashings, each costs about half of what a missed lashing costs
+  const hintsAllowed = Math.max(1, Math.floor(total / 10));
+  const hintCost = Math.round(40 / total);
+  const penalty = G.hintsUsed * hintCost;
+  return { total, tied, correct, polesOk, accuracy, bonus, sec, sum: accuracy + bonus - penalty, stars, groups, wrong: tied - correct,
+    hintsAllowed, hintCost, penalty, all };
 }
 function finish() {
   G.endedAt = performance.now();
@@ -822,16 +870,37 @@ function finish() {
       <span>סנדות באורך שבשרטוט</span><b>${s.polesOk}/${SLOTS.length}</b>
       <span>דיוק</span><b>${s.accuracy}</b>
       <span>בונוס זמן (${fmt(s.sec)})</span><b>+${s.bonus}</b>
+      ${s.penalty ? `<span>רמזים (${G.hintsUsed})</span><b>−${s.penalty}</b>` : ''}
       <span class="total">סה״כ</span><b class="total">${s.sum}</b>
     </div>
     ${missing ? `<p><b>איפה לחפש:</b></p><ul>${missing}</ul>` : ''}
     ${s.wrong ? `<p>${s.wrong === 1 ? 'כפיתה אחת קשורה' : `${s.wrong} כפיתות קשורות`} בסוג לא נכון. זה מוריד ניקוד, אבל לא מפיל את המבנה.</p>` : ''}
     ${s.stars < 3 ? '<p>אפשר לחזור, להשלים ולתקן, ולשפר את הכוכבים.</p>' : ''}
   `, [
-    s.stars < 3 ? ['להשלים ולתקן', () => { closeModal(); G.check = null; G.result = null; G.endedAt = null; goStage('anchor'); }, true] : null,
+    s.stars < 3 ? ['להשלים ולתקן', reopenForFixes, true] : null,
+    s.stars < 3 && G.hintsUsed < s.hintsAllowed ? [`רמז (${s.hintsAllowed - G.hintsUsed} נותרו, −${s.hintCost} נק׳)`, () => useHint(s)] : null,
     ['לבנות מחדש', restart, s.stars === 3],
   ].filter(Boolean));
   refreshAll();
+}
+function reopenForFixes() {
+  closeModal(); G.check = null; G.result = null; G.endedAt = null; goStage('anchor');
+}
+// a hint flies the camera to one problem: first a missing lashing, then a wrong one
+function useHint(s) {
+  const pick = s.all.find(([, t]) => !t) || s.all.find(([j, t]) => t !== j.correct);
+  if (!pick) return;
+  const [j, t] = pick;
+  let pos;
+  if (j.guy) { const a = anchorPos(j); pos = [a[0], 0.4, a[2]]; }
+  else if (j.leg) pos = legPoint(j.leg, j.v);
+  else pos = jointPos(j);
+  if (!pos) return;
+  G.hintsUsed++;
+  reopenForFixes();
+  flashHint(t ? '<b>רמז:</b> הכפיתה כאן מסוג לא נכון' : '<b>רמז:</b> כאן חסרה כפיתה');
+  flashUntil = performance.now() + 4000;
+  lashCloseup(pos, () => {}, 2000);
 }
 function restart() {
   closeModal();
@@ -875,7 +944,8 @@ function setPolesOpacity(o) {
 
 // ---------------- structure folder (תיק מבנה) ----------------
 const FOLDER_TABS = [
-  ['drawing', 'שרטוט הקלף'], ['poles', 'רשימת סנדות'], ['order', 'סדר עבודה'], ['lashings', 'איזו כפיתה איפה'],
+  ['drawing', 'שרטוט הקלף'], ['poles', 'רשימת סנדות'], ['order', 'סדר עבודה'],
+  ...(LEVEL.tutorial ? [['lashings', 'איזו כפיתה איפה (הדרכה)']] : []),
 ];
 function openFolder(tab = 'drawing') {
   const tabs = $('folder-tabs'); tabs.innerHTML = '';
@@ -900,9 +970,9 @@ function openFolder(tab = 'drawing') {
     body.innerHTML = `<ol>
       <li>בונים את הקלף שוכב על הקרקע, על גבי השרטוט.</li>
       <li>דופקים בז״נט ליד כל רגל, במקום שבו הרגליים יעמדו.</li>
-      <li>קושרים 4 יתרים לראש הקלף.</li>
-      <li>מרימים: המרימים מגביהים את הראש, והמושכים מושכים בחבל לאט ובשליטה עד שהקלף ניצב.</li>
-      <li>דופקים בז״נטי יתרים כגובה הקלף מהרגליים (45°) וקושרים אליהם את היתרים.</li>
+      <li>קושרים 4 יתרים לראשי הרגליים. אין חבל שנקשר לאמצע סנדה.</li>
+      <li>מרימים: המרימים מגביהים את הראש, והמושכים מושכים ביתרים הקדמיים לאט ובשליטה עד שהקלף ניצב. מחזיקי היתרים האחוריים עוצרים אותו באנך.</li>
+      <li>דופקים בז״נטי יתרים כגובה הקלף מהרגליים (45°) ומקבעים אליהם את היתרים בקשירת יתר לבז״נט.</li>
       <li>כופתים כל רגל לבז״נט שלה בשתי כפיתות.</li>
       <li>בדיקת יציבות: עוזבים ודוחפים מכל הכיוונים.</li></ol>`;
   } else {
@@ -911,7 +981,7 @@ function openFolder(tab = 'drawing') {
       <tr><td>סנדות בזווית אחרת (אלכסון על רגל, מרכז האיקס)</td><td>כפיתה מוצלבת</td></tr>
       <tr><td>סנדות זו לצד זו (רגל לבז״נט)</td><td>כפיתה מקבילה</td></tr>
       <tr><td>כמה סנדות מקבילות על תמיכה אחת (משטח)</td><td>כפיתה רצה</td></tr>
-      <tr><td>שלוש סנדות קשורות בראש</td><td>כפיתת חצובה</td></tr></tbody></table>
+      <tr><td>יתר אל הבז״נט שלו</td><td>קשירת יתר לבז״נט (שם זמני)</td></tr></tbody></table>
       <p class="note">כפיתה מסוג לא נכון לא מפילה את המבנה, אבל מורידה ניקוד.</p>`;
   }
   $('folder').hidden = false;
@@ -944,6 +1014,7 @@ function drawLashings() {
     const p = jointPos(j); if (!p) { g.visible = false; continue; }
     g.visible = !G.falling || G.falling.t < 2.2;
     placeLashing(g, p, poleDir(j.a), poleDir(j.b));
+    coilProgress(g, j.id);
   }
   for (const sj of STAKE_JOINTS) {
     const g = lashMeshes[sj.id];
@@ -952,7 +1023,13 @@ function drawLashings() {
     const st = LEG_STAKES.find(s => s.leg === sj.leg);
     g.visible = !G.falling || G.falling.t < 2.2;
     placeParallelLashing(g, p, [st.u, p[1], stakeZ], [0, 1, 0]);
+    coilProgress(g, sj.id);
   }
+}
+// coils wind on one by one during the close-up
+function coilProgress(g, id) {
+  const n = G.tying && G.tying.id === id ? Math.ceil(Math.min(1, G.tying.t / 0.55) * g.children.length) : g.children.length;
+  g.children.forEach((c, i) => { c.visible = i < n; });
 }
 function drawStakes() {
   const b = G.build;
@@ -974,41 +1051,36 @@ function drawCrew() {
   const sim = G.sim, st = G.stage;
   for (const k in people) people[k].visible = false;
   for (const k in guyRopes) guyRopes[k].show(false);
-  pullRope.show(false);
   if (!sim || (G.falling && G.falling.t > 2.2)) return;
   const ang = sim.angle();
   const holding = !sim.lettingGo;
-  // pull rope and pullers
-  if (sim.rope?.active && (st === 'raise' || st === 'anchor' || st === 'check')) {
-    const t = sim.poleParticles.topH ? jointPosOf('topH', 0) : legTop('legL');
-    const hand = sim.pos(sim.hand);
-    if (t) pullRope.set(t, hand, sim.rope.force > 5 ? 0.02 : 0.25);
-    const lean = sim.rope.force > 30 ? -0.35 : -0.1;
-    place(people.pull1, [0.18, 0, hand[2] - 0.15], 0, lean, 1.2);
-    place(people.pull2, [-0.15, 0, hand[2] - 0.75], 0, lean, 1.1);
-  }
   // base holders keep the feet in place while it goes up
   if (holding && ang < 85 && (st === 'raise')) {
     place(people.baseL, [-0.9, 0, -0.65], 0, 0.25, 0.9);
     place(people.baseR, [0.9, 0, -0.65], 0, 0.25, 0.9);
   }
-  // lifters carry the top until the rope takes over
+  // lifters carry the top until the guy lines take over
   if (holding && sim.target > 0 && sim.target < 55 && ang < 60) {
     const tp = sim.topCentre();
     const reach = Math.min(Math.PI * 0.9, 0.6 + ang / 40);
     place(people.lift1, [0.5, 0, tp[2] + 0.3], Math.PI, 0.15, reach);
     place(people.lift2, [-0.5, 0, tp[2] + 0.3], Math.PI, 0.15, reach);
   }
-  // guy lines
+  // guy lines: the front ones are the pullers' lines, the back ones are paid out
   for (const g of GUYS) {
     const con = sim.guys[g.id]; if (!con || !con.active) continue;
     const top = legTop(g.leg); if (!top) continue;
     const a = anchorPos(g);
     if (con.tied) {
       guyRopes[g.id].set(top, [a[0], 0.32, a[2] - g.side * 0.08], 0.02);
+    } else if (con.pull || g.side < 0) {
+      const h = PULL_HAND(slotById(g.leg).centre[0]);
+      const lean = con.force > 30 ? -0.35 : -0.1;
+      place(people['guy' + g.id], [h[0], 0, h[2] - 0.2], 0, lean, 1.2);
+      guyRopes[g.id].set(top, h, con.force > 5 ? 0.02 : 0.25);
     } else {
       const holder = [a[0] * 1.15, 0, g.side * (GUY_DIST + 0.55)];
-      place(people['guy' + g.id], holder, g.side > 0 ? Math.PI : 0, -0.15, 1.0);
+      place(people['guy' + g.id], holder, Math.PI, -0.15, 1.0);
       guyRopes[g.id].set(top, [holder[0], 1.05, holder[2] - g.side * 0.35], con.force > 5 ? 0.03 : 0.3);
     }
   }
@@ -1054,6 +1126,11 @@ function frame(now) {
       if (G.falling.t > 2.6 && !G.falling.shown) { G.falling.shown = true; setPolesOpacity(0); collapseCard(); }
     }
   }
+  if (G.tying) { G.tying.t += dt; if (G.tying.t > 1) G.tying = null; }
+  const showPlan = G.stage === 'build' && !stageDone('build');
+  const op = blueprint.material.opacity + (showPlan ? 1 : -1) * dt / 0.8;
+  blueprint.material.opacity = Math.max(0, Math.min(1, op));
+  blueprint.visible = blueprint.material.opacity > 0.01;
   drawPoles(); drawLashings(); drawStakes(); drawCrew(); drawGauge(); drawPushArrow(push);
   updateMallet(dt);
   collectTargets();

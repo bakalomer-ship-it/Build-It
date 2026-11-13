@@ -3,13 +3,16 @@
 import { World } from './physics.js';
 import { SLOTS, JOINTS, LEVEL, GUYS, GUY_DIST, LEG_STAKES, STAKE_JOINTS } from './level1.js';
 
+// where the pullers' hands are, behind the front guy-line stake
+export const PULL_HAND = u => [u * 1.1, 1.0, -(GUY_DIST + 1.4)];
+
 export const TUNING = {
   substeps: 30,
   knee: 4e-4,            // compliance of the square-lashing "stiffness" (racking resistance)
   diagBendCap: 60,       // N a diagonal carries in compression before it bows
   baseHoldCap: 120,      // N base holders can resist without stakes (feet on the ground)
   backGripCap: 340,      // N guy holders can hold before the rope slips out of their hands
-  frontGripCap: 520,
+  frontGripCap: Infinity, // the pullers do not let go of their own line
   guyCompliance: 2.5e-4, // holders' arms give a little
   gust: 45,              // N uneven-pull / wind wobble at the top while raising
   pushForce: 140,        // N push test at the top
@@ -107,12 +110,9 @@ export class KlafSim {
         : W.add('slide', foot, anchor, { cap: TUNING.baseHoldCap, origin: pos, tag: 'foot:' + st.leg });
     }
 
-    // pull rope from the centre of the top horizontal (or top of a leg)
-    this.hand = W.addParticle([0, 1.0, -5.5], 0);
-    const topId = this.topParticle();
-    this.rope = topId != null ? W.add('rope', topId, this.hand, { tag: 'rope' }) : null;
+    // No rope on the middle of a pole: the pullers raise the klaf by the
+    // front guy lines, the same lines that are later fixed to their stakes.
     this.target = 0;
-    if (this.rope) this.rope.rest += 0.02;
 
     // guy lines tied to the top before the raise, held by people
     this.guys = {};
@@ -121,7 +121,6 @@ export class KlafSim {
     this.flat = true;
     this.collectFrame();
     W.onSubstep = () => { if (this.flat) this.keepFlat(); };
-    if (this.rope) this.rope.compliance = 5e-5;
   }
 
   // Poles held by two or more lashings form the frame. A lashed frame keeps
@@ -181,11 +180,19 @@ export class KlafSim {
     const parts = this.poleParticles[g.leg]; if (!parts) return false;
     const top = parts[parts.length - 1].id;
     const u = slotById(g.leg).centre[0];
-    const holder = W.addParticle([u, 0.05, g.side * GUY_DIST], 0);
-    const vertical = Math.hypot(LEVEL.height + r - 0.05, GUY_DIST);
-    const con = g.side > 0
-      ? W.add('grip', top, holder, { rest: vertical + 0.03, compliance: TUNING.guyCompliance, cap: TUNING.backGripCap, tag: g.id })
-      : W.add('ratchet', top, holder, { compliance: TUNING.guyCompliance, cap: TUNING.frontGripCap, tag: g.id });
+    let con;
+    if (g.side > 0) {
+      // back guy line: holders pay it out and stop the klaf at upright
+      const holder = W.addParticle([u, 0.05, g.side * GUY_DIST], 0);
+      const vertical = Math.hypot(LEVEL.height + r - 0.05, GUY_DIST);
+      con = W.add('grip', top, holder, { rest: vertical + 0.03, compliance: TUNING.guyCompliance, cap: TUNING.backGripCap, tag: g.id });
+    } else {
+      // front guy line: the pullers' line, they stand behind its stake
+      const holder = W.addParticle(PULL_HAND(u), 0);
+      con = W.add('grip', top, holder, { compliance: 5e-5, cap: TUNING.frontGripCap, tag: g.id });
+      con.rest += 0.02;
+      con.pull = true;
+    }
     con.held = true;
     this.guys[g.id] = con;
     return true;
@@ -243,26 +250,32 @@ export class KlafSim {
     return m;
   }
 
-  // The pullers walk the rope in. We express the pull as the angle the rope
-  // would bring the top pole to, so each swipe raises the klaf evenly.
+  // The pullers walk the front guy lines in. We express the pull as the angle
+  // the lines would bring the top to, so each swipe raises the klaf evenly.
+  pullLines() { return Object.values(this.guys).filter(c => c.pull && c.held && c.active); }
+  canPull() { return this.pullLines().length > 0; }
   pullTo(angleDeg) {
-    if (!this.rope || !this.rope.active) return;
+    const lines = this.pullLines();
+    if (!lines.length) return;
     this.target = Math.min(angleDeg, 105);
-    const top = this.topParticle();
-    const s = this.poleParticles.topH ? 0 : null;
-    const [u, v] = s === 0 ? [0, 1.9] : [this.pos(top)[0], LEVEL.height];
-    const p = klafToWorld(u, v, this.target);
-    const h = this.pos(this.hand);
-    const want = Math.hypot(p[0] - h[0], p[1] - h[1], p[2] - h[2]) + 0.02;
-    this.rope.rest = Math.min(this.rope.rest, want);
+    for (const con of lines) {
+      const top = this.pos(con.i), h = this.pos(con.j);
+      const p = klafToWorld(top[0], LEVEL.height, this.target);
+      const want = Math.hypot(p[0] - h[0], p[1] - h[1], p[2] - h[2]) + 0.02;
+      con.rest = Math.min(con.rest, want);
+    }
   }
-  ropeTaut() { return this.rope && this.rope.active && this.rope.force > 1; }
 
+  // fix the guy line to its stake (the special guy-line-to-stake lashing)
   tieGuy(gid) {
     const con = this.guys[gid]; if (!con) return false;
-    const a = this.pos(con.i), b = this.pos(con.j);
-    con.kind = 'rope'; con.cap = Infinity; con.compliance = 1e-5; con.held = false; con.tied = true;
-    con.rest = Math.max(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]), 0.5);
+    const g = GUYS.find(q => q.id === gid);
+    const u = slotById(g.leg).centre[0];
+    const stake = this.world.addParticle([u, 0.3, g.side * GUY_DIST], 0);
+    const a = this.pos(con.i);
+    con.j = stake;
+    con.kind = 'rope'; con.cap = Infinity; con.compliance = 1e-5; con.held = false; con.tied = true; con.pull = false;
+    con.rest = Math.max(Math.hypot(a[0] - u, a[1] - 0.3, a[2] - g.side * GUY_DIST), 0.5);
     con.active = true;
     return true;
   }
@@ -280,7 +293,6 @@ export class KlafSim {
   letGo() {
     this.lettingGo = true;
     for (const k in this.guys) { const c = this.guys[k]; if (!c.tied) { c.active = false; c.released = true; } }
-    if (this.rope) this.rope.active = false;
     for (const k in this.feet) if (this.feet[k].kind === 'slide') this.feet[k].cap = 40;
   }
 
@@ -297,7 +309,7 @@ export class KlafSim {
       }
     }
     // lifters (מרימים) carry the top by hand up to about shoulder height,
-    // then the rope takes over
+    // then the guy lines take over
     if (this.target > 0 && this.target <= 55 && !this.lettingGo) {
       for (const leg of ['legL', 'legR']) {
         const p = this.poleParticles[leg]; if (!p) continue;

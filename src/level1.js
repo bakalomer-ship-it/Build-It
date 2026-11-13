@@ -9,9 +9,14 @@ export const LASHINGS = {
   cross:    { he: 'כפיתה מוצלבת', short: 'מוצלבת' },
   parallel: { he: 'כפיתה מקבילה', short: 'מקבילה' },
   running:  { he: 'כפיתה רצה',    short: 'רצה' },
-  tripod:   { he: 'כפיתת חצובה',  short: 'חצובה' },
+  // special lashing used only to fix a guy line to its stake (Omer);
+  // the real name is still to come, this one is a placeholder
+  guy:      { he: 'קשירת יתר לבז״נט', short: 'יתר לבז״נט' },
 };
-export const LASHING_ORDER = ['square', 'cross', 'parallel', 'running', 'tripod'];
+// The four lashings the picker offers on poles (Omer: "these are the four").
+export const LASHING_ORDER = ['square', 'cross', 'parallel', 'running'];
+// On a guy line the picker also offers the guy-line lashing.
+export const GUY_LASHING_ORDER = ['guy', 'square', 'cross', 'parallel', 'running'];
 
 const LEG_U = 0.9;      // legs stand 1.8 m apart (centre to centre)
 const BOTTOM_V = 0.3;   // bottom horizontal 30 cm above the ground (Omer)
@@ -73,6 +78,7 @@ export const GUY_DIST = 2.0;
 export const LEVEL = {
   name: 'קלף 2×2',
   number: 1,
+  tutorial: true,   // lashing guidance shows only in the first structure's tutorial
   legU: LEG_U,
   height: 2.0,
   targetTimeSec: 6 * 60,

@@ -6,15 +6,15 @@ This repository holds the **web prototype of level 1, the 2×2 klaf (קלף 2×2
 
 ## How to play
 
-1. **בניית הקלף.** The klaf drawing lies on the ground at 1:1. Drag a pole (סנדה) from the tray onto a blue line. Scroll the length strip to set its length in 10 cm steps until it matches the drawing. Tap each ring where poles meet and pick a lashing. A wrong lashing type only lowers the score.
+1. **בניית הקלף.** Everything happens in 3D on the plaza. The klaf drawing lies on the ground at 1:1 and fades away once the klaf is built. Drag a pole (סנדה) from the tray onto a blue line. Scroll the length strip to set its length in 10 cm steps until it matches the drawing. Tap each ring where poles meet and pick one of the four lashings; a short close-up shows it being tied. A wrong lashing type only lowers the score. Lashing guidance appears only in this first structure's tutorial.
 2. **בז״נטים.** Tap the stake marks next to the legs. Each tap is one blow of the mallet (למנייה).
-3. **הרמה.** Tap the rings at the top of the legs to tie four guy lines (יתרים). Then swipe down on the rope to pull. Pull slowly and stop when the klaf stands upright.
-4. **עיגון.** Drive the four guy-line stakes, tie the guy lines to them, and lash each leg to its stake.
+3. **הרמה.** Tap the rings at the top of the legs to tie four guy lines (יתרים). No rope is tied to the middle of a pole: the pullers raise the klaf by the two front guy lines. Swipe down to pull, slowly, and stop when the klaf stands upright.
+4. **עיגון.** Drive the four guy-line stakes, fix each guy line to its stake with the guy-line lashing, and lash each leg to its stake.
 5. **בדיקה.** Everyone lets go of anything that is not tied, and the klaf is pushed from every side.
 
 Physics is real, not scripted. A klaf with a missing or half-tied X racks and falls during the raise or the push test. Raising without stakes lets the base slide. Pulling too fast or past upright tears the back guy line out of the holders' hands. Each collapse ends with a card that names the broken rule.
 
-Scoring follows the design document: accuracy is the core score (joints tied, correct lashing type, pole lengths) and time is only a bonus. One star passes the level, two stars need every joint tied, and three stars also need every lashing type right.
+Scoring follows the design document: accuracy is the core score (joints tied, correct lashing type, pole lengths) and time is only a bonus. A missing lashing still gives partial stars: one star passes the level, two stars need every lashing tied, and three stars also need every lashing type right. Hints show one missing or wrong lashing; there is one hint per 10 lashings, and each costs fewer points than a missed lashing.
 
 ## Open it on a phone
 
