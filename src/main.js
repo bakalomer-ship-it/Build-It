@@ -444,13 +444,13 @@ const lashIcon = {
   square: '<svg viewBox="0 0 26 22"><path d="M13 1v20M3 11h20" stroke="currentColor" stroke-width="3"/><rect x="8" y="6" width="10" height="10" fill="none" stroke="#e0a93b" stroke-width="2"/></svg>',
   cross: '<svg viewBox="0 0 26 22"><path d="M4 2l18 18M22 2L4 20" stroke="currentColor" stroke-width="3"/><path d="M8 11l5-5 5 5-5 5z" fill="none" stroke="#e0a93b" stroke-width="2"/></svg>',
   parallel: '<svg viewBox="0 0 26 22"><path d="M9 1v20M17 1v20" stroke="currentColor" stroke-width="3"/><path d="M6 8h14M6 12h14" stroke="#e0a93b" stroke-width="2"/></svg>',
-  running: '<svg viewBox="0 0 26 22"><path d="M1 5h24" stroke="currentColor" stroke-width="3"/><path d="M5 2v18M11 2v18M17 2v18M23 2v18" stroke="currentColor" stroke-width="2"/><path d="M2 9l22 0" stroke="#e0a93b" stroke-width="2"/></svg>',
+  tripod: '<svg viewBox="0 0 26 22"><path d="M13 2L4 21M13 2v19M13 2l9 19" stroke="currentColor" stroke-width="3"/><circle cx="13" cy="5" r="3.5" fill="none" stroke="#e0a93b" stroke-width="2"/></svg>',
   guy: '<svg viewBox="0 0 26 22"><path d="M4 21V6" stroke="currentColor" stroke-width="4"/><path d="M4 9L24 2" stroke="#e0a93b" stroke-width="2"/><circle cx="4" cy="9" r="3.5" fill="none" stroke="#e0a93b" stroke-width="2"/></svg>',
 };
 // tutorial only: describe the meeting point, without naming the lashing
 const TUTORIAL_TIP = {
   square: 'שתי סנדות נפגשות בזווית ישרה',
-  cross: 'סנדות נפגשות בזווית אלכסונית',
+  cross: 'סנדות נפגשות בזווית שאינה ישרה',
   parallel: 'שתי סנדות צמודות זו לצד זו',
   guy: 'יתר שנקשר לבז״נט',
 };
@@ -978,9 +978,9 @@ function openFolder(tab = 'drawing') {
   } else {
     body.innerHTML = `<table><thead><tr><th>מפגש</th><th>כפיתה</th></tr></thead><tbody>
       <tr><td>שתי סנדות בזווית ישרה (רוחב על רגל)</td><td>כפיתה מרובעת</td></tr>
-      <tr><td>סנדות בזווית אחרת (אלכסון על רגל, מרכז האיקס)</td><td>כפיתה מוצלבת</td></tr>
+      <tr><td>סנדות בזווית אחרת (אלכסון על רגל, מרכז האיקס)</td><td>כפיתה אלכסונית</td></tr>
       <tr><td>סנדות זו לצד זו (רגל לבז״נט)</td><td>כפיתה מקבילה</td></tr>
-      <tr><td>כמה סנדות מקבילות על תמיכה אחת (משטח)</td><td>כפיתה רצה</td></tr>
+      <tr><td>שלוש סנדות קשורות בראש</td><td>כפיתת חצובה</td></tr>
       <tr><td>יתר אל הבז״נט שלו</td><td>קשירת יתר לבז״נט (שם זמני)</td></tr></tbody></table>
       <p class="note">כפיתה מסוג לא נכון לא מפילה את המבנה, אבל מורידה ניקוד.</p>`;
   }

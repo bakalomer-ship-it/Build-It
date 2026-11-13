@@ -6,17 +6,18 @@
 
 export const LASHINGS = {
   square:   { he: 'כפיתה מרובעת', short: 'מרובעת' },
-  cross:    { he: 'כפיתה מוצלבת', short: 'מוצלבת' },
+  cross:    { he: 'כפיתה אלכסונית', short: 'אלכסונית' },
   parallel: { he: 'כפיתה מקבילה', short: 'מקבילה' },
-  running:  { he: 'כפיתה רצה',    short: 'רצה' },
+  tripod:   { he: 'כפיתת חצובה',  short: 'חצובה' },
   // special lashing used only to fix a guy line to its stake (Omer);
   // the real name is still to come, this one is a placeholder
   guy:      { he: 'קשירת יתר לבז״נט', short: 'יתר לבז״נט' },
 };
-// The four lashings the picker offers on poles (Omer: "these are the four").
-export const LASHING_ORDER = ['square', 'cross', 'parallel', 'running'];
+// The four lashings the picker offers on poles, as on the mockup Omer
+// confirmed: מרובעת, אלכסונית, מקבילה, חצובה.
+export const LASHING_ORDER = ['square', 'cross', 'parallel', 'tripod'];
 // On a guy line the picker also offers the guy-line lashing.
-export const GUY_LASHING_ORDER = ['guy', 'square', 'cross', 'parallel', 'running'];
+export const GUY_LASHING_ORDER = ['guy', 'square', 'cross', 'parallel', 'tripod'];
 
 const LEG_U = 0.9;      // legs stand 1.8 m apart (centre to centre)
 const BOTTOM_V = 0.3;   // bottom horizontal 30 cm above the ground (Omer)

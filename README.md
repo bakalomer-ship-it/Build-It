@@ -6,7 +6,7 @@ This repository holds the **web prototype of level 1, the 2×2 klaf (קלף 2×2
 
 ## How to play
 
-1. **בניית הקלף.** Everything happens in 3D on the plaza. The klaf drawing lies on the ground at 1:1 and fades away once the klaf is built. Drag a pole (סנדה) from the tray onto a blue line. Scroll the length strip to set its length in 10 cm steps until it matches the drawing. Tap each ring where poles meet and pick one of the four lashings; a short close-up shows it being tied. A wrong lashing type only lowers the score. Lashing guidance appears only in this first structure's tutorial.
+1. **בניית הקלף.** Everything happens in 3D on the plaza. The klaf drawing lies on the ground at 1:1 and fades away once the klaf is built. Drag a pole (סנדה) from the tray onto a blue line. Scroll the length strip to set its length in 10 cm steps until it matches the drawing. Tap each ring where poles meet and pick one of the four lashings (מרובעת, אלכסונית, מקבילה, חצובה); a short close-up shows it being tied. A wrong lashing type only lowers the score. Lashing guidance appears only in this first structure's tutorial.
 2. **בז״נטים.** Tap the stake marks next to the legs. Each tap is one blow of the mallet (למנייה).
 3. **הרמה.** Tap the rings at the top of the legs to tie four guy lines (יתרים). No rope is tied to the middle of a pole: the pullers raise the klaf by the two front guy lines. Swipe down to pull, slowly, and stop when the klaf stands upright.
 4. **עיגון.** Drive the four guy-line stakes, fix each guy line to its stake with the guy-line lashing, and lash each leg to its stake.
