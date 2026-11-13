@@ -452,7 +452,7 @@ const TUTORIAL_TIP = {
   square: 'שתי סנדות נפגשות בזווית ישרה',
   cross: 'סנדות נפגשות בזווית שאינה ישרה',
   parallel: 'שתי סנדות צמודות זו לצד זו',
-  guy: 'יתר שנקשר לבז״נט',
+  guy: 'יתר שנכפת לבז״נט',
 };
 $('picker').insertBefore(Object.assign(document.createElement('div'), { id: 'picker-tip', className: 'picker-tip' }), $('picker-opts'));
 $('picker-untie').addEventListener('click', () => {
@@ -638,7 +638,7 @@ function changeLength(steps) {
     if (!on || !G.sim || G.falling) return;
     const dy = e.clientY - lastY; lastY = e.clientY;
     if (dy <= 0) return;
-    if (!G.sim.canPull()) { flashHint('המושכים מושכים ב<b>יתרים הקדמיים</b>: קשרו אותם קודם לראש הקלף'); return; }
+    if (!G.sim.canPull()) { flashHint('המושכים מושכים ב<b>יתרים הקדמיים</b>: כפתו אותם קודם לראש הקלף'); return; }
     ropeOff += dy;
     $('rp-rope').style.backgroundPosition = `0 ${ropeOff}px`;
     G.sim.pullTo(G.sim.target + dy * 0.16);
@@ -703,7 +703,7 @@ function hintText() {
       if (!sim) return '';
       const ang = sim.angle();
       const g = GUYS.filter(q => b.guyTop[q.id]).length;
-      if (ang < 6 && g < 4) return `קשרו <b>4 יתרים</b> לראש הקלף (הקישו על הטבעות). בשני הקדמיים המושכים ירימו את הקלף · ${g}/4`;
+      if (ang < 6 && g < 4) return `כפתו <b>4 יתרים</b> לראש הקלף (הקישו על הטבעות). בשני הקדמיים המושכים ירימו את הקלף · ${g}/4`;
       if (ang < 6) return 'החליקו את היתרים <b>למטה</b> כדי למשוך. לאט ובשליטה';
       if (ang < 80) return 'ממשיכים למשוך, לאט ובשליטה…';
       if (ang <= 97) return '<b>עצרו!</b> הקלף ניצב';
@@ -714,12 +714,12 @@ function hintText() {
       const a = GUYS.filter(q => (b.anchors[q.id] || 0) >= ANCHOR_HITS).length;
       const t = GUYS.filter(q => b.guyTies[q.id]).length;
       const s = STAKE_JOINTS.filter(q => b.stakeJoints[q.id]).length;
-      return `עגנו את הקלף: בז״נטי יתרים ${a}/4 · יתרים קשורים ${t}/4 · כפיתות רגל לבז״נט ${s}/4`;
+      return `עגנו את הקלף: בז״נטי יתרים ${a}/4 · יתרים כפותים ${t}/4 · כפיתות רגל לבז״נט ${s}/4`;
     }
     case 'check':
       if (G.check?.running) return G.check.label || 'בדיקת יציבות…';
       if (!G.raisedOnce) return 'אין עדיין מה לבדוק: קודם מרימים את הקלף';
-      return 'בבדיקה כולם עוזבים את מה שלא קשור, ודוחפים את הקלף מכל הכיוונים';
+      return 'בבדיקה כולם עוזבים את מה שלא כפות, ודוחפים את הקלף מכל הכיוונים';
   }
   return '';
 }
@@ -807,7 +807,7 @@ function explain(kind) {
   if (grip)
     return { rule: 'מרימים לאט ובשליטה, ועוצרים כשהקלף ניצב', detail: `המשיכה הייתה חזקה מדי: ה${GUYS.find(g => g.id === grip.tag).he} נקרע מידי המחזיקים, והקלף עבר את האנך ונפל לכיוון המושכים.` };
   if (kind === 'over' && backGuys < 2)
-    return { rule: 'קושרים 4 יתרים לראש הקלף לפני ההרמה', detail: 'בלי היתרים האחוריים אין מי שיעצור את הקלף כשהוא מגיע לאנך, והוא המשיך ונפל.' };
+    return { rule: 'כופתים 4 יתרים לראש הקלף לפני ההרמה', detail: 'בלי היתרים האחוריים אין מי שיעצור את הקלף כשהוא מגיע לאנך, והוא המשיך ונפל.' };
   if (kind === 'rack') {
     if (!x.A || !x.B) return xRule();
     if (corners) return cornerRule;
@@ -815,14 +815,14 @@ function explain(kind) {
   }
   if (G.check || sim.lettingGo) {
     const untied = GUYS.filter(g => !sim.guys[g.id]?.tied).length;
-    if (untied) return { rule: 'לא עוזבים את הקלף לפני שכל 4 היתרים קשורים לבז״נטים', detail: `${untied} יתרים לא היו קשורים לבז״נט, וכשהמחזיקים עזבו הקלף נפל.` };
+    if (untied) return { rule: 'לא עוזבים את הקלף לפני שכל 4 היתרים כפותים לבז״נטים', detail: `${untied} יתרים לא היו כפותים לבז״נט, וכשהמחזיקים עזבו הקלף נפל.` };
     if (!x.A || !x.B) return xRule();
     if (!stakesIn) return { rule: 'רגלי הקלף עומדות ליד בז״נטים ונכפתות אליהם', detail: 'בלי בז״נטים רגלי הקלף החליקו בבדיקת הדחיפה.' };
     return { rule: 'הקלף לא עמד בבדיקת הדחיפה', detail: 'בדקו את הכפיתות ואת היתרים ונסו שוב.' };
   }
   if (!x.A || !x.B) return xRule();
   if (kind === 'over') return { rule: 'עוצרים את המשיכה כשהקלף ניצב', detail: 'הקלף עבר את האנך ונפל לכיוון המושכים.' };
-  return { rule: 'הקלף נפל', detail: 'בדקו שכל הכפיתות קשורות ושהיתרים מוחזקים.' };
+  return { rule: 'הקלף נפל', detail: 'בדקו שכל הכפיתות כפותות ושהיתרים מוחזקים.' };
 }
 
 // ---------------- results ----------------
@@ -865,7 +865,7 @@ function finish() {
     <h2>${s.stars === 3 ? 'בנייה מושלמת!' : 'עברתם את השלב'}</h2>
     <div class="stars">${stars}</div>
     <div class="score-grid">
-      <span>כפיתות קשורות</span><b>${s.tied}/${s.total}</b>
+      <span>כפיתות כפותות</span><b>${s.tied}/${s.total}</b>
       <span>סוג כפיתה נכון</span><b>${s.correct}/${s.total}</b>
       <span>סנדות באורך שבשרטוט</span><b>${s.polesOk}/${SLOTS.length}</b>
       <span>דיוק</span><b>${s.accuracy}</b>
@@ -874,7 +874,7 @@ function finish() {
       <span class="total">סה״כ</span><b class="total">${s.sum}</b>
     </div>
     ${missing ? `<p><b>איפה לחפש:</b></p><ul>${missing}</ul>` : ''}
-    ${s.wrong ? `<p>${s.wrong === 1 ? 'כפיתה אחת קשורה' : `${s.wrong} כפיתות קשורות`} בסוג לא נכון. זה מוריד ניקוד, אבל לא מפיל את המבנה.</p>` : ''}
+    ${s.wrong ? `<p>${s.wrong === 1 ? 'כפיתה אחת כפותה' : `${s.wrong} כפיתות כפותות`} בסוג לא נכון. זה מוריד ניקוד, אבל לא מפיל את המבנה.</p>` : ''}
     ${s.stars < 3 ? '<p>אפשר לחזור, להשלים ולתקן, ולשפר את הכוכבים.</p>' : ''}
   `, [
     s.stars < 3 ? ['להשלים ולתקן', reopenForFixes, true] : null,
@@ -970,9 +970,9 @@ function openFolder(tab = 'drawing') {
     body.innerHTML = `<ol>
       <li>בונים את הקלף שוכב על הקרקע, על גבי השרטוט.</li>
       <li>דופקים בז״נט ליד כל רגל, במקום שבו הרגליים יעמדו.</li>
-      <li>קושרים 4 יתרים לראשי הרגליים. אין חבל שנקשר לאמצע סנדה.</li>
+      <li>כופתים 4 יתרים לראשי הרגליים. אין חבל שנכפת לאמצע סנדה.</li>
       <li>מרימים: המרימים מגביהים את הראש, והמושכים מושכים ביתרים הקדמיים לאט ובשליטה עד שהקלף ניצב. מחזיקי היתרים האחוריים עוצרים אותו באנך.</li>
-      <li>דופקים בז״נטי יתרים כגובה הקלף מהרגליים (45°) ומקבעים אליהם את היתרים בקשירת יתר לבז״נט.</li>
+      <li>דופקים בז״נטי יתרים כגובה הקלף מהרגליים (45°) ומקבעים אליהם את היתרים בכפיתת יתר לבז״נט.</li>
       <li>כופתים כל רגל לבז״נט שלה בשתי כפיתות.</li>
       <li>בדיקת יציבות: עוזבים ודוחפים מכל הכיוונים.</li></ol>`;
   } else {
@@ -980,8 +980,8 @@ function openFolder(tab = 'drawing') {
       <tr><td>שתי סנדות בזווית ישרה (רוחב על רגל)</td><td>כפיתה מרובעת</td></tr>
       <tr><td>סנדות בזווית אחרת (אלכסון על רגל, מרכז האיקס)</td><td>כפיתה אלכסונית</td></tr>
       <tr><td>סנדות זו לצד זו (רגל לבז״נט)</td><td>כפיתה מקבילה</td></tr>
-      <tr><td>שלוש סנדות קשורות בראש</td><td>כפיתת חצובה</td></tr>
-      <tr><td>יתר אל הבז״נט שלו</td><td>קשירת יתר לבז״נט (שם זמני)</td></tr></tbody></table>
+      <tr><td>שלוש סנדות כפותות בראש</td><td>כפיתת חצובה</td></tr>
+      <tr><td>יתר אל הבז״נט שלו</td><td>כפיתת יתר לבז״נט (שם זמני)</td></tr></tbody></table>
       <p class="note">כפיתה מסוג לא נכון לא מפילה את המבנה, אבל מורידה ניקוד.</p>`;
   }
   $('folder').hidden = false;
