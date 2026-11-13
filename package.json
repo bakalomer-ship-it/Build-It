@@ -1,0 +1,13 @@
+{
+  "name": "build-it",
+  "private": true,
+  "type": "module",
+  "description": "Scout pioneering (בנייה מחנאית) game, level 1 web prototype",
+  "scripts": {
+    "test": "node tools/simtest.mjs",
+    "build:single": "node tools/build-single.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.0"
+  }
+}
