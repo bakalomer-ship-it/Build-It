@@ -78,8 +78,9 @@ export class KlafSim {
       }
       if (slot.id.startsWith('leg')) {
         for (const sj of STAKE_JOINTS) if (sj.leg === slot.id) { const s = sj.v - slot.centre[1]; if (Math.abs(s) <= half) ss.add(round(s)); }
-        // points where the cube's side poles are lashed on
-        for (const v of cfg.extraLegV || []) { const s = v - slot.centre[1]; if (Math.abs(s) <= half - 0.04) ss.add(round(s)); }
+        // points where the cube's side poles are lashed on (only in the cube's
+        // shared world; extra points on a lone klaf would only soften its legs)
+        for (const v of world ? cfg.extraLegV || [] : []) { const s = v - slot.centre[1]; if (Math.abs(s) <= half - 0.04) ss.add(round(s)); }
       }
       if (slot.id === 'topH' || slot.id.startsWith('diag')) ss.add(0);
       const list = [...ss].sort((x, y) => x - y);
@@ -219,7 +220,9 @@ export class KlafSim {
     let con;
     if (g.side > 0) {
       // back guy line: holders pay it out and stop the klaf at upright
-      const d = this.guyDist(g.side);
+      // the holders pay the line out from a full klaf-height back, even when
+      // its stake will stand closer (the cube's inner guy lines)
+      const d = Math.max(this.guyDist(g.side), GUY_DIST);
       const holder = W.addParticle([u, 0.05, this.z0 + g.side * d], 0);
       const vertical = Math.hypot(LEVEL.height + r - 0.05, d);
       con = W.add('grip', top, holder, { rest: vertical + 0.03, compliance: TUNING.guyCompliance, cap: TUNING.backGripCap, tag: g.id });

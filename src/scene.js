@@ -436,3 +436,82 @@ export function walkPose(p, phase, carry = null) {
   if (carry != null) { aL.rotation.x = aR.rotation.x = -carry; }
   else { aL.rotation.x = -s * 0.45; aR.rotation.x = s * 0.45; }
 }
+
+// ---------- the cube's side drawings (level 2) ----------
+// Each side of the cube has its own drawing, lying on the ground just outside
+// that side (as if the side were folded down flat): the two klaf legs, the
+// side poles that join them, and the spatial X, seen from outside.
+const SIDE = { spanZ: 3.0, hMin: -0.25, hMax: 2.45, x0: 1.15, px: 1024 };
+export function makeSideSheet() {
+  const c = document.createElement('canvas');
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+  const geo = new THREE.PlaneGeometry(SIDE.spanZ, SIDE.hMax - SIDE.hMin); geo.rotateX(-Math.PI / 2);
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, transparent: true, opacity: 0, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 }));
+  m.receiveShadow = true;
+  m.userData = { canvas: c, tex };
+  return m;
+}
+// draw a side's drawing; with a mesh, also place the mesh beside that side
+export function drawSideSheet(mesh, cube, side, klafNames, canvas = null) {
+  const c = canvas || mesh.userData.canvas;
+  const H = SIDE.hMax - SIDE.hMin, W = SIDE.px, Hp = Math.round(W * H / SIDE.spanZ);
+  c.width = W; c.height = Hp;
+  const g = c.getContext('2d');
+  const D = cube.depth, zMin = D / 2 - SIDE.spanZ / 2, k = W / SIDE.spanZ;
+  // seen from outside the side: on the left side +z runs right, on the right side it runs left
+  const cx = z => side > 0 ? (z - zMin) * k : (zMin + SIDE.spanZ - z) * k;
+  const cy = h => (SIDE.hMax - h) * k;
+  g.fillStyle = '#f5f2e6'; g.fillRect(0, 0, W, Hp);
+  for (let i = -30; i <= 30; i++) {
+    const m = i * 0.1;
+    g.strokeStyle = i % 5 === 0 ? 'rgba(47,99,176,.22)' : 'rgba(47,99,176,.08)'; g.lineWidth = i % 5 === 0 ? 2 : 1;
+    g.beginPath(); g.moveTo(cx(D / 2 + m), 0); g.lineTo(cx(D / 2 + m), Hp); g.stroke();
+    g.beginPath(); g.moveTo(0, cy(m + 1)); g.lineTo(W, cy(m + 1)); g.stroke();
+  }
+  g.strokeStyle = '#8a6a43'; g.lineWidth = 4; g.setLineDash([18, 10]);
+  g.beginPath(); g.moveTo(20, cy(0)); g.lineTo(W - 20, cy(0)); g.stroke(); g.setLineDash([]);
+  // the klaf legs, already standing (grey)
+  const r = R;
+  g.font = '700 24px Rubik, Arial'; g.textAlign = 'center'; g.direction = 'rtl';
+  [0, D].forEach((z, i) => {
+    g.fillStyle = 'rgba(120,110,95,.35)'; g.strokeStyle = 'rgba(90,80,70,.7)'; g.lineWidth = 3;
+    g.fillRect(cx(z) - r * k, cy(2.0), 2 * r * k, 2.0 * k); g.strokeRect(cx(z) - r * k, cy(2.0), 2 * r * k, 2.0 * k);
+    g.fillStyle = '#6b5f50'; g.fillText(`רגל ה${klafNames[i]}`, cx(z), cy(2.0) - 14);
+  });
+  // the side poles to add (blue), with their lengths
+  const label = (x, y, text, rot = 0) => {
+    g.save(); g.translate(x, y); g.rotate(rot); g.font = '700 26px Rubik, Arial'; g.direction = 'ltr'; g.textAlign = 'center';
+    const tw = g.measureText(text).width; g.fillStyle = 'rgba(245,242,230,.92)'; g.fillRect(-tw / 2 - 6, -22, tw + 12, 30);
+    g.fillStyle = '#2f63b0'; g.fillText(text, 0, 2); g.restore();
+  };
+  for (const s of cube.slots.filter(q => q.side === side)) {
+    const a = [s.centre[2] - s.dir[2] * s.length / 2, s.centre[1] - s.dir[1] * s.length / 2 - r];
+    const b = [s.centre[2] + s.dir[2] * s.length / 2, s.centre[1] + s.dir[1] * s.length / 2 - r];
+    const ax = cx(a[0]), ay = cy(a[1]), bx2 = cx(b[0]), by2 = cy(b[1]);
+    const ang = Math.atan2(by2 - ay, bx2 - ax), len = Math.hypot(bx2 - ax, by2 - ay), w = 2 * r * k;
+    g.save(); g.translate(ax, ay); g.rotate(ang);
+    g.fillStyle = s.kind === 'd' ? 'rgba(47,99,176,.10)' : 'rgba(47,99,176,.16)'; g.strokeStyle = '#2f63b0'; g.lineWidth = 3;
+    g.beginPath(); g.rect(0, -w / 2, len, w); g.fill(); g.stroke(); g.restore();
+    let rot = ang; if (rot > Math.PI / 2) rot -= Math.PI; if (rot < -Math.PI / 2) rot += Math.PI;
+    const t = s.kind === 'd' ? (s.id.includes('dA') ? 0.3 : 0.7) : 0.5;
+    const off = s.kind === 'h' ? (s.centre[1] > 1 ? -26 : 32) : 0;
+    label(ax + (bx2 - ax) * t, ay + (by2 - ay) * t + off, `${s.length.toFixed(1)} מ׳`, s.kind === 'd' ? rot : 0);
+  }
+  for (const j of cube.joints.filter(q => q.side === side)) {
+    g.fillStyle = '#f5f2e6'; g.strokeStyle = '#2f63b0'; g.lineWidth = 4;
+    g.beginPath(); g.arc(cx(j.at[2]), cy(j.at[1] - r), 11, 0, Math.PI * 2); g.fill(); g.stroke();
+  }
+  // heights of the side poles on the legs
+  g.fillStyle = '#444'; g.font = '500 22px Rubik, Arial'; g.direction = 'rtl'; g.textAlign = 'center';
+  const hs = [...new Set(cube.joints.filter(q => q.side === side && !q.b).map(q => Math.round((q.at[1] - r) * 100)))].sort((a, b) => a - b);
+  const zOut = D + 0.32;
+  for (const h of hs) g.fillText(`${h} ס״מ`, cx(zOut) + (side > 0 ? 18 : -18), cy(h / 100) + 8);
+  g.font = '700 30px Rubik, Arial'; g.fillStyle = '#2f63b0';
+  g.fillText(`שרטוט ${side > 0 ? 'הצד השמאלי' : 'הצד הימני'} · מבט מבחוץ`, W / 2, Hp - 24);
+  if (mesh) {
+    mesh.userData.tex.needsUpdate = true;
+    const hc = (SIDE.hMax + SIDE.hMin) / 2;
+    mesh.position.set(side * (SIDE.x0 + (hc - SIDE.hMin)), 0.006, D / 2);
+    mesh.rotation.set(0, side > 0 ? -Math.PI / 2 : Math.PI / 2, 0);
+  }
+}
