@@ -10,7 +10,7 @@ export function makeRenderer(canvas) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.15;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   return renderer;
@@ -28,60 +28,114 @@ function canvasTex(w, h, draw, repeat) {
 
 function rand(seed) { let s = seed; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
 
+// The look follows Omer's direction: a friendly, stylized world seen from
+// high above (the feel of a mobile base-building game, in a look of our own):
+// soft bright colours, a green meadow, a sandy plaza in the middle, round
+// cartoon trees. Realism lives in the building rules and the physics.
+export const PALETTE = {
+  skyTop: '#4fa8e8', skyBottom: '#c9ecff',
+  grass: '#79c24a', grassDark: '#5fa83a', grassLight: '#97d665',
+  plaza: '#e6cd93', plazaEdge: '#c9a86a',
+  leaf: [0x5cb23a, 0x4a9e30, 0x74c445], trunk: 0x8a5a33, rock: 0xb9b2a6,
+};
 export function makeWorld(scene) {
   scene.background = canvasTex(4, 256, (g, w, h) => {
     const gr = g.createLinearGradient(0, 0, 0, h);
-    gr.addColorStop(0, '#7fb0dc'); gr.addColorStop(0.55, '#c3dbea'); gr.addColorStop(1, '#efe7d2');
+    gr.addColorStop(0, PALETTE.skyTop); gr.addColorStop(1, PALETTE.skyBottom);
     g.fillStyle = gr; g.fillRect(0, 0, w, h);
   });
-  scene.fog = new THREE.Fog(0xe4e2d2, 28, 75);
+  scene.fog = new THREE.Fog(0xbfe2c8, 50, 120);
 
-  const hemi = new THREE.HemisphereLight(0xdbe9ff, 0x8a7350, 1.0);
+  const hemi = new THREE.HemisphereLight(0xd8efff, 0x6f9a45, 1.35);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff1d6, 2.4);
-  sun.position.set(-5, 11, -6);
+  const sun = new THREE.DirectionalLight(0xfff0d0, 2.3);
+  sun.position.set(-6, 14, -7);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
-  Object.assign(sun.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 1, far: 30 });
+  sun.shadow.mapSize.set(2048, 2048);
+  Object.assign(sun.shadow.camera, { left: -20, right: 20, top: 20, bottom: -20, near: 1, far: 60 });
   sun.shadow.bias = -0.0008;
   sun.shadow.normalBias = 0.02;
+  sun.shadow.radius = 4;
   sun.target.position.set(0, 0, 0.5);
   scene.add(sun, sun.target);
 
-  // the plaza: packed sand with tufts of dry grass
   const rnd = rand(7);
-  const sand = canvasTex(512, 512, (g, w, h) => {
-    g.fillStyle = '#cdb88e'; g.fillRect(0, 0, w, h);
-    for (let i = 0; i < 9000; i++) {
-      const v = 150 + rnd() * 70 | 0;
-      g.fillStyle = `rgba(${v},${v * 0.86 | 0},${v * 0.62 | 0},${0.25 + rnd() * 0.3})`;
-      g.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 2, 1 + rnd() * 2);
+  // the meadow
+  const grass = canvasTex(256, 256, (g, w, h) => {
+    g.fillStyle = PALETTE.grass; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 70; i++) {
+      g.fillStyle = rnd() < 0.5 ? PALETTE.grassDark : PALETTE.grassLight;
+      g.globalAlpha = 0.18 + rnd() * 0.15;
+      g.beginPath(); g.ellipse(rnd() * w, rnd() * h, 10 + rnd() * 26, 6 + rnd() * 14, rnd() * 3, 0, Math.PI * 2); g.fill();
     }
+    g.globalAlpha = 0.5;
     for (let i = 0; i < 260; i++) {
-      g.strokeStyle = `rgba(${110 + rnd() * 40 | 0},${120 + rnd() * 30 | 0},${60 + rnd() * 20 | 0},.55)`;
+      g.strokeStyle = rnd() < 0.5 ? PALETTE.grassDark : PALETTE.grassLight; g.lineWidth = 2;
       const x = rnd() * w, y = rnd() * h;
-      for (let k = 0; k < 5; k++) { g.beginPath(); g.moveTo(x, y); g.lineTo(x + (rnd() - .5) * 10, y - 4 - rnd() * 8); g.stroke(); }
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + (rnd() - .5) * 4, y - 5 - rnd() * 4); g.stroke();
     }
-  }, 14);
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(160, 160), new THREE.MeshStandardMaterial({ map: sand, roughness: 1 }));
+    g.globalAlpha = 1;
+  }, 40);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ map: grass, roughness: 1 }));
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // a ring of pines around the plaza
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4f33, roughness: 1 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x4d6b3a, roughness: 1, flatShading: true });
-  for (let i = 0; i < 26; i++) {
-    const a = i / 26 * Math.PI * 2 + rnd() * 0.2, d = 17 + rnd() * 14;
+  // the plaza: a soft rounded patch of packed sand where the scouts build
+  const PW = 16, PD = 14, PR = 3;
+  const shape = new THREE.Shape();
+  shape.moveTo(-PW / 2 + PR, -PD / 2);
+  shape.lineTo(PW / 2 - PR, -PD / 2); shape.quadraticCurveTo(PW / 2, -PD / 2, PW / 2, -PD / 2 + PR);
+  shape.lineTo(PW / 2, PD / 2 - PR); shape.quadraticCurveTo(PW / 2, PD / 2, PW / 2 - PR, PD / 2);
+  shape.lineTo(-PW / 2 + PR, PD / 2); shape.quadraticCurveTo(-PW / 2, PD / 2, -PW / 2, PD / 2 - PR);
+  shape.lineTo(-PW / 2, -PD / 2 + PR); shape.quadraticCurveTo(-PW / 2, -PD / 2, -PW / 2 + PR, -PD / 2);
+  const sandTex = canvasTex(256, 256, (g, w, h) => {
+    g.fillStyle = PALETTE.plaza; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 900; i++) {
+      g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,.18)' : 'rgba(150,110,60,.14)';
+      g.beginPath(); g.arc(rnd() * w, rnd() * h, 0.8 + rnd() * 2.2, 0, Math.PI * 2); g.fill();
+    }
+  });
+  sandTex.wrapS = sandTex.wrapT = THREE.RepeatWrapping; sandTex.repeat.set(0.25, 0.25);
+  const edge = new THREE.Mesh(new THREE.ShapeGeometry(shape, 12), new THREE.MeshStandardMaterial({ color: PALETTE.plazaEdge, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }));
+  edge.rotation.x = -Math.PI / 2; edge.position.set(0, 0.001, 0.5); edge.scale.set(1.04, 1.045, 1); edge.receiveShadow = true;
+  const plaza = new THREE.Mesh(new THREE.ShapeGeometry(shape, 12), new THREE.MeshStandardMaterial({ map: sandTex, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }));
+  plaza.rotation.x = -Math.PI / 2; plaza.position.set(0, 0.002, 0.5); plaza.receiveShadow = true;
+  scene.add(edge, plaza);
+
+  // round cartoon trees, bushes and rocks around the plaza
+  const trunkMat = new THREE.MeshStandardMaterial({ color: PALETTE.trunk, roughness: 1 });
+  const leafMats = PALETTE.leaf.map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.95, flatShading: true }));
+  const rockMat = new THREE.MeshStandardMaterial({ color: PALETTE.rock, roughness: 1, flatShading: true });
+  const away = (x, z) => Math.abs(x) > PW / 2 + 1.2 || Math.abs(z - 0.5) > PD / 2 + 1.2;
+  const tree = (x, z, sc) => {
     const t = new THREE.Group();
-    const hgt = 4 + rnd() * 4;
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.25, hgt * 0.5, 6), trunkMat);
-    trunk.position.y = hgt * 0.25;
-    const crown = new THREE.Mesh(new THREE.ConeGeometry(1.4 + rnd(), hgt * 0.75, 7), leafMat);
-    crown.position.y = hgt * 0.62;
-    t.add(trunk, crown);
-    t.position.set(Math.cos(a) * d, 0, Math.sin(a) * d + 1);
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, 1.4, 7), trunkMat); trunk.position.y = 0.7;
+    t.add(trunk);
+    const n = 2 + (rnd() * 2 | 0);
+    for (let k = 0; k < n; k++) {
+      const r = 0.9 + rnd() * 0.5;
+      const c = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), leafMats[(rnd() * 3) | 0]);
+      c.position.set((rnd() - .5) * 0.8, 1.7 + k * 0.6 + rnd() * 0.3, (rnd() - .5) * 0.8);
+      t.add(c);
+    }
+    t.traverse(o => { if (o.isMesh) o.castShadow = true; });
+    t.scale.setScalar(sc); t.position.set(x, 0, z); t.rotation.y = rnd() * 6;
     scene.add(t);
+  };
+  for (let i = 0; i < 70; i++) {
+    const a = rnd() * Math.PI * 2, d = 11 + rnd() * 24;
+    const x = Math.cos(a) * d * 1.1, z = Math.sin(a) * d + 0.5;
+    if (away(x, z)) tree(x, z, 0.9 + rnd() * 0.7);
+  }
+  for (let i = 0; i < 40; i++) {
+    const a = rnd() * Math.PI * 2, d = 9.5 + rnd() * 10;
+    const x = Math.cos(a) * d, z = Math.sin(a) * d + 0.5;
+    if (!away(x, z)) continue;
+    const bush = rnd() < 0.6;
+    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(bush ? 0.45 + rnd() * 0.3 : 0.3 + rnd() * 0.35, bush ? 1 : 0), bush ? leafMats[(rnd() * 3) | 0] : rockMat);
+    m.position.set(x, bush ? 0.25 : 0.1, z); m.scale.y = bush ? 0.8 : 0.6; m.castShadow = true;
+    scene.add(m);
   }
   return { sun };
 }
@@ -191,7 +245,7 @@ export function makeBlueprintMesh(joints) {
   const c = document.createElement('canvas'); c.width = c.height = BP.size;
   drawBlueprint(c.getContext('2d'), { joints });
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(BP.span, BP.span), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }));
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(BP.span, BP.span), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 }));
   m.rotation.set(-Math.PI / 2, 0, Math.PI);
   m.position.set(BP.u0, 0.004, BP.v0);
   m.receiveShadow = true;
@@ -334,11 +388,11 @@ export function makeDriver() {
 }
 
 // ---------- people ----------
-const skin = new THREE.MeshStandardMaterial({ color: 0xc89a74, roughness: 0.8 });
-const shirt = new THREE.MeshStandardMaterial({ color: 0xc7b285, roughness: 0.9 });
-const pants = new THREE.MeshStandardMaterial({ color: 0x8e7d58, roughness: 0.9 }); // khaki uniform
-const hair = new THREE.MeshStandardMaterial({ color: 0x2b1d14, roughness: 1 });
-const scarfColors = [0x2f63b0, 0xb23a2e, 0x2e7d4f, 0x6a3fa0];
+const skin = new THREE.MeshStandardMaterial({ color: 0xe8b48a, roughness: 0.7 });
+const shirt = new THREE.MeshStandardMaterial({ color: 0xd9bf82, roughness: 0.85 });
+const pants = new THREE.MeshStandardMaterial({ color: 0xa08a5a, roughness: 0.9 }); // khaki uniform
+const hair = new THREE.MeshStandardMaterial({ color: 0x4a2c18, roughness: 1 });
+const scarfColors = [0x2f7fe0, 0xe0473a, 0x2fae5f, 0x8a52d0];
 export function makePerson(i = 0) {
   const g = new THREE.Group();
   const scarf = new THREE.MeshStandardMaterial({ color: scarfColors[i % scarfColors.length] });
@@ -348,10 +402,10 @@ export function makePerson(i = 0) {
   const lR = new THREE.Group(); lR.position.set(0.09, 0.8, 0);
   for (const l of [lL, lR]) { const m = new THREE.Mesh(legGeo, pants); m.position.y = -0.37; l.add(m); }
   const torso = new THREE.Group(); torso.position.y = 0.82;
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.36, 4, 10), shirt); body.position.y = 0.3; body.scale.z = 0.7;
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.32, 4, 10), shirt); body.position.y = 0.3; body.scale.z = 0.75;
   const sc = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.2, 6), scarf); sc.position.set(0, 0.5, 0.11); sc.rotation.x = Math.PI;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 10), skin); head.position.y = 0.73;
-  const hr = new THREE.Mesh(new THREE.SphereGeometry(0.115, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), hair); hr.position.y = 0.745; hr.rotation.x = -0.25;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 16, 12), skin); head.position.y = 0.78;
+  const hr = new THREE.Mesh(new THREE.SphereGeometry(0.157, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), hair); hr.position.y = 0.8; hr.rotation.x = -0.25;
   const armGeo = new THREE.CapsuleGeometry(0.045, 0.5, 4, 8);
   const aL = new THREE.Group(); aL.position.set(-0.2, 0.55, 0);
   const aR = new THREE.Group(); aR.position.set(0.2, 0.55, 0);

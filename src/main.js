@@ -49,13 +49,13 @@ const canvas = $('scene');
 const renderer = makeRenderer(canvas);
 const scene = new THREE.Scene();
 makeWorld(scene);
-const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 200);
+const camera = new THREE.PerspectiveCamera(34, 1, 0.15, 300);
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.dampingFactor = 0.12;
 controls.maxPolarAngle = Math.PI * 0.495;
 controls.minDistance = 1.2;
-controls.maxDistance = 16;
+controls.maxDistance = 34;
 controls.target.set(0, 1, 0.4);
 controls.enabled = false;
 
@@ -215,7 +215,8 @@ function goStage(id) {
   $('tray').hidden = id !== 'build';
   $('rope-panel').hidden = id !== 'raise';
   if (id !== 'build') $('length-panel').hidden = true;
-  setCameraMode(id === 'build' ? 'buildView' : 'orbit');
+  // close enough to tap the small parts in stages with fine work, far and high otherwise
+  setCameraMode(id === 'build' ? 'buildView' : (id === 'stakes' || id === 'anchor') ? 'workView' : 'orbit');
   refreshChips(); refreshActions(); refreshHint();
 }
 function startSim() {
@@ -236,8 +237,11 @@ let camMode = null, camTween = null, closeup = null;
 function stagePose(mode) {
   const aspect = window.innerWidth / window.innerHeight;
   const far = aspect < 1.6 ? 1.25 : 1; // narrower screens step back a little
-  if (mode === 'buildView') return { target: new THREE.Vector3(0, 0.15, 1.0), pos: new THREE.Vector3(0.7 * far, 3.3 * far, -1.9 * far) };
-  return { target: new THREE.Vector3(0, 0.95, 0.3), pos: new THREE.Vector3(3.6, 2.6, -5.4) };
+  // seen from high above, so the klaf and the scouts stay small in a big plaza (Omer)
+  const at = (target, dist, elev, azim) => ({ target, pos: target.clone().add(new THREE.Vector3(Math.sin(azim) * Math.cos(elev), Math.sin(elev), -Math.cos(azim) * Math.cos(elev)).multiplyScalar(dist * far)) });
+  if (mode === 'buildView') return at(new THREE.Vector3(0, 0, 1.0), 10.5, 1.05, 0.3);
+  if (mode === 'workView') return at(new THREE.Vector3(0, 0.5, 0.2), 9, 0.8, 0.55);
+  return at(new THREE.Vector3(0, 0.7, 0.4), 17, 0.85, 0.55);
 }
 function setCameraMode(mode) {
   if (mode === camMode && camTween == null) return;
@@ -274,7 +278,8 @@ function lashCloseup(pos, onTied, hold = 700, withTier = true) {
   const dir = camera.position.clone().sub(P); dir.y = 0;
   if (dir.lengthSq() < 1e-6) dir.set(0, 0, -1);
   dir.normalize();
-  const near = P.clone().addScaledVector(dir, withTier ? 1.6 : 0.9).add(new THREE.Vector3(0, withTier ? 0.75 : 0.6, 0));
+  // a short, pulled-back look from above: the coils and the scout both in view
+  const near = P.clone().addScaledVector(dir, withTier ? 3.0 : 1.8).add(new THREE.Vector3(0, withTier ? 4.0 : 2.4, 0));
   const look = withTier ? P.clone().add(new THREE.Vector3(0, 0.5, 0)).addScaledVector(dir, -0.15) : P;
   closeup = { phase: 'in', tier: withTier ? pos : null };
   camTween = {
@@ -377,7 +382,8 @@ function pickTarget(x, y) {
   let best = null, bd = 34;
   for (const t of targets) {
     const sp = toScreen(t.pos); if (!sp) continue;
-    const d = Math.hypot(sp[0] - x, sp[1] - y);
+    // when rings sit close together, the one still to be tied wins
+    const d = Math.hypot(sp[0] - x, sp[1] - y) - (t.show ? 10 : 0);
     if (d < bd) { bd = d; best = t; }
   }
   return best;
