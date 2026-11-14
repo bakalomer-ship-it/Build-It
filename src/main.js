@@ -6,9 +6,10 @@ import { SLOTS, JOINTS, STAKE_JOINTS, LEG_STAKES, GUYS, GUY_DIST, LASHINGS, LASH
 import { KlafSim, TUNING, PULL_HAND, jointReachable, slotById, slotParam, slotPoint, klafToWorld } from './klafSim.js';
 import {
   R, makeRenderer, makeWorld, makeBlueprintMesh, drawBlueprint, BP, makePoleMesh, placeCylinder,
-  makeLashing, placeLashing, placeParallelLashing, RopeViz, makeStake, makeMallet, makePerson, posePerson,
+  makeLashing, placeLashing, placeParallelLashing, RopeViz, makeStake, makeDriver,
 } from './scene.js';
 import { sfx } from './sound.js';
+import { Actor, makeCrew, freeActors, CREW } from './crew.js';
 
 const $ = id => document.getElementById(id);
 const GAP = 1.9 * R;
@@ -29,6 +30,7 @@ function freshState() {
     stage: 'build',
     build: { poles: {}, joints: {}, stakes: {}, guyTop: {}, anchors: {}, stakeJoints: {}, guyTies: {} },
     tying: null,
+    carrying: {},
     selected: null,
     sim: null,
     raisedOnce: false, uprightFor: 0,
@@ -37,7 +39,7 @@ function freshState() {
     result: null,
     startedAt: null, endedAt: null,
     lastLength: 2.0,
-    hintsUsed: 0,
+    hintsUsed: 0, hinted: [],
   };
 }
 G = freshState();
@@ -81,19 +83,17 @@ for (const j of [...JOINTS, ...STAKE_JOINTS]) { const g = makeLashing(); g.visib
 const stakeMeshes = {};
 for (const st of LEG_STAKES) { const m = makeStake(LEG_STAKE_LEN); m.visible = false; scene.add(m); stakeMeshes[st.id] = m; }
 for (const g of GUYS) { const m = makeStake(ANCHOR_LEN); m.visible = false; scene.add(m); stakeMeshes['A' + g.id] = m; }
-const mallet = makeMallet(); scene.add(mallet);
 
 const guyRopes = {}; for (const g of GUYS) guyRopes[g.id] = new RopeViz(scene);
 Object.values(guyRopes).forEach(r => r.show(false));
 
-const people = {
-  pull1: makePerson(0), pull2: makePerson(1),
-  baseL: makePerson(2), baseR: makePerson(3),
-  lift1: makePerson(1), lift2: makePerson(0),
-  tier: makePerson(3),
-};
-for (const g of GUYS) people['guy' + g.id] = makePerson(GUYS.indexOf(g) + 2);
-for (const k in people) { people[k].visible = false; scene.add(people[k]); }
+// raise roles: each walks to its post when needed and walks off after
+const people = {};
+['baseL', 'baseR', 'lift1', 'lift2', 'tier', ...GUYS.map(g => 'guy' + g.id)].forEach((k, i) => { people[k] = new Actor(scene, i); });
+// the work crew: carries poles and drives stakes
+const crew = makeCrew(scene, 8);
+const allActors = [...Object.values(people), ...crew];
+window.CREW = CREW;
 
 const pushArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 0.8, 0xe2593f, 0.25, 0.16);
 pushArrow.visible = false; scene.add(pushArrow);
@@ -181,7 +181,8 @@ const stagesEl = $('stages');
 STAGES.forEach((s, i) => {
   const b = document.createElement('button');
   b.type = 'button'; b.className = 'chip'; b.dataset.stage = s.id;
-  b.innerHTML = `<span class="n">${i + 1}</span><span class="lbl">${s.he}</span>`;
+  b.innerHTML = `<span class="n">${i + 1}</span>`;
+  b.title = s.he; b.setAttribute('aria-label', s.he);
   b.addEventListener('click', () => goStage(s.id));
   stagesEl.appendChild(b);
 });
@@ -222,6 +223,7 @@ function startSim() {
   G.uprightFor = 0;
 }
 function lowerKlaf() {
+  clearJobs();
   G.sim = null; G.raisedOnce = false; G.check = null; G.result = null;
   G.build.stakeJoints = {}; G.build.guyTies = {};
   pushArrow.visible = false;
@@ -320,7 +322,10 @@ function collectTargets() {
   const busy = G.falling || G.check?.running;
   if (!busy) {
     // klaf lashings: tie (ring) or change (on the coil)
+    // lashings on the klaf can only be tied or changed while it lies on the ground
+    const klafDown = !sim || sim.angle() < 8;
     for (const j of JOINTS) {
+      if (!klafDown || G.carrying[j.a] || G.carrying[j.b]) continue;
       if (!jointReachable(j, b.poles)) continue;
       const p = jointPos(j); if (!p) continue;
       T.push({ kind: b.joints[j.id] ? 'lashed' : 'joint', id: j.id, pos: p, show: !b.joints[j.id] });
@@ -420,18 +425,8 @@ function onTarget(t, x, y) {
   switch (t.kind) {
     case 'joint': case 'lashed': return openPicker(t, x, y);
     case 'stakeJoint': case 'stakeLashed': return openPicker(t, x, y);
-    case 'stake': {
-      b.stakes[t.id] = (b.stakes[t.id] || 0) + 1;
-      hammer(LEG_STAKES.find(s => s.id === t.id).u, stakeZ, stakeTopPos(LEG_STAKES.find(s => s.id === t.id))[1]);
-      if (b.stakes[t.id] >= LEG_STAKE_HITS && G.sim && G.sim.angle() < 8) startSim(); // feet now rest against the stakes
-      break;
-    }
-    case 'anchor': {
-      b.anchors[t.id] = (b.anchors[t.id] || 0) + 1;
-      const a = anchorPos(GUYS.find(g => g.id === t.id));
-      hammer(a[0], a[2], ANCHOR_LEN - 0.25 * b.anchors[t.id] / ANCHOR_HITS);
-      break;
-    }
+    case 'stake': requestDrive('leg', t.id); break;
+    case 'anchor': requestDrive('anchor', t.id); break;
     case 'guyTop': {
       b.guyTop[t.id] = true;
       G.sim?.addGuy(GUYS.find(g => g.id === t.id));
@@ -562,7 +557,7 @@ function endDrag() {
   ghost.visible = false; slotGlow.visible = false;
   if (drag.slot) {
     G.build.poles[drag.slot.id] = { length: G.lastLength };
-    sfx.thud();
+    startCarry(drag.slot.id);
     selectPole(drag.slot.id);
   } else if (drag.slot === null && drag.moved) {
     flashHint('שחררו את הסנדה על אחד הקווים הכחולים בשרטוט');
@@ -652,21 +647,117 @@ function changeLength(steps) {
   pad.addEventListener('pointercancel', () => { on = false; });
 }
 
-// ---------------- hammer ----------------
-let malletAnim = null;
-function hammer(x, z, topY) {
-  sfx.hammer();
-  mallet.visible = true;
-  malletAnim = { t: 0, x, z, y: topY };
+// ---------------- crew jobs: carrying poles, driving stakes ----------------
+const jobs = [];
+const driverPool = [];
+function getDriver() {
+  let d = driverPool.find(m => !m.userData.used);
+  if (!d) { d = makeDriver(); scene.add(d); driverPool.push(d); }
+  d.userData.used = true; d.visible = true;
+  return d;
 }
-function updateMallet(dt) {
-  if (!malletAnim) return;
-  malletAnim.t += dt;
-  const k = malletAnim.t / 0.35;
-  const swing = k < 0.5 ? -1.2 + 2.4 * k : 0 - (k - 0.5) * 1.6;
-  mallet.position.set(malletAnim.x + 0.62, malletAnim.y - 0.55, malletAnim.z);
-  mallet.rotation.set(0, 0, 1.0 + swing);
-  if (k >= 1) { mallet.visible = false; malletAnim = null; }
+function endJob(job) {
+  job.actors.forEach(a => { a.busy = null; a.clear(); });
+  if (job.mesh) { job.mesh.userData.used = false; job.mesh.visible = false; }
+  if (job.type === 'carry') delete G.carrying[job.sid];
+  jobs.splice(jobs.indexOf(job), 1);
+}
+function clearJobs() { while (jobs.length) endJob(jobs[0]); }
+
+// הלמנייה: two scouts bring the post driver and drive the stake, one on each handle
+function requestDrive(kind, id) {
+  const store = kind === 'leg' ? G.build.stakes : G.build.anchors;
+  const max = kind === 'leg' ? LEG_STAKE_HITS : ANCHOR_HITS;
+  let job = jobs.find(j => j.type === 'drive' && j.id === id);
+  if ((store[id] || 0) + (job ? job.queued : 0) >= max) return;
+  if (!job) {
+    const [x, z] = kind === 'leg' ? [LEG_STAKES.find(s => s.id === id).u, stakeZ] : (a => [a[0], a[2]])(anchorPos(GUYS.find(g => g.id === id)));
+    const two = freeActors(crew, 2, new THREE.Vector3(x, 0, z));
+    if (!two) { flashHint('כל הצופים עסוקים, עוד רגע…'); return; }
+    job = { type: 'drive', kind, id, x, z, actors: two, queued: 0, t: 0, idle: 0, mesh: getDriver() };
+    two.forEach(a => { a.busy = job; });
+    jobs.push(job);
+  }
+  job.queued++;
+}
+function stakeTopNow(job) {
+  if (job.kind === 'leg') return stakeTopPos(LEG_STAKES.find(s => s.id === job.id))[1];
+  return ANCHOR_LEN - 0.25 * Math.min(G.build.anchors[job.id] || 0, ANCHOR_HITS) / ANCHOR_HITS;
+}
+function updateDrive(job, dt) {
+  const [a1, a2] = job.actors;
+  const top = stakeTopNow(job);
+  let lift = 0;
+  const there = a1.arrived() && a2.arrived();
+  if (there && job.queued > 0) {
+    job.t += dt;
+    const u = Math.min(1, job.t / 0.5);
+    lift = u < 0.65 ? 0.3 * (u / 0.65) : 0.3 * (1 - (u - 0.65) / 0.35);
+    if (u >= 1) {
+      job.t = 0; job.queued--;
+      const store = job.kind === 'leg' ? G.build.stakes : G.build.anchors;
+      store[job.id] = (store[job.id] || 0) + 1;
+      sfx.hammer();
+      if (job.kind === 'leg' && store[job.id] >= LEG_STAKE_HITS && G.sim && G.sim.angle() < 8) startSim(); // feet now rest against the stakes
+      refreshAll();
+    }
+  } else if (there) {
+    job.idle += dt;
+    if (job.idle > 0.5) return endJob(job);
+  }
+  const handY = top + 0.28 + lift;
+  const reach = Math.max(0.5, Math.min(2.6, 0.5 + (handY - 0.5) * 2.2));
+  a1.set([job.x - 0.4, 0, job.z], Math.PI / 2, 0.05, reach, { carry: 0.5 });
+  a2.set([job.x + 0.4, 0, job.z], -Math.PI / 2, 0.05, reach, { carry: 0.5 });
+  const m = job.mesh;
+  if (there) m.position.set(job.x, top - 0.12 + lift, job.z);
+  else { const h = a1.hands(0.55); m.position.set(h[0], h[1] - 0.3, h[2]); }
+}
+
+// two scouts carry each new pole in and lay it on its line in the drawing
+function startCarry(sid) {
+  const slot = slotById(sid);
+  const two = freeActors(crew, 2, new THREE.Vector3(slot.centre[0], 0, slot.centre[1]));
+  if (!two) return; // nobody free: the pole is simply laid
+  const job = { type: 'carry', sid, actors: two, phase: 'walk', t: 0 };
+  two.forEach(a => { a.busy = job; });
+  jobs.push(job);
+  G.carrying[sid] = job;
+}
+function carryStands(job) {
+  const slot = slotById(job.sid), len = G.build.poles[job.sid].length;
+  const n = [-slot.dir[1], slot.dir[0]];
+  return [-1, 1].map(k => {
+    const e = slotPoint(slot, k * (len / 2 - 0.3));
+    return [e[0] + n[0] * 0.38, 0, e[1] + n[1] * 0.38];
+  });
+}
+function updateCarry(job, dt) {
+  if (!G.build.poles[job.sid] || G.stage !== 'build') return endJob(job);
+  const slot = slotById(job.sid);
+  const yaw = Math.atan2(-(-slot.dir[1]), -slot.dir[0]);
+  const [s1, s2] = carryStands(job);
+  const laying = job.phase === 'lay';
+  job.actors[0].set(s1, yaw, laying ? 0.55 : 0.1, laying ? 0.95 : 0.5, { carry: 0.5 });
+  job.actors[1].set(s2, yaw, laying ? 0.55 : 0.1, laying ? 0.95 : 0.5, { carry: 0.5 });
+  if (!laying && job.actors.every(a => a.arrived())) { job.phase = 'lay'; job.t = 0; }
+  if (laying) { job.t += dt; if (job.t > 0.45) { sfx.thud(); endJob(job); refreshAll(); } }
+}
+// where a carried pole is drawn
+function carriedSegs(job) {
+  const slot = slotById(job.sid), len = G.build.poles[job.sid].length, off = layerOff(slot);
+  const rest = [-1, 1].map(k => { const p = slotPoint(slot, k * len / 2); return add3(klafToWorld(p[0], p[1]), [0, 1, 0], off); });
+  if (job.phase === 'lay') {
+    const k = Math.min(1, job.t / 0.45), lift = 0.55 * (1 - k);
+    return [[add3(rest[0], [0, 1, 0], lift), add3(rest[1], [0, 1, 0], lift)]];
+  }
+  const h1 = job.actors[0].hands(0.6), h2 = job.actors[1].hands(0.6);
+  const c = [(h1[0] + h2[0]) / 2, 0.6, (h1[2] + h2[2]) / 2];
+  let d = [h2[0] - h1[0], 0, h2[2] - h1[2]]; const dl = Math.hypot(d[0], d[2]) || 1; d = [d[0] / dl, 0, d[2] / dl];
+  return [[add3(c, d, -len / 2), add3(c, d, len / 2)]];
+}
+function updateJobs(dt) {
+  for (const job of [...jobs]) (job.type === 'drive' ? updateDrive : updateCarry)(job, dt);
 }
 
 // ---------------- action buttons and hints ----------------
@@ -701,14 +792,14 @@ function hintText() {
     }
     case 'stakes': {
       const d = LEG_STAKES.filter(s => (b.stakes[s.id] || 0) >= LEG_STAKE_HITS).length;
-      if (d < 2) return `הקישו על מקום הבז״נט ליד כל רגל, וכל הקשה היא מכת <b>למנייה</b> · בז״נטים ${d}/2`;
+      if (d < 2) return `הקישו על מקום הבז״נט ליד כל רגל, וכל הקשה היא מכת <b>הלמנייה</b> · בז״נטים ${d}/2`;
       return 'הבז״נטים בפנים. המשיכו ל<b>הרמה</b>';
     }
     case 'raise': {
       if (!sim) return '';
       const ang = sim.angle();
       const g = GUYS.filter(q => b.guyTop[q.id]).length;
-      if (ang < 6 && g < 4) return `כפתו <b>4 יתרים</b> לראש הקלף (הקישו על הטבעות). בשני הקדמיים המושכים ירימו את הקלף · ${g}/4`;
+      if (ang < 6 && g < 4) return `כפתו <b>4 יתרים</b> לראש הקלף (הקישו על הטבעות) · ${g}/4`;
       if (ang < 6) return 'החליקו את היתרים <b>למטה</b> כדי למשוך. לאט ובשליטה';
       if (ang < 80) return 'ממשיכים למשוך, לאט ובשליטה…';
       if (ang <= 97) return '<b>עצרו!</b> הקלף ניצב';
@@ -864,7 +955,8 @@ function finish() {
   const s = G.result = score();
   sfx.ok();
   const stars = [1, 2, 3].map(i => `<span class="${i <= s.stars ? 'on' : ''}">★</span>`).join('');
-  const missing = Object.entries(s.groups).map(([k, n]) => `<li>${n === 1 ? 'כפיתה אחת חסרה' : `${n} כפיתות חסרות`}: ${k}</li>`).join('');
+  const nMissing = s.total - s.tied;
+  const missing = nMissing ? (nMissing === 1 ? 'כפיתה אחת חסרה במבנה.' : `${nMissing} כפיתות חסרות במבנה.`) : '';
   showModal(`
     <div class="eyebrow">הקלף עמד בבדיקה</div>
     <h2>${s.stars === 3 ? 'בנייה מושלמת!' : 'עברתם את השלב'}</h2>
@@ -876,14 +968,15 @@ function finish() {
       <span>דיוק</span><b>${s.accuracy}</b>
       <span>בונוס זמן (${fmt(s.sec)})</span><b>+${s.bonus}</b>
       ${s.penalty ? `<span>רמזים (${G.hintsUsed})</span><b>−${s.penalty}</b>` : ''}
+      <span></span><span></span>
       <span class="total">סה״כ</span><b class="total">${s.sum}</b>
     </div>
-    ${missing ? `<p><b>איפה לחפש:</b></p><ul>${missing}</ul>` : ''}
+    ${missing ? `<p>${missing} אפשר לחפש לבד בתיק המבנה, או לקחת רמז.</p>` : ''}
     ${s.wrong ? `<p>${s.wrong === 1 ? 'כפיתה אחת כפותה' : `${s.wrong} כפיתות כפותות`} בסוג לא נכון. זה מוריד ניקוד, אבל לא מפיל את המבנה.</p>` : ''}
     ${s.stars < 3 ? '<p>אפשר לחזור, להשלים ולתקן, ולשפר את הכוכבים.</p>' : ''}
   `, [
     s.stars < 3 ? ['להשלים ולתקן', reopenForFixes, true] : null,
-    s.stars < 3 && G.hintsUsed < s.hintsAllowed ? [`רמז (${s.hintsAllowed - G.hintsUsed} נותרו, −${s.hintCost} נק׳)`, () => useHint(s)] : null,
+    s.stars < 3 && G.hintsUsed < s.hintsAllowed && G.result ? [`רמז (${s.hintsAllowed - G.hintsUsed} נותרו, −${s.hintCost} נק׳)`, () => useHint(s)] : null,
     ['לבנות מחדש', restart, s.stars === 3],
   ].filter(Boolean));
   refreshAll();
@@ -891,24 +984,28 @@ function finish() {
 function reopenForFixes() {
   closeModal(); G.check = null; G.result = null; G.endedAt = null; goStage('anchor');
 }
-// a hint flies the camera to one problem: first a missing lashing, then a wrong one
+// where a lashing is, as the structure file names it: the drawing sheet and the height band
+function sheetOf(j) {
+  if (j.guy) return 'מפת יתרים';
+  if (j.leg) return 'מפת בסיסים (רגליים לבז״נטים)';
+  return `שרטוט הקלף, ${j.at[1] < 1.0 ? 'גובה 0–1 מ׳' : 'גובה 1–2 מ׳'}`;
+}
+// a hint names the sheet and height of one problem (missing first, then a wrong type),
+// never the joint itself
 function useHint(s) {
-  const pick = s.all.find(([, t]) => !t) || s.all.find(([j, t]) => t !== j.correct);
+  const pick = s.all.find(([j, t]) => !t && !G.hinted.includes(j.id)) || s.all.find(([j, t]) => t && t !== j.correct && !G.hinted.includes(j.id));
   if (!pick) return;
   const [j, t] = pick;
-  let pos;
-  if (j.guy) { const a = anchorPos(j); pos = [a[0], 0.4, a[2]]; }
-  else if (j.leg) pos = legPoint(j.leg, j.v);
-  else pos = jointPos(j);
-  if (!pos) return;
   G.hintsUsed++;
-  reopenForFixes();
-  flashHint(t ? '<b>רמז:</b> הכפיתה כאן מסוג לא נכון' : '<b>רמז:</b> כאן חסרה כפיתה');
-  flashUntil = performance.now() + 4000;
-  lashCloseup(pos, () => {}, 2000, false);
+  G.hinted.push(j.id);
+  const text = t ? `יש כפיתה מסוג לא נכון ב<b>${sheetOf(j)}</b>` : `חסרה כפיתה ב<b>${sheetOf(j)}</b>`;
+  showModal(`<div class="eyebrow">רמז</div><h2>${t ? 'כפיתה מסוג לא נכון' : 'כפיתה חסרה'}</h2><p>${text}.</p>
+    ${!j.leg && !j.guy ? '<p>כפיתות בקלף אפשר לתקן רק כשהקלף שוכב על הקרקע.</p>' : ''}`,
+    [['הבנתי', () => { closeModal(); finish(); }, true]]);
 }
 function restart() {
   closeModal();
+  clearJobs();
   G = freshState();
   for (const k in poleMeshes) poleMeshes[k].forEach(m => m.material[0].emissive.setHex(0));
   $('timer').textContent = '0:00';
@@ -1004,7 +1101,7 @@ $('btn-full').addEventListener('click', async () => {
 function drawPoles() {
   for (const s of SLOTS) {
     const [m0, m1] = poleMeshes[s.id];
-    const segs = poleSegs(s.id);
+    const segs = G.carrying[s.id] ? carriedSegs(G.carrying[s.id]) : poleSegs(s.id);
     if (!segs) { m0.visible = m1.visible = false; continue; }
     placeCylinder(m0, segs[0][0], segs[0][1]);
     if (segs[1]) placeCylinder(m1, segs[1][0], segs[1][1]); else m1.visible = false;
@@ -1040,13 +1137,13 @@ function drawStakes() {
   const b = G.build;
   for (const st of LEG_STAKES) {
     const m = stakeMeshes[st.id], hits = b.stakes[st.id] || 0;
-    m.visible = hits > 0;
+    m.visible = hits > 0 || jobs.some(j => j.id === st.id);
     const top = stakeTopPos(st)[1];
     m.position.set(st.u, top - LEG_STAKE_LEN, stakeZ);
   }
   for (const g of GUYS) {
     const m = stakeMeshes['A' + g.id], hits = b.anchors[g.id] || 0;
-    m.visible = hits > 0;
+    m.visible = hits > 0 || jobs.some(j => j.id === g.id);
     const a = anchorPos(g);
     m.position.set(a[0], -0.25 * Math.min(hits, ANCHOR_HITS) / ANCHOR_HITS, a[2]);
     m.rotation.x = g.side * 0.35; // anchor stakes lean away from the load
@@ -1054,7 +1151,7 @@ function drawStakes() {
 }
 function drawCrew() {
   const sim = G.sim, st = G.stage;
-  for (const k in people) people[k].visible = false;
+  for (const k in people) if (k !== 'tier') people[k].clear();
   for (const k in guyRopes) guyRopes[k].show(false);
   if (!sim || (G.falling && G.falling.t > 2.2)) return;
   const ang = sim.angle();
@@ -1086,14 +1183,14 @@ function drawCrew() {
     } else {
       const holder = [a[0] * 1.15, 0, g.side * (GUY_DIST + 0.55)];
       place(people['guy' + g.id], holder, Math.PI, -0.15, 1.0);
-      guyRopes[g.id].set(top, [holder[0], 1.05, holder[2] - g.side * 0.35], con.force > 5 ? 0.03 : 0.3);
+      guyRopes[g.id].set(top, [holder[0], 0.9, holder[2] - g.side * 0.3], con.force > 5 ? 0.03 : 0.3);
     }
   }
 }
 // a scout steps in to tie each lashing, during its close-up
 function drawTier() {
   const p = people.tier;
-  if (!closeup || !closeup.tier) { p.visible = false; return; }
+  if (!closeup || !closeup.tier) { p.clear(); return; }
   const J = closeup.tier;
   if (!closeup.stand) {
     const d = new THREE.Vector3(camera.position.x - J[0], 0, camera.position.z - J[2]);
@@ -1108,15 +1205,13 @@ function drawTier() {
   const low = J[1] < 0.6; // joints near the ground: bend down to them
   const reach = low ? 0.9 : Math.min(Math.PI * 0.85, 0.6 + J[1] * 0.7);
   const wiggle = closeup.phase === 'tie' ? 0.15 * Math.sin(performance.now() / 70) : 0;
-  place(p, low ? [st[0], -0.32, st[2]] : st, yaw, low ? 0.6 : 0.1, reach + wiggle); // kneel for low joints
+  p.set(low ? [st[0], -0.28, st[2]] : st, yaw, low ? 0.6 : 0.1, reach + wiggle, { snap: true }); // kneel for low joints
 }
 function jointPosOf(sid, s) {
   const id = G.sim.findParticle(sid, s); if (id == null) return null;
   return add3(G.sim.pos(id), visNormal(), layerOff(slotById(sid)));
 }
-function place(p, pos, rotY, lean, reach) {
-  p.visible = true; p.position.set(...pos); p.rotation.y = rotY; posePerson(p, lean, reach);
-}
+function place(actor, pos, rotY, lean, reach) { actor.set(pos, rotY, lean, reach); }
 function drawGauge() {
   $('rope-panel').hidden = G.stage !== 'raise' || !!G.falling;
   if (!G.sim || G.stage !== 'raise') return;
@@ -1157,7 +1252,8 @@ function frame(now) {
   blueprint.material.opacity = Math.max(0, Math.min(1, op));
   blueprint.visible = blueprint.material.opacity > 0.01;
   drawPoles(); drawLashings(); drawStakes(); drawCrew(); drawTier(); drawGauge(); drawPushArrow(push);
-  updateMallet(dt);
+  updateJobs(dt);
+  for (const a of allActors) a.update(dt);
   collectTargets();
   updateCamera(dt);
   hintTimer += dt;

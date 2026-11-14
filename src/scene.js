@@ -310,13 +310,25 @@ export function makeStake(len) {
   g.userData.len = len;
   return g;
 }
-export function makeMallet() {
+// הלמנייה: a steel tube post driver with a handle on each side
+export function makeDriver() {
   const g = new THREE.Group();
-  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.55, 8), new THREE.MeshStandardMaterial({ color: 0xb08a5a }));
-  handle.position.y = 0.275;
-  const head = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.22, 12), new THREE.MeshStandardMaterial({ color: 0x6d4c2c }));
-  head.rotation.z = Math.PI / 2; head.position.y = 0.56;
-  g.add(handle, head);
+  const steel = new THREE.MeshStandardMaterial({ color: 0x2f6b45, roughness: 0.45, metalness: 0.5 });
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.62, 16, 1, true), steel);
+  tube.position.y = 0.31;
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.058, 0.058, 0.03, 16), steel);
+  cap.position.y = 0.62;
+  g.add(tube, cap);
+  for (const sx of [-1, 1]) {
+    // each handle: two short arms out from the tube and a grip bar
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.4, 8), steel);
+    bar.position.set(sx * 0.17, 0.3, 0);
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.12, 8), steel);
+    top.rotation.z = Math.PI / 2; top.position.set(sx * 0.115, 0.5, 0);
+    const bot = top.clone(); bot.position.y = 0.1;
+    g.add(bar, top, bot);
+  }
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
   g.visible = false;
   return g;
 }
@@ -324,15 +336,17 @@ export function makeMallet() {
 // ---------- people ----------
 const skin = new THREE.MeshStandardMaterial({ color: 0xc89a74, roughness: 0.8 });
 const shirt = new THREE.MeshStandardMaterial({ color: 0xc7b285, roughness: 0.9 });
-const pants = new THREE.MeshStandardMaterial({ color: 0x3e4b5e, roughness: 0.9 });
+const pants = new THREE.MeshStandardMaterial({ color: 0x8e7d58, roughness: 0.9 }); // khaki uniform
 const hair = new THREE.MeshStandardMaterial({ color: 0x2b1d14, roughness: 1 });
 const scarfColors = [0x2f63b0, 0xb23a2e, 0x2e7d4f, 0x6a3fa0];
 export function makePerson(i = 0) {
   const g = new THREE.Group();
   const scarf = new THREE.MeshStandardMaterial({ color: scarfColors[i % scarfColors.length] });
   const legGeo = new THREE.CapsuleGeometry(0.065, 0.62, 4, 8);
-  const lL = new THREE.Mesh(legGeo, pants); lL.position.set(-0.09, 0.43, 0);
-  const lR = new THREE.Mesh(legGeo, pants); lR.position.set(0.09, 0.43, 0);
+  // legs hang from hip pivots so they can swing while walking
+  const lL = new THREE.Group(); lL.position.set(-0.09, 0.8, 0);
+  const lR = new THREE.Group(); lR.position.set(0.09, 0.8, 0);
+  for (const l of [lL, lR]) { const m = new THREE.Mesh(legGeo, pants); m.position.y = -0.37; l.add(m); }
   const torso = new THREE.Group(); torso.position.y = 0.82;
   const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.36, 4, 10), shirt); body.position.y = 0.3; body.scale.z = 0.7;
   const sc = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.2, 6), scarf); sc.position.set(0, 0.5, 0.11); sc.rotation.x = Math.PI;
@@ -345,12 +359,26 @@ export function makePerson(i = 0) {
   torso.add(body, sc, head, hr, aL, aR);
   g.add(lL, lR, torso);
   g.traverse(o => { if (o.isMesh) o.castShadow = true; });
-  g.userData = { torso, aL, aR };
-  return g;
+  g.userData = { torso, aL, aR, lL, lR };
+  const outer = new THREE.Group();
+  g.scale.setScalar(0.9); // about 1.5 m tall next to a 2 m klaf
+  outer.add(g);
+  outer.userData = g.userData;
+  return outer;
 }
 // lean: + forward; reach: arm angle forward (0 down, PI/2 straight ahead, PI up)
 export function posePerson(p, lean = 0, reach = 0.3) {
-  const { torso, aL, aR } = p.userData;
+  const { torso, aL, aR, lL, lR } = p.userData;
   torso.rotation.x = lean;
   aL.rotation.x = -reach; aR.rotation.x = -reach;
+  lL.rotation.x = 0; lR.rotation.x = 0;
+}
+// one frame of a walk cycle
+export function walkPose(p, phase, carry = null) {
+  const { torso, aL, aR, lL, lR } = p.userData;
+  const s = Math.sin(phase);
+  lL.rotation.x = s * 0.5; lR.rotation.x = -s * 0.5;
+  torso.rotation.x = 0.06;
+  if (carry != null) { aL.rotation.x = aR.rotation.x = -carry; }
+  else { aL.rotation.x = -s * 0.45; aR.rotation.x = s * 0.45; }
 }
