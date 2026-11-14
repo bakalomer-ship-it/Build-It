@@ -3,8 +3,8 @@
 import { World } from './physics.js';
 import { SLOTS, JOINTS, LEVEL, GUYS, GUY_DIST, LEG_STAKES, STAKE_JOINTS } from './level1.js';
 
-// where the pullers' hands are, behind the front guy-line stake
-export const PULL_HAND = u => [u * 1.1, 1.0, -(GUY_DIST + 1.4)];
+// How a klaf sits on the plaza (see levels.js). Level 1: one klaf at z = 0.
+export const SOLO_CFG = { z0: 0, frontDist: GUY_DIST, backDist: GUY_DIST, pullDist: GUY_DIST + 1.4, anchorX: { front: 1.05, back: 1.05 }, inner: 0 };
 
 export const TUNING = {
   substeps: 30,
@@ -16,6 +16,10 @@ export const TUNING = {
   guyCompliance: 2.5e-4, // holders' arms give a little
   gust: 45,              // N uneven-pull / wind wobble at the top while raising
   pushForce: 140,        // N push test at the top
+  tiedGuyCompliance: 1e-5, // a guy line fixed to its stake stretches very little
+  cubeGuyCompliance: 4e-4, // ... but a few centimetres under a push, which the cube's Xs take over
+  sideDiagCap: 60,         // N a cube side diagonal carries in compression before its lashings slip
+  cubeSwayLimit: 0.25,     // m the cube may lean in the push test before it counts as falling
 };
 
 const r = LEVEL.poleRadius;
@@ -50,9 +54,12 @@ export function klafToWorld(u, v, angleDeg = 0, layer = 0) {
 }
 
 export class KlafSim {
-  constructor(build) {
+  // world: pass a shared World to put several klafim (and the cube's side poles) in one simulation
+  constructor(build, cfg = SOLO_CFG, world = null) {
     this.build = build;
-    const W = this.world = new World();
+    this.cfg = cfg;
+    this.z0 = cfg.z0;
+    const W = this.world = world || new World();
     this.poleParticles = {};   // slotId -> [{id, s}]
     this.jointCons = {};
     this.events = [];
@@ -69,15 +76,17 @@ export class KlafSim {
         const s = slotParam(slot, j.at);
         if (Math.abs(s) <= half - 0.04) ss.add(round(s));
       }
-      if (slot.id.startsWith('leg')) for (const sj of STAKE_JOINTS) {
-        if (sj.leg === slot.id) { const s = sj.v - slot.centre[1]; if (Math.abs(s) <= half) ss.add(round(s)); }
+      if (slot.id.startsWith('leg')) {
+        for (const sj of STAKE_JOINTS) if (sj.leg === slot.id) { const s = sj.v - slot.centre[1]; if (Math.abs(s) <= half) ss.add(round(s)); }
+        // points where the cube's side poles are lashed on
+        for (const v of cfg.extraLegV || []) { const s = v - slot.centre[1]; if (Math.abs(s) <= half - 0.04) ss.add(round(s)); }
       }
       if (slot.id === 'topH' || slot.id.startsWith('diag')) ss.add(0);
       const list = [...ss].sort((x, y) => x - y);
       const mass = pole.length * LEVEL.kgPerMetre / list.length;
       const parts = list.map(s => {
         const [u, v] = slotPoint(slot, s);
-        const pos = klafToWorld(u, v);
+        const pos = this.kw(u, v);
         if (slot.id.startsWith('diag') && Math.abs(s) < 1e-6) pos[1] += slot.id === 'diagA' ? 0.002 : -0.002;
         const id = W.addParticle(pos, mass, r);
         W.p[id].tag = slot.id;
@@ -120,7 +129,34 @@ export class KlafSim {
     this.stakeCons = {};
     this.flat = true;
     this.collectFrame();
-    W.onSubstep = () => { if (this.flat) this.keepFlat(); };
+    const prev = W.onSubstep;
+    W.onSubstep = h => { if (prev) prev(h); if (this.flat) this.keepFlat(); };
+  }
+  // klaf plane -> world, for this klaf's place on the plaza
+  kw(u, v, angleDeg = 0) { const p = klafToWorld(u, v, angleDeg); p[2] += this.z0; return p; }
+  guyDist(side) { return side > 0 ? this.cfg.backDist : this.cfg.frontDist; }
+  anchorPos(g) {
+    const u = slotById(g.leg).centre[0];
+    return [u * this.cfg.anchorX[g.side > 0 ? 'back' : 'front'], 0, this.z0 + g.side * this.guyDist(g.side)];
+  }
+  // where the pullers' hands are, behind the front guy-line stake
+  pullHand(u) { return [u * 1.1, 1.0, this.z0 - this.cfg.pullDist]; }
+
+  // Put a klaf that was already raised and anchored straight back up, as it
+  // stood (used to rebuild the cube's simulation, and after going back to an
+  // earlier stage). Rotates every pole point from lying flat to upright.
+  standUp() {
+    const W = this.world;
+    for (const sid in this.poleParticles) for (const q of this.poleParticles[sid]) {
+      const P = W.p[q.id], v = P.x[2] - this.z0, h = P.x[1] - r;
+      P.x = [P.x[0], r + v, this.z0 - h]; P.prev = [...P.x]; P.v = [0, 0, 0];
+    }
+    this.target = 90;
+    this.flat = true;
+    const b = this.build;
+    for (const g of GUYS) if (b.guyTop[g.id]) { this.addGuy(g); if (b.guyTies[g.id]) this.tieGuy(g.id); }
+    for (const sj of STAKE_JOINTS) if (b.stakeJoints[sj.id]) this.tieStakeJoint(sj);
+    for (const g of GUYS) if (b.guyOff?.[g.id] && this.guys[g.id]) { this.guys[g.id].active = false; this.guys[g.id].removed = true; }
   }
 
   // Poles held by two or more lashings form the frame. A lashed frame keeps
@@ -183,12 +219,13 @@ export class KlafSim {
     let con;
     if (g.side > 0) {
       // back guy line: holders pay it out and stop the klaf at upright
-      const holder = W.addParticle([u, 0.05, g.side * GUY_DIST], 0);
-      const vertical = Math.hypot(LEVEL.height + r - 0.05, GUY_DIST);
+      const d = this.guyDist(g.side);
+      const holder = W.addParticle([u, 0.05, this.z0 + g.side * d], 0);
+      const vertical = Math.hypot(LEVEL.height + r - 0.05, d);
       con = W.add('grip', top, holder, { rest: vertical + 0.03, compliance: TUNING.guyCompliance, cap: TUNING.backGripCap, tag: g.id });
     } else {
       // front guy line: the pullers' line, they stand behind its stake
-      const holder = W.addParticle(PULL_HAND(u), 0);
+      const holder = W.addParticle(this.pullHand(u), 0);
       con = W.add('grip', top, holder, { compliance: 5e-5, cap: TUNING.frontGripCap, tag: g.id });
       con.rest += 0.02;
       con.pull = true;
@@ -233,7 +270,7 @@ export class KlafSim {
   // raise angle in degrees (0 flat, 90 standing, >90 tipping over the pullers)
   angle() {
     const t = this.topCentre();
-    return Math.atan2(t[1] - r, t[2]) * 180 / Math.PI;
+    return Math.atan2(t[1] - r, t[2] - this.z0) * 180 / Math.PI;
   }
   // sideways lean of the legs (racking), metres at the top
   rack() {
@@ -260,7 +297,7 @@ export class KlafSim {
     this.target = Math.min(angleDeg, 105);
     for (const con of lines) {
       const top = this.pos(con.i), h = this.pos(con.j);
-      const p = klafToWorld(top[0], LEVEL.height, this.target);
+      const p = this.kw(top[0], LEVEL.height, this.target);
       const want = Math.hypot(p[0] - h[0], p[1] - h[1], p[2] - h[2]) + 0.02;
       con.rest = Math.min(con.rest, want);
     }
@@ -270,12 +307,12 @@ export class KlafSim {
   tieGuy(gid) {
     const con = this.guys[gid]; if (!con) return false;
     const g = GUYS.find(q => q.id === gid);
-    const u = slotById(g.leg).centre[0];
-    const stake = this.world.addParticle([u, 0.3, g.side * GUY_DIST], 0);
+    const sp = this.anchorPos(g); sp[1] = 0.3;
+    const stake = this.world.addParticle(sp, 0);
     const a = this.pos(con.i);
     con.j = stake;
-    con.kind = 'rope'; con.cap = Infinity; con.compliance = 1e-5; con.held = false; con.tied = true; con.pull = false;
-    con.rest = Math.max(Math.hypot(a[0] - u, a[1] - 0.3, a[2] - g.side * GUY_DIST), 0.5);
+    con.kind = 'rope'; con.cap = Infinity; con.compliance = TUNING.tiedGuyCompliance; con.held = false; con.tied = true; con.pull = false;
+    con.rest = Math.max(Math.hypot(a[0] - sp[0], a[1] - sp[1], a[2] - sp[2]), 0.5);
     con.active = true;
     return true;
   }
@@ -285,7 +322,7 @@ export class KlafSim {
     const stake = LEG_STAKES.find(s => s.leg === sj.leg);
     if ((this.build.stakes[stake.id] || 0) < 1) return;
     const pid = this.findParticle(sj.leg, sj.v - slotById(sj.leg).centre[1]); if (pid == null) return;
-    const sp = this.world.addParticle([stake.u, sj.v + r, 0], 0);
+    const sp = this.world.addParticle([stake.u, sj.v + r, this.z0], 0);
     this.stakeCons[sj.id] = this.world.add('rigid', pid, sp, { rest: 0.09, compliance: 2e-4, tag: sj.id });
   }
 
@@ -299,6 +336,11 @@ export class KlafSim {
   brokenGrip() { return Object.values(this.guys).find(c => c.broke); }
 
   step(dt, extra = {}) {
+    this.forces(extra);
+    this.world.step(Math.min(dt, 1 / 30), TUNING.substeps);
+  }
+  // the people's forces on this klaf this frame (wobble, lifters, push test)
+  forces(extra = {}) {
     const W = this.world;
     const ang = this.angle();
     // uneven pull and wind: a gentle side-to-side wobble once the klaf is up
@@ -314,7 +356,7 @@ export class KlafSim {
       for (const leg of ['legL', 'legR']) {
         const p = this.poleParticles[leg]; if (!p) continue;
         const id = p[p.length - 1].id, q = W.p[id];
-        const goal = klafToWorld(q.x[0], LEVEL.height, Math.min(this.target, 50));
+        const goal = this.kw(q.x[0], LEVEL.height, Math.min(this.target, 50));
         const f = [0, 1, 2].map(k => 900 * (goal[k] - q.x[k]) - 120 * q.v[k]);
         const fl = Math.hypot(...f), cap = 420;
         if (fl > cap) for (let k = 0; k < 3; k++) f[k] *= cap / fl;
@@ -325,7 +367,6 @@ export class KlafSim {
       const t = this.topParticle();
       if (t != null) W.applyForce(t, extra.push);
     }
-    W.step(Math.min(dt, 1 / 30), TUNING.substeps);
   }
 }
 

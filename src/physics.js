@@ -13,6 +13,7 @@ export class World {
     this.groundY = 0;
     this.time = 0;
     this.damping = 0.6;   // 1/s, mild air and rope friction
+    this.iterations = 1;  // constraint passes per substep (more for big structures with long load paths)
   }
 
   addParticle(pos, mass, radius = 0.04) {
@@ -65,7 +66,8 @@ export class World {
         if (q.w === 0) continue;
         q.x[0] += q.v[0] * h; q.x[1] += q.v[1] * h; q.x[2] += q.v[2] * h;
       }
-      for (const con of this.c) if (con.active) this.solve(con, h);
+      for (const con of this.c) con.acc = 0; // capped constraints give way per substep, however many passes
+      for (let it = 0; it < this.iterations; it++) for (const con of this.c) if (con.active) this.solve(con, h);
       if (this.onSubstep) this.onSubstep(h);
       // ground contact with friction
       for (const q of P) {
@@ -128,9 +130,11 @@ export class World {
     }
     let dl = -C / (wSum + alpha);
     let force = Math.abs(dl) / (h * h);
-    if (con.kind === 'buckle' && C < 0 && force > con.cap) {
-      dl = con.cap * h * h * Math.sign(dl);
-      force = con.cap;
+    if (con.kind === 'buckle' && C < 0) {
+      // in compression the pole carries at most `cap` newtons, then bows
+      const left = Math.max(0, con.cap * h * h - con.acc);
+      if (Math.abs(dl) > left) { dl = left * Math.sign(dl); force = con.cap; }
+      con.acc += Math.abs(dl);
     }
     // smoothed force reading
     con.force = con.force * 0.9 + force * 0.1;
