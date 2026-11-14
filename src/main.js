@@ -381,7 +381,13 @@ function stagePose(mode) {
   return at(new THREE.Vector3(0, 0.7, z + 0.4), 17, 0.85, 0.55);
 }
 function setCameraMode(mode) {
-  if (mode === camMode && camTween == null) return;
+  // a stage change during a lashing close-up: finish the tie at once and leave the close-up
+  const wasClose = !!closeup;
+  if (closeup) {
+    if (closeup.phase === 'in' && camTween?.onDone) { const done = camTween.onDone; camTween = null; done(); }
+    closeup = null;
+  }
+  if (mode === camMode && camTween == null && !wasClose) return;
   const p = stagePose(mode);
   camMode = mode;
   camTween = { t: 0, fromPos: camera.position.clone(), fromTarget: controls.target.clone(), toPos: p.pos, toTarget: p.target, dur: 0.45 };
@@ -418,13 +424,14 @@ function lashCloseup(pos, onTied, hold = 420, withTier = true) {
   // a short, pulled-back look from above: the coils and the scout both in view
   const near = P.clone().addScaledVector(dir, withTier ? 3.0 : 1.8).add(new THREE.Vector3(0, withTier ? 4.0 : 2.4, 0));
   const look = withTier ? P.clone().add(new THREE.Vector3(0, 0.5, 0)).addScaledVector(dir, -0.15) : P;
-  closeup = { phase: 'in', tier: withTier ? pos : null };
+  const mine = closeup = { phase: 'in', tier: withTier ? pos : null };
   camTween = {
     t: 0, dur: 0.22, fromPos: back.pos.clone(), fromTarget: back.target.clone(), toPos: near, toTarget: look,
     onDone: () => {
       closeup.phase = 'tie';
       onTied();
       setTimeout(() => {
+        if (closeup !== mine) return; // the stage changed meanwhile: its camera move wins
         camTween = { t: 0, dur: 0.22, fromPos: camera.position.clone(), fromTarget: controls.target.clone(), toPos: back.pos, toTarget: back.target,
           onDone: () => { closeup = null; controls.enabled = true; controls.update(); } };
       }, hold);
@@ -572,6 +579,13 @@ canvas.addEventListener('pointerup', e => {
 });
 function onTap(x, y) {
   if (G.falling || closeup) return;
+  // a length picked from the pile goes on the line that was tapped
+  if (G.armed && (G.stage === 'build' || G.stage === 'cube')) {
+    let slot = null;
+    if (G.stage === 'cube') slot = nearestCubeSlot(x, y);
+    else { const p = groundAt(x, y); if (p) slot = nearestSlot(p.x, p.z - z0()); }
+    if (slot) { G.lastLength = G.armed; placePole(slot); refreshAll(); return; }
+  }
   const t = pickTarget(x, y);
   if (t) return onTarget(t, x, y);
   if (G.stage === 'build' || G.stage === 'cube') {
@@ -716,11 +730,12 @@ trayPole.addEventListener('pointerdown', e => {
   if (poleLeft(len) <= 0) { flashHint(`<b>אין עוד סנדות של ${len.toFixed(1)} מ׳ בערימה.</b> אפשר להחזיר סנדה מהשרטוט`); return; }
   G.lastLength = len; renderPile();
   trayPole.setPointerCapture(e.pointerId);
-  drag = { slot: null };
+  drag = { slot: null, len, x: e.clientX, y: e.clientY };
   closePicker();
 });
 trayPole.addEventListener('pointermove', e => {
   if (!drag) return;
+  if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 8) return; // a tap, not a drag
   const p = groundAt(e.clientX, e.clientY);
   if (!p) return;
   drag.moved = true;
@@ -749,19 +764,24 @@ trayPole.addEventListener('pointermove', e => {
     slotGlow.visible = false;
   }
 });
+// put a pole of the chosen length from the pile on a line of the drawing
+function placePole(slot) {
+  if (poleLeft(G.lastLength) <= 0) { flashHint(`<b>אין עוד סנדות של ${G.lastLength.toFixed(1)} מ׳ בערימה.</b> אפשר להחזיר סנדה מהשרטוט`); return false; }
+  if (G.stage === 'cube') { G.cube.build.poles[slot.id] = { length: G.lastLength }; rebuildCube(); }
+  else G.build.poles[slot.id] = { length: G.lastLength };
+  startCarry(slot.id);
+  selectPole(slot.id);
+  G.armed = null; renderPile();
+  return true;
+}
 function endDrag() {
   if (!drag) return;
   ghost.visible = false; slotGlow.visible = false;
-  if (drag.slot && poleLeft(G.lastLength) <= 0) drag.slot = null;
-  if (drag.slot && G.stage === 'cube') {
-    G.cube.build.poles[drag.slot.id] = { length: G.lastLength };
-    rebuildCube();
-    startCarry(drag.slot.id);
-    selectPole(drag.slot.id);
-  } else if (drag.slot) {
-    G.build.poles[drag.slot.id] = { length: G.lastLength };
-    startCarry(drag.slot.id);
-    selectPole(drag.slot.id);
+  if (drag.slot) placePole(drag.slot);
+  else if (!drag.moved) {
+    // a tap on the pile: hold that length, then tap a line on the drawing
+    G.armed = drag.len; renderPile();
+    flashHint(`נבחרה סנדה של <b>${drag.len.toFixed(1)} מ׳</b>. הקישו על קו בשרטוט כדי להניח אותה, או גררו אותה לשם`);
   } else if (drag.slot === null && drag.moved) {
     flashHint(G.stage === 'cube' ? 'שחררו את הסנדה על אחד הקווים בשרטוטי הצדדים' : 'שחררו את הסנדה על אחד הקווים הכחולים בשרטוט');
   }
@@ -894,12 +914,14 @@ const ropeLeft = () => ropeTotal() - ropeUsed();
 let pileKey = '';
 function renderPile() {
   const rows = pileStock().map(([l, n]) => [l, n - (polesInUse().get(l) || 0)]);
-  const key = JSON.stringify(rows) + G.lastLength;
+  const key = JSON.stringify(rows);
   if (key !== pileKey) {
+    // rebuilt only when the counts change, never under a finger that is starting a drag
     pileKey = key;
-    $('tray-pole').innerHTML = rows.map(([l, left]) => `<button type="button" class="pile-item${left ? '' : ' empty'}${l === G.lastLength && left ? ' on' : ''}" data-len="${l}">
+    $('tray-pole').innerHTML = rows.map(([l, left]) => `<button type="button" class="pile-item${left ? '' : ' empty'}" data-len="${l}">
       <span class="pile-stick" style="width:${Math.round(l * 22)}px"></span><b>${l.toFixed(1)}</b><small>×${left}</small></button>`).join('');
   }
+  for (const el of $('tray-pole').children) el.classList.toggle('on', +el.dataset.len === (G.armed ?? G.lastLength) && poleLeft(+el.dataset.len) > 0);
   $('rope-count').innerHTML = `חבלים לכפיתות: <b>${ropeLeft()}</b>`;
 }
 
@@ -2099,4 +2121,4 @@ restart();
 requestAnimationFrame(frame);
 
 // debug hook for automated tests
-window.__game = { get state() { return G; }, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, toScreen, targets: () => targets };
+window.__game = { get state() { return G; }, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, toScreen, targets: () => targets };

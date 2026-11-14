@@ -260,7 +260,7 @@ button { font-family: inherit; }
 }
 
 /* the pole pile: real poles of fixed lengths, each choice uses one up */
-.pile { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; touch-action: none; }
+.pile { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; touch-action: pan-y; }
 .pile-item {
   appearance: none; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; align-items: center; gap: 2px 6px;
   padding: 6px 8px; border-radius: 10px; border: 1px solid rgba(243,234,214,.18); background: rgba(0,0,0,.18); color: var(--canvas);
@@ -293,7 +293,10 @@ button { font-family: inherit; }
 @media (max-height: 420px) {
   #crew-panel { width: 132px; }
   .crew-row { padding: 5px 8px; }
-  .pile-item { padding: 4px 6px; }
+  .pile-item { padding: 3px 7px; grid-template-rows: auto; }
+  .pile-stick { display: none; }
+  #tray .tray-title, #tray .tray-count { display: none; }
+  #tray { gap: 6px; }
 }
 
 /* the inspection results */

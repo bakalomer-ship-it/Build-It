@@ -59,11 +59,14 @@ export class CubeSim {
         return { id, s };
       });
       this.poleParticles[slot.id] = parts;
+      // until a side pole is lashed at two points, scouts hold it in its place
+      for (const q of parts) { const P = W.p[q.id]; P.heldW = P.w; P.w = 0; }
       // side poles are straight and stiff; the cube's bracing comes from the spatial Xs
       rigidAll(W, parts);
     }
     this.braces = {};
     for (const j of cube.joints) if (build.joints[j.id]) this.addJoint(j);
+    this.releaseHeld();
     // joined into a cube, the klafim are held square by the side poles, not by keeping themselves flat
     if (cube.unflatten !== false) for (const k of this.klafim) k.flat = false;
   }
@@ -93,6 +96,7 @@ export class CubeSim {
     // diagonal running from leg to leg, added below once both its ends are lashed
     this.jointCons[j.id] = W.add('weld', pa, pb, { tag: j.id, compliance: diag ? 2e-3 : 0 });
     if (diag && !j.b) this.addBrace(j.a);
+    this.releaseHeld();
     if (j.correct === 'square' && !j.b) {
       // a square lashing resists a little rotation, like a real one
       const parts = this.poleParticles[j.a];
@@ -125,7 +129,15 @@ export class CubeSim {
     const con = this.klafim[k].guys[gid]; if (!con) return;
     con.active = false; con.removed = true;
   }
-  letGo() { for (const k of this.klafim) k.letGo(); this.lettingGo = true; }
+  letGo() { for (const k of this.klafim) k.letGo(); this.lettingGo = true; this.releaseHeld(true); }
+  // a side pole lashed at two points (or everything, when the scouts let go) is on its own
+  releaseHeld(all = false) {
+    for (const sid in this.poleParticles) {
+      const n = this.cube.joints.filter(j => (j.a === sid || j.b === sid) && this.jointCons[j.id]).length;
+      if (!all && n < 2) continue;
+      for (const q of this.poleParticles[sid]) { const P = this.world.p[q.id]; if (P.heldW != null) { P.w = P.heldW; P.heldW = null; P.prev = [...P.x]; } }
+    }
+  }
 
   // the cube leaning forward or back as a whole (the side faces racking)
   sway() {
