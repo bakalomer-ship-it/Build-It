@@ -8,7 +8,7 @@ import {
   R, makeRenderer, makeWorld, makeBlueprintMesh, drawBlueprint, BP, makePoleMesh, placeCylinder,
   makeLashing, placeLashing, placeParallelLashing, RopeViz, makeStake, makeDriver,
 } from './scene.js';
-import { sfx } from './sound.js';
+import { sfx, buzz } from './sound.js';
 import { Actor, makeCrew, freeActors, CREW } from './crew.js';
 
 const $ = id => document.getElementById(id);
@@ -223,7 +223,7 @@ function startSim() {
   G.uprightFor = 0;
 }
 function lowerKlaf() {
-  clearJobs();
+  clearJobs(); rec.length = 0;
   G.sim = null; G.raisedOnce = false; G.check = null; G.result = null;
   G.build.stakeJoints = {}; G.build.guyTies = {};
   pushArrow.visible = false;
@@ -406,7 +406,7 @@ canvas.addEventListener('pointerdown', e => { sfx.unlock(); down = { x: e.client
 canvas.addEventListener('pointerup', e => {
   if (!down) return;
   const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
-  if (moved < 10 && performance.now() - down.t < 600) onTap(e.clientX, e.clientY);
+  if (moved < 10 && performance.now() - down.t < 600) { if (G.replay) endReplay(); else onTap(e.clientX, e.clientY); }
   down = null;
 });
 function onTap(x, y) {
@@ -606,6 +606,8 @@ function changeLength(steps) {
   // a lashing falls off if the pole no longer reaches the joint
   for (const j of JOINTS) if (G.build.joints[j.id] && !jointReachable(j, G.build.poles)) delete G.build.joints[j.id];
   sfx.tick();
+  // the pole clicks to each 10 cm step; a stronger buzz when it matches the drawing
+  buzz(Math.abs(nl - slotById(sid).length) < 0.05 ? 35 : 8);
   updateLengthPanel(); refreshAll();
 }
 {
@@ -632,7 +634,7 @@ function changeLength(steps) {
 
 // ---------------- rope pull ----------------
 {
-  const pad = $('rp-pad'); let on = false, lastY = 0, ropeOff = 0;
+  const pad = $('rp-pad'); let on = false, lastY = 0, ropeOff = 0, lastCreak = 0;
   pad.addEventListener('pointerdown', e => { sfx.unlock(); startClock(); on = true; lastY = e.clientY; pad.setPointerCapture(e.pointerId); });
   pad.addEventListener('pointermove', e => {
     if (!on || !G.sim || G.falling) return;
@@ -642,6 +644,8 @@ function changeLength(steps) {
     ropeOff += dy;
     $('rp-rope').style.backgroundPosition = `0 ${ropeOff}px`;
     G.sim.pullTo(G.sim.target + dy * 0.16);
+    const now = performance.now();
+    if (now - lastCreak > 180 + Math.random() * 120) { lastCreak = now; sfx.creak(Math.min(1, dy / 12)); }
   });
   pad.addEventListener('pointerup', () => { on = false; });
   pad.addEventListener('pointercancel', () => { on = false; });
@@ -697,7 +701,7 @@ function updateDrive(job, dt) {
       job.t = 0; job.queued--;
       const store = job.kind === 'leg' ? G.build.stakes : G.build.anchors;
       store[job.id] = (store[job.id] || 0) + 1;
-      sfx.hammer();
+      sfx.hammer(); buzz(15);
       if (job.kind === 'leg' && store[job.id] >= LEG_STAKE_HITS && G.sim && G.sim.angle() < 8) startSim(); // feet now rest against the stakes
       refreshAll();
     }
@@ -777,6 +781,7 @@ let flashUntil = 0;
 function flashHint(html) { $('hint-text').innerHTML = html; flashUntil = performance.now() + 2600; }
 function hintText() {
   const b = G.build, sim = G.sim;
+  if (G.replay) return '<b>הילוך חוזר איטי</b> · מה שגרם לקריסה מסומן באדום · הקישו כדי לדלג';
   if (G.falling) return '<b>הקלף קורס…</b>';
   const nPoles = SLOTS.filter(s => b.poles[s.id]).length;
   const nJ = JOINTS.filter(j => b.joints[j.id]).length;
@@ -868,7 +873,7 @@ function watchSim(dt) {
   if (kind) {
     G.falling = { kind, t: 0, explain: explain(kind) };
     sim.flat = false;
-    sfx.crash();
+    sfx.crash(); buzz([60, 40, 90]);
     closePicker(); refreshAll();
   }
 }
@@ -878,6 +883,11 @@ function xComplete() {
   return { A: has('diagA', 'J5', 'J6'), B: has('diagB', 'J7', 'J8') };
 }
 function explain(kind) {
+  const e = explainRule(kind);
+  e.focus = e.focus || {};
+  return e;
+}
+function explainRule(kind) {
   const sim = G.sim, b = G.build;
   const x = xComplete();
   const top = sim.topCentre();
@@ -893,11 +903,18 @@ function explain(kind) {
       const miss = slotById(x.A ? 'diagB' : 'diagA').he.match(/\((.*)\)/)[1];
       detail = `חסר האלכסון שהולך מ${miss}, או שאחד הקצוות שלו לא כפות לרגל, והקלף נפל ${dir}. אלכסון לבד מחזיק רק בכיוון אחד: כשמושכים אותו הוא נמתח ומחזיק, כשדוחפים אותו הוא מתכופף.`;
     }
-    return { rule: 'כל קלף צריך איקס מלא, כפי שהוא מופיע בשרטוט', detail };
+    // what the slow-motion replay points at: the half-tied diagonal, or a red ghost where a diagonal is missing
+    const focus = { poles: [], ghosts: [], joints: [] };
+    for (const [d, ok, js] of [['diagA', x.A, ['J5', 'J6']], ['diagB', x.B, ['J7', 'J8']]]) {
+      if (ok) continue;
+      if (!b.poles[d]) focus.ghosts.push(js);
+      else { focus.poles.push(d); focus.joints.push(...js.filter(id => !b.joints[id])); }
+    }
+    return { rule: 'כל קלף צריך איקס מלא, כפי שהוא מופיע בשרטוט', detail, focus };
   };
   if (kind === 'slid' || (!stakesIn && sim.baseSlid() > 0.2))
-    return { rule: 'בז״נטים נדפקים ליד הרגליים לפני שמרימים את הקלף', detail: 'בלי בז״נטים, החבל גרר את רגלי הקלף על הקרקע והקלף לא נשאר במקומו.' };
-  const cornerRule = { rule: 'כל פינה של הקלף נכפתת', detail: `חסרות ${corners} כפיתות בפינות הקלף, המסגרת התעקמה, והמחזיקים לא הצליחו להחזיק אותה.` };
+    return { rule: 'בז״נטים נדפקים ליד הרגליים לפני שמרימים את הקלף', detail: 'בלי בז״נטים, החבל גרר את רגלי הקלף על הקרקע והקלף לא נשאר במקומו.', focus: { feet: true } };
+  const cornerRule = { rule: 'כל פינה של הקלף נכפתת', detail: `חסרות ${corners} כפיתות בפינות הקלף, המסגרת התעקמה, והמחזיקים לא הצליחו להחזיק אותה.`, focus: { joints: ['J1', 'J2', 'J3', 'J4'].filter(id => !b.joints[id]) } };
   if (grip && (!x.A || !x.B)) return xRule();
   if (grip && corners) return cornerRule;
   if (grip)
@@ -907,13 +924,13 @@ function explain(kind) {
   if (kind === 'rack') {
     if (!x.A || !x.B) return xRule();
     if (corners) return cornerRule;
-    return { rule: 'כל כפיתה בשרטוט נושאת עומס', detail: 'הקלף התעקם. בדקו בשרטוט שכל המפגשים כפותים.' };
+    return { rule: 'כל כפיתה בשרטוט נושאת עומס', detail: 'הקלף התעקם. בדקו בשרטוט שכל המפגשים כפותים.', focus: { joints: JOINTS.filter(j => !b.joints[j.id]).map(j => j.id) } };
   }
   if (G.check || sim.lettingGo) {
     const untied = GUYS.filter(g => !sim.guys[g.id]?.tied).length;
     if (untied) return { rule: 'לא עוזבים את הקלף לפני שכל 4 היתרים כפותים לבז״נטים', detail: `${untied} יתרים לא היו כפותים לבז״נט, וכשהמחזיקים עזבו הקלף נפל.` };
     if (!x.A || !x.B) return xRule();
-    if (!stakesIn) return { rule: 'רגלי הקלף עומדות ליד בז״נטים ונכפתות אליהם', detail: 'בלי בז״נטים רגלי הקלף החליקו בבדיקת הדחיפה.' };
+    if (!stakesIn) return { rule: 'רגלי הקלף עומדות ליד בז״נטים ונכפתות אליהם', detail: 'בלי בז״נטים רגלי הקלף החליקו בבדיקת הדחיפה.', focus: { feet: true } };
     return { rule: 'הקלף לא עמד בבדיקת הדחיפה', detail: 'בדקו את הכפיתות ואת היתרים ונסו שוב.' };
   }
   if (!x.A || !x.B) return xRule();
@@ -1039,6 +1056,76 @@ function collapseCard() {
     closeModal(); G.falling = null; G.check = null; lowerKlaf(); setPolesOpacity(1); goStage('build');
   }, true]]);
 }
+// ---------------- slow-motion replay of a collapse ----------------
+// The last moments of the simulation are recorded every frame. After a
+// collapse they play back at 40% speed with the cause marked in red
+// (the half-tied pole, a ghost of a missing pole, the missing lashings or
+// the unstaked feet), and then the rule card appears.
+const rec = [];          // { t, p: Float32Array }
+let recT = 0;
+const REPLAY = { before: 1.0, speed: 0.4 };
+function fadedOut() { return G.falling && G.falling.t >= 2.2 && !G.replay; }
+function record(dt) {
+  const ps = G.sim.world.p;
+  recT += dt;
+  const a = new Float32Array(ps.length * 3);
+  ps.forEach((q, i) => { a[i * 3] = q.x[0]; a[i * 3 + 1] = q.x[1]; a[i * 3 + 2] = q.x[2]; });
+  rec.push({ t: recT, p: a });
+  // keep a short window before the collapse; once falling, keep everything
+  if (!G.falling) while (rec.length && recT - rec[0].t > REPLAY.before + 0.2) rec.shift();
+  else if (G.falling.t0 == null) G.falling.t0 = recT;
+  if (rec.length > 600) rec.shift();
+}
+const markMat = new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.9, depthTest: false });
+const marks = [];
+function mark(i) {
+  if (!marks[i]) { marks[i] = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.025, 8, 28), markMat); marks[i].renderOrder = 10; scene.add(marks[i]); }
+  return marks[i];
+}
+const ghostMat = new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.5, depthWrite: false });
+const ghostPoles = [0, 1].map(() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1, 10), ghostMat); m.visible = false; scene.add(m); return m; });
+function startReplay() {
+  if (rec.length < 2 || !G.falling.t0) { collapseCard(); return; }
+  const t0 = Math.max(rec[0].t, G.falling.t0 - REPLAY.before);
+  G.replay = { t: t0, end: rec[rec.length - 1].t, focus: G.falling.explain.focus || {} };
+  setPolesOpacity(1);
+}
+function stepReplay(dt) {
+  const r = G.replay;
+  r.t += dt * REPLAY.speed;
+  if (r.t >= r.end) { endReplay(); return; }
+  let i = rec.findIndex(f => f.t >= r.t); if (i < 1) i = 1;
+  const A = rec[i - 1], B = rec[i], k = Math.min(1, Math.max(0, (r.t - A.t) / (B.t - A.t || 1)));
+  G.sim.world.p.forEach((q, n) => { for (let c = 0; c < 3; c++) q.x[c] = A.p[n * 3 + c] + (B.p[n * 3 + c] - A.p[n * 3 + c]) * k; });
+  drawFocus();
+}
+function drawFocus() {
+  const f = G.replay.focus, b = G.build;
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 160);
+  for (const sid of f.poles || []) poleMeshes[sid].forEach(m => m.material[0].emissive.setRGB(0.55 + 0.4 * pulse, 0.05, 0));
+  (f.ghosts || []).forEach((js, i) => {
+    const [pa, pb] = js.map(id => jointPos(JOINTS.find(j => j.id === id)));
+    if (pa && pb) placeCylinder(ghostPoles[i], pa, pb);
+  });
+  const spots = (f.joints || []).map(id => jointPos(JOINTS.find(j => j.id === id)));
+  if (f.feet) for (const leg of ['legL', 'legR']) { const P = G.sim.poleParticles[leg]; if (P) spots.push(G.sim.pos(P[0].id)); }
+  let n = 0;
+  for (const p of spots) {
+    if (!p) continue;
+    const m = mark(n++); m.visible = true; m.position.set(...p);
+    m.lookAt(camera.position); m.scale.setScalar(0.85 + 0.35 * pulse);
+  }
+  for (; n < marks.length; n++) marks[n].visible = false;
+}
+function endReplay() {
+  if (!G.replay) return;
+  G.replay = null;
+  marks.forEach(m => { m.visible = false; });
+  ghostPoles.forEach(m => { m.visible = false; });
+  for (const k in poleMeshes) poleMeshes[k].forEach(m => m.material[0].emissive.setHex(0));
+  setPolesOpacity(0);
+  collapseCard();
+}
 function setPolesOpacity(o) {
   for (const k in poleMeshes) for (const m of poleMeshes[k]) for (const mat of m.material) { mat.transparent = o < 1; mat.opacity = o; }
   for (const k in lashMeshes) lashMeshes[k].visible = lashMeshes[k].visible && o > 0.05;
@@ -1114,7 +1201,7 @@ function drawLashings() {
     const on = b.joints[j.id] && jointReachable(j, b.poles) && (!G.sim || G.sim.jointCons[j.id]);
     if (!on) { g.visible = false; continue; }
     const p = jointPos(j); if (!p) { g.visible = false; continue; }
-    g.visible = !G.falling || G.falling.t < 2.2;
+    g.visible = !fadedOut();
     placeLashing(g, p, poleDir(j.a), poleDir(j.b));
     coilProgress(g, j.id);
   }
@@ -1123,7 +1210,7 @@ function drawLashings() {
     if (!b.stakeJoints[sj.id] || !G.sim || !G.sim.stakeCons[sj.id]) { g.visible = false; continue; }
     const p = legPoint(sj.leg, sj.v); if (!p) { g.visible = false; continue; }
     const st = LEG_STAKES.find(s => s.leg === sj.leg);
-    g.visible = !G.falling || G.falling.t < 2.2;
+    g.visible = !fadedOut();
     placeParallelLashing(g, p, [st.u, p[1], stakeZ], [0, 1, 0]);
     coilProgress(g, sj.id);
   }
@@ -1238,12 +1325,15 @@ function frame(now) {
   if (sim) {
     push = checkPush(dt);
     const wobble = !sim.lettingGo && (G.stage === 'raise' || G.stage === 'anchor');
-    sim.step(dt, { wobble, push });
-    watchSim(dt);
-    if (G.falling) {
+    if (G.replay) stepReplay(dt);
+    else {
+      sim.step(dt, { wobble, push });
+      record(dt);
+      watchSim(dt);
+    }
+    if (G.falling && !G.replay) {
       G.falling.t += dt;
-      if (G.falling.t > 2.2 && G.falling.t - dt <= 2.2) setPolesOpacity(0.35);
-      if (G.falling.t > 2.6 && !G.falling.shown) { G.falling.shown = true; setPolesOpacity(0); collapseCard(); }
+      if (G.falling.t > 2.2 && !G.falling.shown) { G.falling.shown = true; startReplay(); }
     }
   }
   if (G.tying) { G.tying.t += dt; if (G.tying.t > 1) G.tying = null; }
@@ -1265,4 +1355,4 @@ goStage('build');
 requestAnimationFrame(frame);
 
 // debug hook for automated tests
-window.__game = { get state() { return G; }, goStage, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, toScreen, targets: () => targets };
+window.__game = { get state() { return G; }, rec, goStage, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, toScreen, targets: () => targets };
