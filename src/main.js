@@ -362,7 +362,7 @@ function setCameraMode(mode) {
   if (mode === camMode && camTween == null) return;
   const p = stagePose(mode);
   camMode = mode;
-  camTween = { t: 0, fromPos: camera.position.clone(), fromTarget: controls.target.clone(), toPos: p.pos, toTarget: p.target, dur: 0.7 };
+  camTween = { t: 0, fromPos: camera.position.clone(), fromTarget: controls.target.clone(), toPos: p.pos, toTarget: p.target, dur: 0.45 };
   controls.enabled = false;
 }
 const ease = t => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
@@ -386,7 +386,7 @@ function updateCamera(dt) {
   controls.update();
 }
 // short close-up of a lashing being tied, then back to where the player was
-function lashCloseup(pos, onTied, hold = 700, withTier = true) {
+function lashCloseup(pos, onTied, hold = 420, withTier = true) {
   const P = new THREE.Vector3(...pos);
   const back = { pos: camera.position.clone(), target: controls.target.clone() };
   // come in low and from the side, so both the coils and the scout tying them are in view
@@ -398,12 +398,12 @@ function lashCloseup(pos, onTied, hold = 700, withTier = true) {
   const look = withTier ? P.clone().add(new THREE.Vector3(0, 0.5, 0)).addScaledVector(dir, -0.15) : P;
   closeup = { phase: 'in', tier: withTier ? pos : null };
   camTween = {
-    t: 0, dur: 0.35, fromPos: back.pos.clone(), fromTarget: back.target.clone(), toPos: near, toTarget: look,
+    t: 0, dur: 0.22, fromPos: back.pos.clone(), fromTarget: back.target.clone(), toPos: near, toTarget: look,
     onDone: () => {
       closeup.phase = 'tie';
       onTied();
       setTimeout(() => {
-        camTween = { t: 0, dur: 0.35, fromPos: camera.position.clone(), fromTarget: controls.target.clone(), toPos: back.pos, toTarget: back.target,
+        camTween = { t: 0, dur: 0.22, fromPos: camera.position.clone(), fromTarget: controls.target.clone(), toPos: back.pos, toTarget: back.target,
           onDone: () => { closeup = null; controls.enabled = true; controls.update(); } };
       }, hold);
     },
@@ -891,7 +891,7 @@ function updateDrive(job, dt) {
   const there = a1.arrived() && a2.arrived();
   if (there && job.queued > 0) {
     job.t += dt;
-    const u = Math.min(1, job.t / 0.5);
+    const u = Math.min(1, job.t / 0.3);
     lift = u < 0.65 ? 0.3 * (u / 0.65) : 0.3 * (1 - (u - 0.65) / 0.35);
     if (u >= 1) {
       job.t = 0; job.queued--;
@@ -947,11 +947,11 @@ function updateCarry(job, dt) {
   const [e1, e2] = job.fin();
   const face = (st, e) => Math.atan2(e[0] - st[0], e[2] - st[2]);
   const laying = job.phase === 'lay';
-  const high = job.cube && laying ? Math.min(Math.PI * 0.85, 0.9 + job.t * 2) : null;
+  const high = job.cube && laying ? Math.min(Math.PI * 0.85, 0.9 + job.t * 3.5) : null;
   job.actors[0].set(s1, face(s1, e1), laying && !job.cube ? 0.55 : 0.1, high ?? (laying ? 0.95 : 0.5), { carry: 0.5 });
   job.actors[1].set(s2, face(s2, e2), laying && !job.cube ? 0.55 : 0.1, high ?? (laying ? 0.95 : 0.5), { carry: 0.5 });
   if (!laying && job.actors.every(a => a.arrived())) { job.phase = 'lay'; job.t = 0; }
-  if (laying) { job.t += dt; if (job.t > (job.cube ? 0.7 : 0.45)) { sfx.thud(); endJob(job); refreshAll(); } }
+  if (laying) { job.t += dt; if (job.t > (job.cube ? 0.4 : 0.25)) { sfx.thud(); endJob(job); refreshAll(); } }
 }
 // where a carried pole is drawn
 function carriedSegs(job) {
@@ -1109,7 +1109,7 @@ const PUSHES = [
   { from: 8.2, to: 9.4, f: [0, 0, -0.7], label: 'דוחפים <b>קדימה</b>' },
 ];
 function checkPush(dt) {
-  const c = G.check; if (!c?.running) return null;
+  const c = G.check; if (!c?.running || G.falling) return null;
   c.t += dt;
   let push = null;
   c.label = 'כולם עוזבים…';
@@ -1130,7 +1130,7 @@ function checkPush(dt) {
 function watchSim(dt) {
   const sim = G.sim; if (!sim || G.falling) return;
   const ang = sim.angle(), top = sim.topCentre();
-  if (ang > 82 && ang < 98) { G.uprightFor += dt; if (G.uprightFor > 1.0 && !G.raisedOnce) { G.raisedOnce = true; sfx.ok(); if (G.stage === 'raise') setTimeout(() => G.stage === 'raise' && !G.falling && goStage('anchor'), 900); refreshAll(); } }
+  if (ang > 82 && ang < 98) { G.uprightFor += dt; if (G.uprightFor > 0.6 && !G.raisedOnce) { G.raisedOnce = true; sfx.ok(); if (G.stage === 'raise') setTimeout(() => G.stage === 'raise' && !G.falling && goStage('anchor'), 500); refreshAll(); } }
   else G.uprightFor = 0;
   let kind = null;
   if (sim.baseSlid() > 0.35) kind = 'slid';
@@ -1287,6 +1287,7 @@ function finish() {
   G.endedAt = performance.now();
   pushArrow.visible = false;
   const s = G.result = score();
+  saveStars(LV.number, s.stars);
   sfx.ok();
   const stars = [1, 2, 3].map(i => `<span class="${i <= s.stars ? 'on' : ''}">★</span>`).join('');
   const nMissing = s.total - s.tied;
@@ -1312,7 +1313,8 @@ function finish() {
     s.stars < 3 ? ['להשלים ולתקן', reopenForFixes, true] : null,
     s.stars < 3 && G.hintsUsed < s.hintsAllowed && G.result ? [`רמז (${s.hintsAllowed - G.hintsUsed} נותרו, −${s.hintCost} נק׳)`, () => useHint(s)] : null,
     LEVELS[LV.number] ? [`לשלב ${LV.number + 1}: ${LEVELS[LV.number].name}`, () => switchLevel(LV.number + 1), s.stars === 3] : null,
-    ['לבנות מחדש', restart, s.stars === 3 && !LEVELS[LV.number]],
+    ['למגרש שלי', () => { closeModal(); showLevels(); }, s.stars === 3 && !LEVELS[LV.number]],
+    ['לבנות מחדש', restart],
   ].filter(Boolean));
   refreshAll();
 }
@@ -1369,11 +1371,64 @@ function switchLevel(n) {
   makeChips();
   restart();
 }
-$('btn-level').addEventListener('click', () => {
-  showModal(`<div class="eyebrow">בחירת שלב</div><h2>שלבים</h2>
-    <p>בגרסת הבדיקה כל השלבים פתוחים. במשחק עצמו כוכב אחד בשלב פותח את השלב הבא.</p>`,
-    [...LEVELS.map(l => [`שלב ${l.number}: ${l.name}`, () => { closeModal(); switchLevel(l.number); }, l === LV]), ['ביטול', closeModal]]);
-});
+// ---------------- home screen and the plaza's levels ----------------
+// Best stars per level are kept on this device only. One star opens the next level.
+const PROGRESS_KEY = 'buildit.stars';
+function loadStars() { try { return JSON.parse(localStorage.getItem(PROGRESS_KEY)) || {}; } catch { return {}; } }
+function saveStars(n, stars) {
+  const all = loadStars();
+  if ((all[n] || 0) >= stars) return;
+  all[n] = stars;
+  try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(all)); } catch { /* private mode: progress lasts this visit */ }
+  memStars = all;
+}
+let memStars = loadStars();
+const starsOf = n => Math.max(memStars[n] || 0, loadStars()[n] || 0);
+const unlocked = n => n === 1 || starsOf(n - 1) >= 1;
+// structures that come after the playable ones, shown on the path as coming soon
+const COMING = [{ name: 'בסיס מתקן 2×4', sub: 'שתי קוביות בשורה' }];
+const ICONS = {
+  1: '<svg viewBox="0 0 64 46"><g stroke="#6b4423" stroke-width="4" stroke-linecap="round"><path d="M14 44V4M50 44V4M8 36h48M8 8h48M14 36L50 8M14 8l36 28"/></g></svg>',
+  2: '<svg viewBox="0 0 64 46"><g stroke="#6b4423" stroke-width="3.5" stroke-linecap="round" fill="none"><path d="M8 44V12M38 44V12M8 38h30M8 14h30M8 38L38 14M8 14l30 24"/><path d="M38 12l18-8M38 44l18-8M56 36V4M8 12l18-8h30" opacity=".6"/></g></svg>',
+  soon: '<svg viewBox="0 0 64 46"><g stroke="#3a3a30" stroke-width="3.5" stroke-linecap="round" fill="none" opacity=".7"><path d="M4 44V14M30 44V14M56 44V14M4 16h52M4 38h52"/></g></svg>',
+};
+const starRow = n => [1, 2, 3].map(i => `<span class="${i <= n ? 'on' : ''}">★</span>`).join('');
+function showHome() {
+  const total = LEVELS.reduce((a, l) => a + starsOf(l.number), 0);
+  $('home-stars').textContent = total ? `★ ${total} / ${LEVELS.length * 3}` : 'מתחילים מהקלף הראשון';
+  $('levels').hidden = true; $('home').hidden = false;
+}
+function showLevels() {
+  const total = LEVELS.reduce((a, l) => a + starsOf(l.number), 0);
+  $('levels-total').textContent = `★ ${total} / ${LEVELS.length * 3}`;
+  const path = $('levels-path'); path.innerHTML = '';
+  for (const l of LEVELS) {
+    const open = unlocked(l.number);
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'lvl-card' + (open ? '' : ' locked');
+    b.innerHTML = `<span class="num">${l.number}</span>${ICONS[l.number] || ICONS.soon}<span class="nm">${l.name}</span>
+      ${open ? `<span class="st">${starRow(starsOf(l.number))}</span>` : `<span class="lock">נפתח בכוכב אחד בשלב ${l.number - 1}</span>`}`;
+    if (open) b.addEventListener('click', () => playLevel(l.number));
+    path.appendChild(b);
+  }
+  for (const [i, c] of COMING.entries()) {
+    const d = document.createElement('div');
+    d.className = 'lvl-card locked';
+    d.innerHTML = `<span class="num">${LEVELS.length + i + 1}</span>${ICONS.soon}<span class="nm">${c.name}</span><span class="sub">${c.sub}</span><span class="lock">בקרוב</span>`;
+    path.appendChild(d);
+  }
+  $('home').hidden = true; $('levels').hidden = false;
+}
+function playLevel(n) {
+  $('home').hidden = true; $('levels').hidden = true;
+  switchLevel(n);
+}
+$('home-plaza').addEventListener('click', showLevels);
+$('levels-back').addEventListener('click', showHome);
+$('btn-home').addEventListener('click', () => { closeModal(); showLevels(); });
+$('btn-level').addEventListener('click', () => { closeModal(); showLevels(); });
+// a direct link to a level (?level=2) skips the home screen
+if (new URLSearchParams(location.search).get('level')) $('home').hidden = true; else showHome();
 
 // ---------------- modal cards ----------------
 function showModal(html, actions) {
@@ -1606,7 +1661,7 @@ function drawCube(dt) {
   for (const side of [-1, 1]) {
     const m = CM.sheets[side];
     const show = on && G.stage === 'cube' && !done[side];
-    m.material.opacity = Math.max(0, Math.min(0.92, m.material.opacity + (show ? 1 : -1) * dt / 0.8));
+    m.material.opacity = Math.max(0, Math.min(0.92, m.material.opacity + (show ? 1 : -1) * dt / 0.5));
     m.visible = on && m.material.opacity > 0.01;
   }
 }
@@ -1644,7 +1699,7 @@ function drawLashings() {
 }
 // coils wind on one by one during the close-up
 function coilProgress(g, id) {
-  const n = G.tying && G.tying.id === id ? Math.ceil(Math.min(1, G.tying.t / 0.55) * g.children.length) : g.children.length;
+  const n = G.tying && G.tying.id === id ? Math.ceil(Math.min(1, G.tying.t / 0.32) * g.children.length) : g.children.length;
   g.children.forEach((c, i) => { c.visible = i < n; });
 }
 function drawStakes() {
@@ -1753,31 +1808,39 @@ function drawPushArrow(push) {
 
 // ---------------- main loop ----------------
 let last = performance.now(), hintTimer = 0;
+const CHECK_SPEED = 1.6; // how much faster than real time the push test plays
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   const cs = G.cube?.sim && cubeStage(G.stage) ? G.cube.sim : null;
   const sim = cs || G.sim;
   let push = null;
   if (sim) {
-    push = checkPush(dt);
+    // the stability check plays faster than real time; physics still steps in small pieces,
+    // and the check's clock moves only as far as the physics really stepped
+    const warp = G.check?.running && !G.falling ? CHECK_SPEED : 1;
     const wobble = !sim.lettingGo && (G.stage === 'raise' || G.stage === 'anchor');
     if (G.replay) stepReplay(dt);
     else {
-      if (cs) cs.step(dt, { push }); else sim.step(dt, { wobble, push });
-      record(dt);
-      if (cs) watchCube(dt); else watchSim(dt);
+      for (let w = 0; w < warp; w += 1) {
+        const h = Math.min(1 / 30, dt * Math.min(1, warp - w));
+        push = checkPush(h);
+        if (cs) cs.step(h, { push }); else sim.step(h, { wobble, push });
+        record(h);
+        if (cs) watchCube(h); else watchSim(h);
+        if (G.falling) break;
+      }
     }
     if (G.falling && !G.replay) {
       G.falling.t += dt;
-      if (G.falling.t > 2.2 && !G.falling.shown) { G.falling.shown = true; startReplay(); }
+      if (G.falling.t > 1.6 && !G.falling.shown) { G.falling.shown = true; startReplay(); }
     }
   }
-  if (G.tying) { G.tying.t += dt; if (G.tying.t > 1) G.tying = null; }
+  if (G.tying) { G.tying.t += dt; if (G.tying.t > 0.6) G.tying = null; }
   const cur = G.ki;
   eachKlaf((k, i) => {
     // the drawing lies on the ground while its klaf is being built, then fades
     const showPlan = i === cur && G.stage === 'build' && !stageDone('build');
-    const op = blueprint.material.opacity + (showPlan ? 1 : -1) * dt / 0.8;
+    const op = blueprint.material.opacity + (showPlan ? 1 : -1) * dt / 0.5;
     blueprint.material.opacity = Math.max(0, Math.min(1, op));
     blueprint.visible = blueprint.material.opacity > 0.01;
     drawPoles(); drawLashings(); drawStakes();

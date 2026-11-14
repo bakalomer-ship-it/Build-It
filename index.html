@@ -21,6 +21,7 @@
   <canvas id="scene"></canvas>
 
   <header id="topbar">
+    <button type="button" id="btn-home" class="tool icon home-btn" aria-label="למגרש שלי" title="למגרש שלי">⌂</button>
     <button type="button" id="btn-level" class="level-tag" title="בחירת שלב"><span class="lvl" id="level-no">שלב 1</span><span class="lvl-name" id="level-name">קלף 2×2</span></button>
     <nav id="stages" aria-label="שלבי בנייה"></nav>
     <div class="top-tools">
@@ -91,6 +92,39 @@
       <div class="folder-body" id="folder-body"></div>
     </div>
   </div>
+
+  <section id="home" class="screen" aria-label="מסך הבית">
+    <div class="home-title">
+      <div class="logo-knot" aria-hidden="true"></div>
+      <h1>בונים מחנאות</h1>
+      <p>כופתים סנדות, מרימים קלפים ובונים מבנים אמיתיים</p>
+    </div>
+    <div class="home-grid">
+      <button type="button" class="home-main" id="home-plaza">
+        <span class="hm-eyebrow">משחק</span>
+        <span class="hm-name">המגרש שלי</span>
+        <span class="hm-sub">בונים מבנה אחרי מבנה על הרחבה האישית</span>
+        <span class="hm-stars" id="home-stars"></span>
+      </button>
+      <div class="home-soon">
+        <div class="soon"><b>בנייה חופשית</b><span>בקרוב</span></div>
+        <div class="soon"><b>קישוט המגרש</b><span>בקרוב</span></div>
+        <div class="soon"><b>ביקור במגרשים של חברים</b><span>בקרוב</span></div>
+        <div class="soon"><b>תחרויות</b><span>בקרוב</span></div>
+        <div class="soon"><b>בנייה בצוות</b><span>בקרוב</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="levels" class="screen" aria-label="המגרש שלי" hidden>
+    <div class="levels-head">
+      <button type="button" class="tool" id="levels-back">חזרה</button>
+      <div><div class="hm-eyebrow">המגרש שלי</div><h2>בחרו מבנה לבנות</h2></div>
+      <span class="levels-total" id="levels-total"></span>
+    </div>
+    <div class="levels-path" id="levels-path"></div>
+    <p class="levels-note">כוכב אחד במבנה פותח את המבנה הבא.</p>
+  </section>
 
   <div id="rotate" class="rotate">
     <div class="rotate-phone"></div>

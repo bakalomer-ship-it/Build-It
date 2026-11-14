@@ -8,9 +8,9 @@
 import * as THREE from 'three';
 import { makePerson, posePerson, walkPose } from './scene.js';
 
-export const CREW = { waitAtSide: false, speed: 3.0 };
+export const CREW = { waitAtSide: false, speed: 5.5 };
 const SIDE_X = 2.9;   // the waiting row, beside the drawing (left on screen)
-const OFF_X = 9.0;    // where scouts walk off to (past the plaza edge)
+const OFF_X = 7.5;    // where scouts walk off to (past the plaza edge)
 
 export class Actor {
   constructor(scene, i) {
