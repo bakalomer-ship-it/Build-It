@@ -14,6 +14,13 @@ This repository holds the **web prototype of levels 1 and 2: the 2×2 klaf (קל
 
 **Level 2, the cube.** Tap the level name at the top to switch level, or open the page with `?level=2`. Build and raise a front klaf and a back klaf the same way (their inner guy lines are short, 75 cm, because the other klaf stands there). Then lash the side poles and the spatial Xs (איקסים מרחביים) between them, working from the drawings that lie on the ground beside each side. Once the cube is braced, take the inner guy lines down. The check pushes the cube from every side, then releases all the guy lines: a braced cube must stand by itself. A cube without full Xs on both sides sways over. There is no step guidance after level 1; the structure file (תיק מבנה) is always open to flip through.
 
+**Home screen and the plaza.** The game opens on a home screen. Only "המגרש שלי" works for now; the other modes are marked as coming soon. Each structure is a level on the plaza's path, with its best stars saved on the device; one star opens the next structure. Every structure you pass stays standing on the plaza.
+
+**The building puzzle.**
+- *A pile of real poles.* Each level comes with a fixed pile: the lengths its drawings need plus a few that fit nowhere exactly (`stockExtra` in `src/levels.js`). Poles are not cut, so a wrong choice uses up a pole another place needs. Rope is limited too: one per lashing plus `ropeSpare`.
+- *The raise crew.* Before pulling, send the level's scouts (`crew`) to the guy lines: pullers on the front ones, holders on the back ones. A line nobody holds lies slack, and the physics shows what follows.
+- *The inspection (מסדר).* A מדריך pushes the structure from every side and hangs a bucket of water on the top horizontal. Passing the inspection gives one star; every lashing tied gives two; every lashing type right gives three.
+
 Physics is real, not scripted. A klaf with a missing or half-tied X racks and falls during the raise or the push test. Raising without stakes lets the base slide. Pulling too fast or past upright tears the back guy line out of the holders' hands. Each collapse ends with a card that names the broken rule.
 
 Scoring follows the design document: accuracy is the core score (joints tied, correct lashing type, pole lengths) and time is only a bonus. A missing lashing still gives partial stars: one star passes the level, two stars need every lashing tied, and three stars also need every lashing type right. Hints show one missing or wrong lashing; there is one hint per 10 lashings, and each costs fewer points than a missed lashing.

@@ -32,7 +32,7 @@ function stageList() {
     L.push({ key: 'cube', id: 'cube', k: null, he: 'חיבור הקלפים לקובייה' });
     L.push({ key: 'unguy', id: 'unguy', k: null, he: 'הורדת היתרים הפנימיים' });
   }
-  L.push({ key: 'check', id: 'check', k: null, he: 'בדיקה' });
+  L.push({ key: 'check', id: 'check', k: null, he: 'מסדר' });
   return L;
 }
 let STAGES = stageList();
@@ -45,7 +45,7 @@ let G;
 function freshKlaf(cfg) {
   return {
     cfg,
-    build: { poles: {}, joints: {}, stakes: {}, guyTop: {}, anchors: {}, stakeJoints: {}, guyTies: {}, guyOff: {} },
+    build: { poles: {}, joints: {}, stakes: {}, guyTop: {}, anchors: {}, stakeJoints: {}, guyTies: {}, guyOff: {}, crew: {} },
     sim: null, raisedOnce: false, uprightFor: 0, carrying: {},
   };
 }
@@ -145,6 +145,27 @@ const crew = makeCrew(scene, 8);
 const allActors = [...Object.values(people), ...crew];
 window.CREW = CREW;
 
+// the מדריך who runs the inspection (מסדר): a scout leader in a wide-brimmed hat
+const inspector = new Actor(scene, 3);
+{
+  const mat = new THREE.MeshStandardMaterial({ color: 0x5b4a2c, roughness: 0.9 });
+  const hat = new THREE.Group();
+  const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.025, 18), mat);
+  const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 0.14, 14), mat); crown.position.y = 0.075;
+  hat.add(brim, crown); hat.position.y = 0.9;
+  inspector.mesh.userData.torso.add(hat);
+  allActors.push(inspector);
+}
+// the inspection's buckets of water, one per klaf
+const buckets = [0, 1].map(() => {
+  const g = new THREE.Group();
+  const pail = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.1, 0.24, 14), new THREE.MeshStandardMaterial({ color: 0x5f86b8, roughness: 0.5, metalness: 0.3 }));
+  pail.position.y = -0.5; pail.castShadow = true;
+  const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.38, 5), new THREE.MeshStandardMaterial({ color: 0xd8b878, roughness: 1 }));
+  rope.position.y = -0.19;
+  g.add(pail, rope); g.visible = false; scene.add(g);
+  return g;
+});
 const pushArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 0.8, 0xe2593f, 0.25, 0.16);
 pushArrow.visible = false; scene.add(pushArrow);
 
@@ -298,6 +319,7 @@ function goStage(key) {
   closePicker();
   $('tray').hidden = id !== 'build' && id !== 'cube';
   $('rope-panel').hidden = id !== 'raise';
+  $('crew-panel').hidden = id !== 'raise';
   if (id !== 'build' && id !== 'cube') $('length-panel').hidden = true;
   // close enough to tap the small parts in stages with fine work, far and high otherwise
   setCameraMode(id === 'build' ? 'buildView' : (id === 'stakes' || id === 'anchor' || id === 'unguy') ? 'workView' : id === 'cube' ? 'cubeView' : 'orbit');
@@ -466,7 +488,7 @@ function collectTargets() {
       const a = anchorPos(g);
       if ((b.anchors[g.id] || 0) < ANCHOR_HITS) {
         if (st !== 'raise') T.push({ kind: 'anchor', id: g.id, pos: [a[0], 0.12, a[2]], show: true });
-      } else if (sim.guys[g.id] && !sim.guys[g.id].tied && sim.angle() > 70) {
+      } else if (b.guyTop[g.id] && !sim.guys[g.id]?.tied && sim.angle() > 70) {
         T.push({ kind: 'guyTie', id: g.id, pos: [a[0], 0.4, a[2]], show: true });
       }
     }
@@ -658,6 +680,8 @@ function chooseLashing(type) {
   const t = picker.target; if (!t || closeup) return;
   const b = G.build;
   closePicker();
+  const fresh = t.kind === 'joint' || t.kind === 'cjoint' || t.kind === 'guyTie' || t.kind === 'stakeJoint';
+  if (fresh && ropeLeft() <= 0) return flashHint('<b>נגמרו החבלים.</b> אפשר להתיר כפיתה מיותרת כדי לקבל חבל בחזרה');
   const tie = () => {
     if (t.kind === 'joint' || t.kind === 'lashed') {
       b.joints[t.id] = type;
@@ -687,6 +711,10 @@ const trayPole = $('tray-pole');
 let drag = null;
 trayPole.addEventListener('pointerdown', e => {
   sfx.unlock(); startClock();
+  const item = e.target.closest('.pile-item'); if (!item) return;
+  const len = +item.dataset.len;
+  if (poleLeft(len) <= 0) { flashHint(`<b>אין עוד סנדות של ${len.toFixed(1)} מ׳ בערימה.</b> אפשר להחזיר סנדה מהשרטוט`); return; }
+  G.lastLength = len; renderPile();
   trayPole.setPointerCapture(e.pointerId);
   drag = { slot: null };
   closePicker();
@@ -724,6 +752,7 @@ trayPole.addEventListener('pointermove', e => {
 function endDrag() {
   if (!drag) return;
   ghost.visible = false; slotGlow.visible = false;
+  if (drag.slot && poleLeft(G.lastLength) <= 0) drag.slot = null;
   if (drag.slot && G.stage === 'cube') {
     G.cube.build.poles[drag.slot.id] = { length: G.lastLength };
     rebuildCube();
@@ -785,7 +814,9 @@ function updateLengthPanel() {
   $('lp-name').textContent = slot.he.replace(/ \((?!צד).*\)/, '');
   $('lp-value').textContent = pole.length.toFixed(1);
   $('lp-plan').textContent = slot.length.toFixed(1);
-  $('lp-value').style.color = Math.abs(pole.length - slot.length) < 0.05 ? '#9be37f' : '';
+  const d = pole.length - slot.length;
+  $('lp-value').style.color = Math.abs(d) < 0.05 ? '#9be37f' : d < 0 ? '#ff9a85' : '';
+  $('lp-fit').textContent = Math.abs(d) < 0.05 ? 'בדיוק כמו בשרטוט' : d < 0 ? 'קצרה מדי: לא תגיע לכל הכפיתות' : 'ארוכה מהשרטוט: תעבוד, אבל בפחות נקודות';
 }
 function changeLength(steps) {
   const sid = G.selected; if (!sid || !steps) return;
@@ -827,6 +858,88 @@ function changeLength(steps) {
     selectPole(null); refreshAll();
   });
 }
+
+// ---------------- the pole pile and the rope (limited per level) ----------------
+// Each level comes with a pile of real poles: the lengths its drawings need, plus
+// a few that fit nowhere exactly. Poles are not cut, so every choice uses one up.
+const r1 = x => Math.round(x * 10) / 10;
+function pileStock() {
+  const m = new Map();
+  const add = l => m.set(r1(l), (m.get(r1(l)) || 0) + 1);
+  for (let i = 0; i < LV.klafim.length; i++) SLOTS.forEach(s => add(s.length));
+  if (LV.cube) LV.cube.slots.forEach(s => add(s.length));
+  (LV.stockExtra || []).forEach(add);
+  return [...m.entries()].sort((a, b) => b[0] - a[0]);
+}
+function polesInUse() {
+  const m = new Map();
+  const add = set => { for (const id in set) if (set[id]) { const l = r1(set[id].length); m.set(l, (m.get(l) || 0) + 1); } };
+  G.klafim.forEach(k => add(k.build.poles));
+  if (G.cube) add(G.cube.build.poles);
+  return m;
+}
+const poleLeft = len => (pileStock().find(([l]) => l === r1(len))?.[1] || 0) - (polesInUse().get(r1(len)) || 0);
+// rope: one length per lashing in the plan, and a couple to spare
+const countTrue = o => Object.values(o).filter(Boolean).length;
+function ropeTotal() {
+  return (JOINTS.length + STAKE_JOINTS.length + GUYS.length) * LV.klafim.length + (LV.cube ? LV.cube.joints.length : 0) + (LV.ropeSpare ?? 2);
+}
+function ropeUsed() {
+  let n = 0;
+  for (const k of G.klafim) n += countTrue(k.build.joints) + countTrue(k.build.stakeJoints) + countTrue(k.build.guyTies);
+  if (G.cube) n += countTrue(G.cube.build.joints);
+  return n;
+}
+const ropeLeft = () => ropeTotal() - ropeUsed();
+let pileKey = '';
+function renderPile() {
+  const rows = pileStock().map(([l, n]) => [l, n - (polesInUse().get(l) || 0)]);
+  const key = JSON.stringify(rows) + G.lastLength;
+  if (key !== pileKey) {
+    pileKey = key;
+    $('tray-pole').innerHTML = rows.map(([l, left]) => `<button type="button" class="pile-item${left ? '' : ' empty'}${l === G.lastLength && left ? ' on' : ''}" data-len="${l}">
+      <span class="pile-stick" style="width:${Math.round(l * 22)}px"></span><b>${l.toFixed(1)}</b><small>×${left}</small></button>`).join('');
+  }
+  $('rope-count').innerHTML = `חבלים לכפיתות: <b>${ropeLeft()}</b>`;
+}
+
+// ---------------- the raise crew ----------------
+// The player sends the scouts of the level's crew to the guy lines: pullers
+// on the front lines, holders on the back ones. A line nobody holds lies
+// slack, and the physics shows what that means.
+const CREW_NAMES = ['נועה', 'איתי', 'מאיה', 'יונתן', 'תמר', 'עידו'];
+function crewRole(g) { return `${g.side < 0 ? 'מושכים' : 'מחזיקים'} · ${g.side < 0 ? 'קדמי' : 'אחורי'} ${slotById(g.leg).he.replace('רגל ', '')}`; }
+function freeCrew() {
+  const used = new Set(Object.values(G.build.crew).filter(v => v != null));
+  return [...Array(LV.crew || 4).keys()].filter(i => !used.has(i));
+}
+function toggleCrew(gid) {
+  const b = G.build, sim = G.sim, g = GUYS.find(q => q.id === gid);
+  if (!sim || sim.angle() > 8 || b.guyTies[gid]) return flashHint('את הצוות משבצים לפני שמתחילים למשוך');
+  if (!b.guyTop[gid]) return flashHint('קודם כופתים את היתר לראש הרגל');
+  if (b.crew[gid] != null) { delete b.crew[gid]; sim.dropGuy(gid); }
+  else {
+    const free = freeCrew();
+    if (!free.length) return flashHint(`<b>כל ${LV.crew || 4} הצופים כבר משובצים.</b> הקישו על יתר כדי לשחרר צופה`);
+    b.crew[gid] = free[0];
+    sim.addGuy(g);
+  }
+  sfx.tick(); renderCrew(); refreshAll();
+}
+let crewKey = '';
+function renderCrew() {
+  const b = G.build; if (!b) return;
+  const key = JSON.stringify([b.crew, b.guyTop, G.ki, LV.number]);
+  if (key === crewKey) return;
+  crewKey = key;
+  $('crew-free').textContent = `${freeCrew().length} מתוך ${LV.crew || 4} פנויים`;
+  $('crew-list').innerHTML = GUYS.map(g => {
+    const who = b.crew[g.id];
+    return `<button type="button" class="crew-row${who != null ? ' on' : ''}${b.guyTop[g.id] ? '' : ' off'}" data-gid="${g.id}">
+      <span class="crew-role">${crewRole(g)}</span><span class="crew-who">${who != null ? CREW_NAMES[who] : b.guyTop[g.id] ? '+ צופה' : 'יתר לא כפות'}</span></button>`;
+  }).join('');
+}
+$('crew-list').addEventListener('click', e => { const r = e.target.closest('.crew-row'); if (r) toggleCrew(r.dataset.gid); });
 
 // ---------------- rope pull ----------------
 {
@@ -986,10 +1099,10 @@ function refreshActions() {
   const go = label => add(label, () => goStage(nx.key));
   if (G.stage === 'build' && stageDone('build')) go('המשך לבז״נטים');
   if (G.stage === 'stakes' && stageDone('stakes')) go('המשך להרמה');
-  if (G.stage === 'anchor' && G.raisedOnce) go(nx.id === 'check' ? 'לבדיקת היציבות' : nx.id === 'cube' ? 'המשך לחיבור הקובייה' : `המשך ל${nx.he.split(', ')[1] || nx.he}`);
+  if (G.stage === 'anchor' && G.raisedOnce) go(nx.id === 'check' ? 'למסדר המדריך' : nx.id === 'cube' ? 'המשך לחיבור הקובייה' : `המשך ל${nx.he.split(', ')[1] || nx.he}`);
   if (G.stage === 'cube' && cubeComplete()) go('המשך להורדת היתרים הפנימיים');
-  if (G.stage === 'unguy' && stageDone('unguy')) go('לבדיקת היציבות');
-  if (G.stage === 'check' && !G.check) add('התחלת בדיקת יציבות', runCheck);
+  if (G.stage === 'unguy' && stageDone('unguy')) go('למסדר המדריך');
+  if (G.stage === 'check' && !G.check) add('קוראים למדריך למסדר', runCheck);
 }
 let flashUntil = 0;
 function flashHint(html) { $('hint-text').innerHTML = html; flashUntil = performance.now() + 2600; }
@@ -1005,9 +1118,9 @@ function hintText() {
     case 'build': {
       if (G.selected) {
         const sl = slotById(G.selected), p = b.poles[G.selected];
-        if (Math.abs(p.length - sl.length) > 0.05) return `גללו את <b>פס האורך</b> עד שהסנדה תהיה באורך שבשרטוט (${sl.length.toFixed(1)} מ׳)`;
+        if (Math.abs(p.length - sl.length) > 0.05) return `הסנדה הזו ${p.length.toFixed(1)} מ׳, ובשרטוט ${sl.length.toFixed(1)} מ׳. אפשר <b>להחזיר אותה לערימה</b> ולקחת אחרת`;
       }
-      if (nPoles < 6) return `גררו <b>סנדה</b> מהמגש אל קו כחול בשרטוט · סנדות ${nPoles}/6`;
+      if (nPoles < 6) return `בחרו בערימה <b>סנדה באורך הנכון</b> וגררו אותה אל קו כחול. הסנדות מוגבלות! · ${nPoles}/6`;
       if (nJ < 9) return `הקישו על <b>טבעת</b> במפגש סנדות ובחרו כפיתה · כפיתות ${nJ}/9`;
       return 'הקלף מוכן על הקרקע. המשיכו ל<b>דפיקת בז״נטים</b>';
     }
@@ -1021,6 +1134,8 @@ function hintText() {
       const ang = sim.angle();
       const g = GUYS.filter(q => b.guyTop[q.id]).length;
       if (ang < 6 && g < 4) return `כפתו <b>4 יתרים</b> לראש הקלף (הקישו על הטבעות) · ${g}/4`;
+      const manned = GUYS.filter(q => b.crew[q.id] != null).length;
+      if (ang < 6 && manned < 4) return `שלחו צופה לכל יתר בלוח <b>הצוות</b>: מושכים בקדמיים, מחזיקים באחוריים · ${manned}/4`;
       if (ang < 6) return 'החליקו את היתרים <b>למטה</b> כדי למשוך. לאט ובשליטה';
       if (ang < 80) return 'ממשיכים למשוך, לאט ובשליטה…';
       if (ang <= 97) return '<b>עצרו!</b> הקלף ניצב';
@@ -1034,9 +1149,9 @@ function hintText() {
       return `עגנו את הקלף: בז״נטי יתרים ${a}/4 · יתרים כפותים ${t}/4 · כפיתות רגל לבז״נט ${s}/4`;
     }
     case 'check':
-      if (G.check?.running) return G.check.label || 'בדיקת יציבות…';
+      if (G.check?.running) return G.check.label || 'מסדר…';
       if (!G.raisedOnce) return 'אין עדיין מה לבדוק: קודם מרימים את הקלף';
-      return 'בבדיקה כולם עוזבים את מה שלא כפות, ודוחפים את הקלף מכל הכיוונים';
+      return 'במסדר כולם עוזבים את מה שלא כפות. המדריך דוחף את הקלף מכל הכיוונים ותולה עליו דלי מים';
   }
   return '';
 }
@@ -1049,7 +1164,7 @@ function statusText(nPoles, nJ) {
     case 'raise': {
       if (!sim) return kn;
       const ang = sim.angle();
-      if (ang < 6) return `${kn}יתרים בראש הקלף ${GUYS.filter(q => b.guyTop[q.id]).length}/4`;
+      if (ang < 6) return `${kn}יתרים בראש הקלף ${GUYS.filter(q => b.guyTop[q.id]).length}/4 · צוות ${GUYS.filter(q => b.crew[q.id] != null).length}/${LV.crew || 4}`;
       if (ang < 82) return `${kn}עולה…`;
       return ang <= 97 ? `${kn}<b>הקלף ניצב</b>` : `${kn}<b>הקלף עובר את האנך!</b>`;
     }
@@ -1067,12 +1182,12 @@ function statusText(nPoles, nJ) {
       let n = 0; eachKlaf(() => { n += GUYS.filter(g => isInnerGuy(g) && G.build.guyOff[g.id]).length; });
       return `יתרים פנימיים שירדו ${n}/4`;
     }
-    case 'check': return G.check?.running ? (G.check.label || 'בדיקת יציבות…') : 'בדיקת יציבות';
+    case 'check': return G.check?.running ? (G.check.label || 'מסדר…') : 'מסדר: המדריך דוחף, תולה משקל ובודק כל כפיתה';
   }
   return '';
 }
 function refreshHint() { if (performance.now() > flashUntil) $('hint-text').innerHTML = hintText(); }
-function refreshAll() { refreshChips(); refreshActions(); refreshHint(); }
+function refreshAll() { refreshChips(); refreshActions(); refreshHint(); renderPile(); renderCrew(); }
 
 // ---------------- clock ----------------
 function startClock() { if (!G.startedAt) G.startedAt = performance.now(); }
@@ -1085,34 +1200,35 @@ function runCheck() {
     if (!G.cube.sim) return;
     G.cube.sim.letGo();
     // with the outer guy lines first; then they come down too, and a braced cube stands by itself
-    G.check = { t: 0, running: true, label: 'כולם עוזבים…', pushes: CUBE_PUSHES, release: 8, end: 18 };
+    G.check = { t: 0, running: true, label: 'כולם עוזבים…', pushes: CUBE_PUSHES, release: 8, load: [18, 20.5], end: 21 };
     return refreshAll();
   }
   if (!G.raisedOnce || !G.sim) return infoCard('אין עדיין מה לבדוק', 'קודם בונים את הקלף, דופקים בז״נטים ומרימים אותו.');
   G.sim.letGo();
-  G.check = { t: 0, running: true, label: 'כולם עוזבים…' };
+  G.check = { t: 0, running: true, label: 'כולם עוזבים…', load: [10, 12.5], end: 13 };
   refreshAll();
 }
 const CUBE_PUSHES = [
-  { from: 1.5, to: 3.0, f: [1, 0, 0], label: 'דוחפים את הקובייה <b>שמאלה</b>' },
-  { from: 3.5, to: 5.0, f: [0, 0, 1], label: 'דוחפים <b>אחורה</b>' },
-  { from: 5.5, to: 7.0, f: [0, 0, -1], label: 'דוחפים <b>קדימה</b>' },
-  { from: 9.5, to: 11, f: [1, 0, 0], label: 'בלי יתרים: דוחפים <b>שמאלה</b>' },
-  { from: 11.5, to: 13, f: [-1, 0, 0], label: 'בלי יתרים: דוחפים <b>ימינה</b>' },
-  { from: 13.5, to: 15, f: [0, 0, 1], label: 'בלי יתרים: דוחפים <b>אחורה</b>' },
-  { from: 15.5, to: 17, f: [0, 0, -1], label: 'בלי יתרים: דוחפים <b>קדימה</b>' },
+  { from: 1.5, to: 3.0, f: [1, 0, 0], label: 'המדריך דוחף את הקובייה <b>שמאלה</b>' },
+  { from: 3.5, to: 5.0, f: [0, 0, 1], label: 'המדריך דוחף <b>אחורה</b>' },
+  { from: 5.5, to: 7.0, f: [0, 0, -1], label: 'המדריך דוחף <b>קדימה</b>' },
+  { from: 9.5, to: 11, f: [1, 0, 0], label: 'בלי יתרים: המדריך דוחף <b>שמאלה</b>' },
+  { from: 11.5, to: 13, f: [-1, 0, 0], label: 'בלי יתרים: המדריך דוחף <b>ימינה</b>' },
+  { from: 13.5, to: 15, f: [0, 0, 1], label: 'בלי יתרים: המדריך דוחף <b>אחורה</b>' },
+  { from: 15.5, to: 17, f: [0, 0, -1], label: 'בלי יתרים: המדריך דוחף <b>קדימה</b>' },
 ];
 const PUSHES = [
-  { from: 1.5, to: 3.5, f: [1, 0, 0], label: 'דוחפים את הקלף <b>שמאלה</b>' },
-  { from: 4.0, to: 6.0, f: [-1, 0, 0], label: 'דוחפים את הקלף <b>ימינה</b>' },
-  { from: 6.5, to: 7.7, f: [0, 0, 0.7], label: 'דוחפים <b>אחורה</b>' },
-  { from: 8.2, to: 9.4, f: [0, 0, -0.7], label: 'דוחפים <b>קדימה</b>' },
+  { from: 1.5, to: 3.5, f: [1, 0, 0], label: 'המדריך דוחף את הקלף <b>שמאלה</b>' },
+  { from: 4.0, to: 6.0, f: [-1, 0, 0], label: 'המדריך דוחף את הקלף <b>ימינה</b>' },
+  { from: 6.5, to: 7.7, f: [0, 0, 0.7], label: 'המדריך דוחף <b>אחורה</b>' },
+  { from: 8.2, to: 9.4, f: [0, 0, -0.7], label: 'המדריך דוחף <b>קדימה</b>' },
 ];
 function checkPush(dt) {
   const c = G.check; if (!c?.running || G.falling) return null;
   c.t += dt;
   let push = null;
-  c.label = 'כולם עוזבים…';
+  c.loading = false;
+  c.label = c.t < 1.5 ? 'כולם עוזבים…' : 'המדריך עובר לבדיקה הבאה…';
   if (c.release != null && c.t >= c.release) {
     if (!c.released) { c.released = true; G.cube.sim.releaseAllGuys(); }
     c.label = 'מורידים את כל היתרים: קובייה עם איקסים עומדת בעצמה';
@@ -1122,11 +1238,28 @@ function checkPush(dt) {
     push = p.f.map(v => v * TUNING.pushForce * Math.max(0, k));
     c.label = p.label;
   }
+  if (c.load && c.t >= c.load[0] && c.t <= c.load[1]) {
+    c.loading = true;
+    c.label = LV.cube ? 'המדריך תולה <b>דלי מים</b> על הרוחב העליון של כל קלף' : 'המדריך תולה <b>דלי מים</b> על הרוחב העליון';
+  }
   if (c.t > (c.end || 10.2)) { c.running = false; finish(); }
   return push;
 }
 
 // ---------------- collapse watch ----------------
+// the top horizontal sagged or fell under the inspection's bucket
+// (measured against its height in the drawing: a pole hanging from one lashing is caught here too)
+function loadDropped(ks) {
+  if (!G.check?.loading) return false;
+  return ks.some(k => SIZES.klaf.topHeight + R - k.loadY() > 0.25);
+}
+// the top horizontal hangs on its two square lashings
+function loadRule(missing) {
+  return missing
+    ? { rule: 'כל סנדה נכפתת בשני הקצוות שלה', detail: 'הרוחב העליון לא היה כפות בשני הקצוות, ונפל כשהמדריך תלה עליו את דלי המים.' }
+    : { rule: 'המבנה צריך לשאת משקל', detail: 'הרוחב העליון שקע תחת דלי המים. בדקו את הכפיתות בראש הקלף.' };
+}
+const topMissing = b => !b.poles.topH || !b.joints.J3 || !b.joints.J4;
 function watchSim(dt) {
   const sim = G.sim; if (!sim || G.falling) return;
   const ang = sim.angle(), top = sim.topCentre();
@@ -1137,6 +1270,7 @@ function watchSim(dt) {
   else if (sim.rack() > 0.42) kind = 'rack';
   else if (ang > 122) kind = 'over';
   else if (G.raisedOnce && (top[1] < 1.4 || ang < 55)) kind = 'down';
+  else if (loadDropped([sim])) kind = 'load';
   if (kind) {
     G.falling = { kind, t: 0, explain: explain(kind) };
     sim.flat = false;
@@ -1147,7 +1281,8 @@ function watchSim(dt) {
 function watchCube(dt) {
   const cs = G.cube.sim; if (G.falling) return;
   let kind = null;
-  if (cs.baseSlid() > 0.35) kind = 'slid';
+  if (loadDropped(cs.klafim)) kind = 'load';
+  else if (cs.baseSlid() > 0.35) kind = 'slid';
   else if (cs.rack() > 0.42) kind = 'rack';
   else if (cs.sway() > TUNING.cubeSwayLimit) kind = 'sway';
   else if (cs.lowestTop() < 1.4) kind = 'down';
@@ -1158,6 +1293,7 @@ function watchCube(dt) {
   }
 }
 function explainCube(kind) {
+  if (kind === 'load') return { ...loadRule(G.klafim.some(k => topMissing(k.build))), focus: { cubePoles: [], cubeGhosts: [], cubeJoints: [] } };
   const b = G.cube.build, cs = G.cube.sim;
   const sideName = side => side > 0 ? 'הצד השמאלי' : 'הצד הימני';
   const focus = { cubePoles: [], cubeGhosts: [], cubeJoints: [] };
@@ -1196,6 +1332,7 @@ function explain(kind) {
 }
 function explainRule(kind) {
   const sim = G.sim, b = G.build;
+  if (kind === 'load') return { ...loadRule(topMissing(b)), focus: { joints: ['J3', 'J4'].filter(id => !b.joints[id]) } };
   const x = xComplete();
   const top = sim.topCentre();
   const dir = top[0] < 0 ? 'ימינה' : 'שמאלה'; // +x is on the left from the pullers' side
@@ -1226,6 +1363,14 @@ function explainRule(kind) {
   if (grip && corners) return cornerRule;
   if (grip)
     return { rule: 'מרימים לאט ובשליטה, ועוצרים כשהקלף ניצב', detail: `המשיכה הייתה חזקה מדי: ה${GUYS.find(g => g.id === grip.tag).he} נקרע מידי המחזיקים, והקלף עבר את האנך ונפל לכיוון המושכים.` };
+  // the crew: a line with nobody on it does nothing
+  const sideBy = side => GUYS.filter(g => Math.sign(g.side) === side && b.guyTop[g.id]);
+  const heldBack = sideBy(1).filter(g => b.crew[g.id] != null).length;
+  const heldFront = sideBy(-1).filter(g => b.crew[g.id] != null).length;
+  if (!sim.lettingGo && !G.check && kind === 'over' && backGuys === 2 && heldBack < 2)
+    return { rule: 'על כל יתר אחורי עומד מחזיק בזמן ההרמה', detail: heldBack ? 'רק יתר אחורי אחד הוחזק. הקלף נמשך מצד אחד, הסתובב ועבר את האנך.' : 'אף אחד לא החזיק את היתרים האחוריים, אז אף אחד לא עצר את הקלף כשהגיע לאנך, והוא המשיך ונפל.' };
+  if (!sim.lettingGo && !G.check && heldFront < 2 && sideBy(-1).length === 2)
+    return { rule: 'מושכים בשני היתרים הקדמיים יחד', detail: 'רק יתר קדמי אחד נמשך. הקלף עלה עקום, צד אחד לפני השני, ולא נשאר ישר.' };
   if (kind === 'over' && backGuys < 2)
     return { rule: 'כופתים 4 יתרים לראש הקלף לפני ההרמה', detail: 'בלי היתרים האחוריים אין מי שיעצור את הקלף כשהוא מגיע לאנך, והוא המשיך ונפל.' };
   if (kind === 'rack') {
@@ -1293,9 +1438,15 @@ function finish() {
   const nMissing = s.total - s.tied;
   const missing = nMissing ? (nMissing === 1 ? 'כפיתה אחת חסרה במבנה.' : `${nMissing} כפיתות חסרות במבנה.`) : '';
   showModal(`
-    <div class="eyebrow">${LV.cube ? 'הקובייה עמדה בבדיקה' : 'הקלף עמד בבדיקה'}</div>
+    <div class="eyebrow">תוצאות המסדר</div>
     <h2>${s.stars === 3 ? 'בנייה מושלמת!' : 'עברתם את השלב'}</h2>
     <div class="stars">${stars}</div>
+    <ul class="inspect">
+      <li class="ok">${LV.cube ? 'הקובייה עמדה' : 'הקלף עמד'} בדחיפות מכל הכיוונים${LV.cube ? ', גם בלי יתרים' : ''}</li>
+      <li class="ok">החזיק את דלי המים על הרוחב העליון</li>
+      <li class="${s.tied === s.total ? 'ok' : 'no'}">${s.tied === s.total ? 'כל הכפיתות במקום' : 'המדריך מצא כפיתות חסרות'}</li>
+      <li class="${s.correct === s.total ? 'ok' : 'no'}">${s.correct === s.total ? 'כל כפיתה מהסוג הנכון' : 'יש כפיתות מסוג לא נכון'}</li>
+    </ul>
     <div class="score-grid">
       <span>כפיתות כפותות</span><b>${s.tied}/${s.total}</b>
       <span>סוג כפיתה נכון</span><b>${s.correct}/${s.total}</b>
@@ -1362,6 +1513,7 @@ function restart() {
   });
   if (LV.cube) for (const side of [-1, 1]) drawSideSheet(CM.sheets[side], LV.cube, side, LV.klafim.map(k => k.he));
   $('timer').textContent = '0:00';
+  drawPlaza();
   goStage(STAGES[0].key);
   refreshAll();
 }
@@ -1371,6 +1523,58 @@ function switchLevel(n) {
   makeChips();
   restart();
 }
+// ---------------- the growing plaza ----------------
+// Every structure the player has passed stays standing on the plaza, in its
+// own spot around the building ground, so the camp grows level by level.
+const PLAZA_SPOTS = { 1: { x: -5.6, z: 3.6, yaw: 0.35 }, 2: { x: 5.4, z: 3.2, yaw: -0.3 } };
+const plazaShown = {};
+function makeDisplay(L) {
+  const g = new THREE.Group();
+  const pole = (a, b) => { const m = makePoleMesh(0); placeCylinder(m, a, b); g.add(m); };
+  const knot = (p, dA, dB) => { const k = makeLashing(); placeLashing(k, p, dA, dB); g.add(k); };
+  const N = [0, 0, -1]; // a standing klaf faces the pullers
+  for (const cfg of L.klafim) {
+    const at = (u, v, slot) => { const p = klafToWorld(u, v, 90); p[2] += cfg.z0; return add3(p, N, slot ? layerOff(slot) : 0); };
+    for (const sl of SLOTS) {
+      const h = sl.length / 2;
+      pole(at(sl.centre[0] - sl.dir[0] * h, sl.centre[1] - sl.dir[1] * h, sl), at(sl.centre[0] + sl.dir[0] * h, sl.centre[1] + sl.dir[1] * h, sl));
+    }
+    for (const j of JOINTS) {
+      const A = slotById(j.a), B = slotById(j.b);
+      knot(at(j.at[0], j.at[1], A), [A.dir[0], A.dir[1], 0], [B.dir[0], B.dir[1], 0]);
+    }
+    for (const st of LEG_STAKES) { const m = makeStake(LEG_STAKE_LEN); m.position.set(st.u, -0.3, cfg.z0 - GAP); g.add(m); }
+    // a klaf standing alone keeps its guy lines; inside a cube the inner ones are down
+    if (!L.cube) for (const gl of GUYS) {
+      const u = slotById(gl.leg).centre[0];
+      const a = [u * cfg.anchorX[gl.side > 0 ? 'back' : 'front'], 0.3, cfg.z0 + gl.side * (gl.side > 0 ? cfg.backDist : cfg.frontDist)];
+      const top = at(u, slotById(gl.leg).length, slotById(gl.leg));
+      const r = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 1, 5), new THREE.MeshStandardMaterial({ color: 0xd8b878, roughness: 1 }));
+      placeCylinder(r, top, a); g.add(r);
+      const sk = makeStake(ANCHOR_LEN); sk.position.set(a[0], -0.25, a[2]); sk.rotation.x = gl.side * 0.35; g.add(sk);
+    }
+  }
+  if (L.cube) for (const sl of L.cube.slots) {
+    const h = sl.length / 2;
+    pole(cubeSlotPoint(sl, -h), cubeSlotPoint(sl, h));
+  }
+  // centre it on its spot
+  const box = new THREE.Box3().setFromObject(g), c = box.getCenter(new THREE.Vector3());
+  const outer = new THREE.Group(); g.position.set(-c.x, 0, -c.z); outer.add(g);
+  return outer;
+}
+function drawPlaza() {
+  for (const L of LEVELS) {
+    const spot = PLAZA_SPOTS[L.number]; if (!spot) continue;
+    const want = starsOf(L.number) >= 1 && L !== LV;
+    if (want && !plazaShown[L.number]) {
+      const d = plazaShown[L.number] = makeDisplay(L);
+      d.position.set(spot.x, 0, spot.z); d.rotation.y = spot.yaw; scene.add(d);
+    }
+    if (plazaShown[L.number]) plazaShown[L.number].visible = want;
+  }
+}
+
 // ---------------- home screen and the plaza's levels ----------------
 // Best stars per level are kept on this device only. One star opens the next level.
 const PROGRESS_KEY = 'buildit.stars';
@@ -1394,11 +1598,13 @@ const ICONS = {
 };
 const starRow = n => [1, 2, 3].map(i => `<span class="${i <= n ? 'on' : ''}">★</span>`).join('');
 function showHome() {
+  drawPlaza();
   const total = LEVELS.reduce((a, l) => a + starsOf(l.number), 0);
   $('home-stars').textContent = total ? `★ ${total} / ${LEVELS.length * 3}` : 'מתחילים מהקלף הראשון';
   $('levels').hidden = true; $('home').hidden = false;
 }
 function showLevels() {
+  drawPlaza();
   const total = LEVELS.reduce((a, l) => a + starsOf(l.number), 0);
   $('levels-total').textContent = `★ ${total} / ${LEVELS.length * 3}`;
   const path = $('levels-path'); path.innerHTML = '';
@@ -1594,7 +1800,7 @@ function openFolder(tab = 'drawing') {
       <li>מרימים: המרימים מגביהים את הראש, והמושכים מושכים ביתרים הקדמיים לאט ובשליטה עד שהקלף ניצב. מחזיקי היתרים האחוריים עוצרים אותו באנך.</li>
       <li>דופקים בז״נטי יתרים כגובה הקלף מהרגליים (45°) ומקבעים אליהם את היתרים בקיבוע.</li>
       <li>כופתים כל רגל לבז״נט שלה בשתי כפיתות.</li>
-      <li>בדיקת יציבות: עוזבים ודוחפים מכל הכיוונים.</li></ol>`;
+      <li>מסדר: המדריך דוחף מכל הכיוונים ותולה דלי מים על הרוחב העליון.</li></ol>`;
   } else {
     body.innerHTML = `<table><thead><tr><th>מפגש</th><th>כפיתה</th></tr></thead><tbody>
       <tr><td>שתי סנדות בזווית ישרה (רוחב על רגל)</td><td>כפיתה מרובעת</td></tr>
@@ -1745,7 +1951,14 @@ function drawKlafCrew(withPeople) {
   }
   // guy lines: the front ones are the pullers' lines, the back ones are paid out
   for (const g of GUYS) {
-    const con = sim.guys[g.id]; if (!con || !con.active) continue;
+    const con = sim.guys[g.id];
+    if (!con && G.build.guyTop[g.id] && !sim.lettingGo) {
+      // nobody on this line: it lies slack on the ground
+      const top = legTop(g.leg), a = anchorPos(g);
+      if (top) guyRopes[g.id].set(top, [a[0], 0.03, a[2] - g.side * 0.5], 0.5);
+      continue;
+    }
+    if (!con || !con.active) continue;
     const top = legTop(g.leg); if (!top) continue;
     const a = anchorPos(g);
     if (con.tied) {
@@ -1791,11 +2004,36 @@ function jointPosOf(sid, s) {
 function placeActor(actor, pos, rotY, lean, reach) { actor.set(pos, rotY, lean, reach); }
 function drawGauge() {
   $('rope-panel').hidden = G.stage !== 'raise' || !!G.falling;
+  $('crew-panel').hidden = G.stage !== 'raise' || !!G.falling;
   if (!G.sim || G.stage !== 'raise') return;
   const ang = G.sim.angle();
   $('gauge-needle').style.transform = `rotate(${Math.max(-95, Math.min(95, ang - 90))}deg)`;
   $('gauge-val').textContent = Math.round(ang) + '°';
   $('gauge-label').textContent = ang < 6 ? 'שוכב' : ang < 82 ? 'עולה' : ang <= 97 ? 'ניצב' : 'עבר את האנך!';
+}
+function drawInspector(push) {
+  const c = G.check;
+  if (!c?.running || G.falling || G.replay) { inspector.clear(); buckets.forEach(b => { b.visible = false; }); return; }
+  const cs = G.cube?.sim && cubeStage(G.stage) ? G.cube.sim : null;
+  const ks = cs ? cs.klafim : [G.sim];
+  const tops = ks.map(k => k.topCentre());
+  const cx = tops.reduce((a, t) => a + t[0], 0) / tops.length, cz = tops.reduce((a, t) => a + t[2], 0) / tops.length;
+  buckets.forEach((b, i) => {
+    const k = ks[i];
+    b.visible = !!(c.loading && k);
+    if (b.visible) { const t = k.topParticle(); const p = k.pos(t); b.position.set(p[0], p[1] - 0.03, p[2]); }
+  });
+  if (push) {
+    // he leans into the top of the structure from the side the push comes from
+    const d = new THREE.Vector3(push[0], 0, push[2]).normalize();
+    const span = cs ? 1.6 : 1.1;
+    inspector.set([cx - d.x * span, 0, cz - d.z * span], Math.atan2(d.x, d.z), 0.35, 1.5);
+  } else if (c.loading) {
+    inspector.set([cx + 0.7, 0, Math.min(...ks.map(k => k.z0)) - 0.8], 0, 0.1, Math.PI * 0.8);
+  } else {
+    // stepping back to watch, and walking round between tests
+    inspector.set([cx + 2.0, 0, cz - 2.4], Math.atan2(-2.0, 2.4), 0, 0.2);
+  }
 }
 function drawPushArrow(push) {
   if (!push || !G.sim) { pushArrow.visible = false; return; }
@@ -1824,7 +2062,8 @@ function frame(now) {
       for (let w = 0; w < warp; w += 1) {
         const h = Math.min(1 / 30, dt * Math.min(1, warp - w));
         push = checkPush(h);
-        if (cs) cs.step(h, { push }); else sim.step(h, { wobble, push });
+        const load = G.check?.loading ? TUNING.loadForce : 0;
+        if (cs) cs.step(h, { push, load }); else sim.step(h, { wobble, push, load });
         record(h);
         if (cs) watchCube(h); else watchSim(h);
         if (G.falling) break;
@@ -1846,7 +2085,7 @@ function frame(now) {
     drawPoles(); drawLashings(); drawStakes();
   });
   drawCube(dt);
-  drawCrew(); drawTier(); drawGauge(); drawPushArrow(push);
+  drawCrew(); drawTier(); drawGauge(); drawPushArrow(push); drawInspector(push);
   updateJobs(dt);
   for (const a of allActors) a.update(dt);
   collectTargets();

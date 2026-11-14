@@ -16,6 +16,7 @@ export const TUNING = {
   guyCompliance: 2.5e-4, // holders' arms give a little
   gust: 45,              // N uneven-pull / wind wobble at the top while raising
   pushForce: 140,        // N push test at the top
+  loadForce: 300,        // N the inspection's bucket of water on the top horizontal (about 30 kg)
   tiedGuyCompliance: 1e-5, // a guy line fixed to its stake stretches very little
   cubeGuyCompliance: 4e-4, // ... but a few centimetres under a push, which the cube's Xs take over
   sideDiagCap: 60,         // N a cube side diagonal carries in compression before its lashings slip
@@ -126,7 +127,7 @@ export class KlafSim {
 
     // guy lines tied to the top before the raise, held by people
     this.guys = {};
-    for (const g of GUYS) if (build.guyTop[g.id]) this.addGuy(g);
+    for (const g of GUYS) if (build.guyTop[g.id] && this.manned(g)) this.addGuy(g);
     this.stakeCons = {};
     this.flat = true;
     this.collectFrame();
@@ -155,7 +156,7 @@ export class KlafSim {
     this.target = 90;
     this.flat = true;
     const b = this.build;
-    for (const g of GUYS) if (b.guyTop[g.id]) { this.addGuy(g); if (b.guyTies[g.id]) this.tieGuy(g.id); }
+    for (const g of GUYS) if (b.guyTop[g.id] && (this.manned(g) || b.guyTies[g.id])) { this.addGuy(g); if (b.guyTies[g.id]) this.tieGuy(g.id); }
     for (const sj of STAKE_JOINTS) if (b.stakeJoints[sj.id]) this.tieStakeJoint(sj);
     for (const g of GUYS) if (b.guyOff?.[g.id] && this.guys[g.id]) { this.guys[g.id].active = false; this.guys[g.id].removed = true; }
   }
@@ -211,6 +212,10 @@ export class KlafSim {
     return true;
   }
 
+  // is someone on this guy line? (the player sends a scout to each line; with no crew plan, everyone is)
+  manned(g) { const c = this.build.crew; return !c || c[g.id] != null || !!this.build.guyTies[g.id]; }
+  // nobody on the line: it lies slack
+  dropGuy(gid) { const con = this.guys[gid]; if (!con || con.tied) return; con.active = false; delete this.guys[gid]; }
   addGuy(g) {
     if (this.guys[g.id]) return false;
     const W = this.world;
@@ -308,8 +313,9 @@ export class KlafSim {
 
   // fix the guy line to its stake (the special guy-line-to-stake lashing)
   tieGuy(gid) {
-    const con = this.guys[gid]; if (!con) return false;
     const g = GUYS.find(q => q.id === gid);
+    if (!this.guys[gid]) this.addGuy(g); // a line nobody held can still be fixed to its stake
+    const con = this.guys[gid]; if (!con) return false;
     const sp = this.anchorPos(g); sp[1] = 0.3;
     const stake = this.world.addParticle(sp, 0);
     const a = this.pos(con.i);
@@ -370,7 +376,14 @@ export class KlafSim {
       const t = this.topParticle();
       if (t != null) W.applyForce(t, extra.push);
     }
+    // the inspection's load: a bucket of water hung from the middle of the top horizontal
+    if (extra.load) {
+      const t = this.topParticle();
+      if (t != null) W.applyForce(t, [0, -extra.load, 0]);
+    }
   }
+  // height of the point the load hangs from
+  loadY() { const t = this.topParticle(); return t == null ? 0 : this.pos(t)[1]; }
 }
 
 function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }

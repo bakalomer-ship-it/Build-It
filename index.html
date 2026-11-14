@@ -32,27 +32,25 @@
   </header>
 
   <aside id="tray" class="side side-start">
-    <div class="tray-title">מגש סנדות</div>
-    <div id="tray-pole" class="tray-pole" role="button" aria-label="גררו סנדה לשרטוט">
-      <div class="pole-graphic"></div>
-      <span>סנדה</span>
-      <small>גררו לשרטוט</small>
-    </div>
+    <div class="tray-title">ערימת סנדות</div>
+    <div id="tray-pole" class="pile" aria-label="גררו סנדה מהערימה לשרטוט"></div>
     <div class="tray-count" id="tray-count"></div>
+    <div class="rope-count" id="rope-count"></div>
   </aside>
 
   <aside id="length-panel" class="side side-end" hidden>
     <div class="lp-name" id="lp-name">רגל</div>
-    <div class="lp-scroll" id="lp-scroll" aria-label="גללו לשינוי האורך">
+    <div class="lp-scroll" id="lp-scroll" aria-label="אורך הסנדה">
       <div class="lp-ticks" id="lp-ticks"></div>
       <div class="lp-value"><b id="lp-value">2.0</b><span>מ'</span></div>
     </div>
     <div class="lp-plan">בשרטוט: <b id="lp-plan">2.0</b> מ'</div>
-    <div class="lp-row">
+    <div class="lp-fit" id="lp-fit"></div>
+    <div class="lp-row" hidden>
       <button type="button" class="tool" id="lp-minus" aria-label="קצר ב-10 ס&quot;מ">−</button>
       <button type="button" class="tool" id="lp-plus" aria-label="הארך ב-10 ס&quot;מ">+</button>
     </div>
-    <button type="button" class="tool ghost" id="lp-remove">הסרת הסנדה</button>
+    <button type="button" class="tool ghost" id="lp-remove">החזרה לערימה</button>
   </aside>
 
   <aside id="rope-panel" class="side side-end" hidden>
@@ -65,6 +63,12 @@
       <div class="gauge-arc"><div class="gauge-needle" id="gauge-needle"></div></div>
       <div class="gauge-text"><b id="gauge-val">0°</b> <span id="gauge-label">שוכב</span></div>
     </div>
+  </aside>
+
+  <aside id="crew-panel" class="side side-start" hidden>
+    <div class="tray-title">צוות ההרמה</div>
+    <div class="crew-free" id="crew-free"></div>
+    <div class="crew-list" id="crew-list"></div>
   </aside>
 
   <footer id="hint"><span id="hint-text"></span><div id="actions"></div></footer>

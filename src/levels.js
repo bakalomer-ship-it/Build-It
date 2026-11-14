@@ -61,11 +61,14 @@ const CUBE_LEG_V = [C.sideBottomHeight, C.sideTopHeight, C.sideDiagLow, C.sideDi
 export const LEVELS = [
   {
     number: 1, name: 'קלף 2×2', tutorial: true, targetTimeSec: 6 * 60,
+    // the pile: the plan's poles plus these extra lengths; the crew for the raise
+    stockExtra: [3.0, 1.6], ropeSpare: 2, crew: 4,
     klafim: [{ ...SOLO, he: 'הקלף' }],
     cube: null,
   },
   {
     number: 2, name: 'קובייה 2×2', tutorial: false, targetTimeSec: 16 * 60,
+    stockExtra: [3.0, 2.2, 1.6], ropeSpare: 2, crew: 4,
     klafim: [
       { ...SOLO, he: 'קלף קדמי', short: 'א׳', backDist: C.innerGuyDistance, anchorX: { front: 1.05, back: 0.65 }, inner: 1, extraLegV: CUBE_LEG_V },
       { ...SOLO, he: 'קלף אחורי', short: 'ב׳', z0: D, frontDist: C.innerGuyDistance, pullDist: 1.3, anchorX: { front: 0.65, back: 1.05 }, inner: -1, extraLegV: CUBE_LEG_V },

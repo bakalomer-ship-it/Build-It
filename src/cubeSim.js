@@ -144,7 +144,7 @@ export class CubeSim {
   step(dt, extra = {}) {
     // the push test pushes the top of the whole cube: half on each klaf
     const push = extra.push ? extra.push.map(v => v / this.klafim.length) : null;
-    for (const k of this.klafim) k.forces({ push });
+    for (const k of this.klafim) k.forces({ push, load: extra.load });
     this.world.step(Math.min(dt, 1 / 30), TUNING.substeps);
   }
 }
