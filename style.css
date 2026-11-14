@@ -47,7 +47,7 @@ button { font-family: inherit; }
 .level-tag { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; min-width: 74px; background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; text-align: right; }
 .level-tag .lvl { font-size: 11px; letter-spacing: .06em; color: var(--sisal); font-weight: 700; }
 .level-tag .lvl-name { font-size: 16px; font-weight: 800; }
-#stages { display: flex; gap: 4px; flex: 1; justify-content: center; flex-wrap: nowrap; overflow: hidden; }
+#stages { display: none; gap: 4px; flex: 1; justify-content: center; flex-wrap: nowrap; overflow: hidden; }
 .chip {
   appearance: none; border: 1px solid rgba(243, 234, 214, .2); background: rgba(44, 53, 36, .85); color: var(--muted);
   border-radius: 999px; padding: 6px 10px; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; min-height: 34px;

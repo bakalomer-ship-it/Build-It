@@ -1638,7 +1638,7 @@ function drawLashings() {
     const p = legPoint(sj.leg, sj.v); if (!p) { g.visible = false; continue; }
     const st = LEG_STAKES.find(s => s.leg === sj.leg);
     g.visible = !fadedOut();
-    placeParallelLashing(g, p, [st.u, p[1], stakeZ], [0, 1, 0]);
+    placeParallelLashing(g, p, [st.u, p[1], stakeZ()], [0, 1, 0]);
     coilProgress(g, sj.id);
   }
 }
@@ -1653,7 +1653,7 @@ function drawStakes() {
     const m = stakeMeshes[st.id], hits = b.stakes[st.id] || 0;
     m.visible = hits > 0 || jobs.some(j => j.id === st.id);
     const top = stakeTopPos(st)[1];
-    m.position.set(st.u, top - LEG_STAKE_LEN, stakeZ);
+    m.position.set(st.u, top - LEG_STAKE_LEN, stakeZ());
   }
   for (const g of GUYS) {
     const m = stakeMeshes['A' + g.id], hits = b.anchors[g.id] || 0;
@@ -1701,9 +1701,11 @@ function drawKlafCrew(withPeople) {
       place(people['guy' + g.id], [h[0], 0, h[2] - 0.2], 0, lean, 1.2);
       guyRopes[g.id].set(top, h, con.force > 5 ? 0.02 : 0.25);
     } else {
-      const holder = [a[0] * 1.15, 0, a[2] + g.side * 0.55];
+      // the holder stands where the physics holds the line, a little behind its hands
+      const hp = sim.world.p[con.j].x;
+      const holder = [hp[0], 0, hp[2] + g.side * 0.3];
       place(people['guy' + g.id], holder, Math.PI, -0.15, 1.0);
-      guyRopes[g.id].set(top, [holder[0], 0.9, holder[2] - g.side * 0.3], con.force > 5 ? 0.03 : 0.3);
+      guyRopes[g.id].set(top, [hp[0], 0.9, hp[2]], con.force > 5 ? 0.03 : 0.3);
     }
   }
 }
