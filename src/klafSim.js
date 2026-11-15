@@ -4,6 +4,13 @@ import { World } from './physics.js';
 import { SLOTS, JOINTS, LEVEL, GUYS, GUY_DIST, LEG_STAKES, STAKE_JOINTS } from './level1.js';
 
 // How a klaf sits on the plaza (see levels.js). Level 1: one klaf at z = 0.
+// Where a guy line's stake stands (Omer, 2026-11-15): every guy line leaves the klaf
+// outward at 45° (seen from above), and its stake stands one klaf-height from the
+// leg, so the line also rises at about 45° to the top of the leg.
+export function guyAnchor(cfg, g) {
+  const u = slotById(g.leg).centre[0], d = g.side > 0 ? cfg.backDist : cfg.frontDist, s = Math.SQRT1_2;
+  return [u + Math.sign(u) * d * s, 0, cfg.z0 + g.side * d * s];
+}
 export const SOLO_CFG = { z0: 0, frontDist: GUY_DIST, backDist: GUY_DIST, pullDist: GUY_DIST + 1.4, anchorX: { front: 1.05, back: 1.05 }, inner: 0 };
 
 export const TUNING = {
@@ -138,12 +145,9 @@ export class KlafSim {
   // klaf plane -> world, for this klaf's place on the plaza
   kw(u, v, angleDeg = 0) { const p = klafToWorld(u, v, angleDeg); p[2] += this.z0; return p; }
   guyDist(side) { return side > 0 ? this.cfg.backDist : this.cfg.frontDist; }
-  anchorPos(g) {
-    const u = slotById(g.leg).centre[0];
-    return [u * this.cfg.anchorX[g.side > 0 ? 'back' : 'front'], 0, this.z0 + g.side * this.guyDist(g.side)];
-  }
-  // where the pullers' hands are, behind the front guy-line stake
-  pullHand(u) { return [u * 1.1, 1.0, this.z0 - this.cfg.pullDist]; }
+  anchorPos(g) { return guyAnchor(this.cfg, g); }
+  // where the pullers' hands are: further out along the front guy line, past its stake
+  pullHand(u) { const s = Math.SQRT1_2, d = this.cfg.pullDist; return [u + Math.sign(u) * d * s, 1.0, this.z0 - d * s]; }
 
   // Put a klaf that was already raised and anchored straight back up, as it
   // stood (used to rebuild the cube's simulation, and after going back to an

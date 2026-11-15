@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SLOTS, JOINTS, STAKE_JOINTS, LEG_STAKES, GUYS, LASHINGS, LASHING_ORDER, GUY_LASHING_ORDER, LEVEL } from './level1.js';
 import { SIZES } from './blueprints.js';
-import { KlafSim, TUNING, jointReachable, slotById, slotParam, slotPoint, klafToWorld } from './klafSim.js';
+import { KlafSim, TUNING, jointReachable, guyAnchor, slotById, slotParam, slotPoint, klafToWorld } from './klafSim.js';
 import { CubeSim, cubeSlotPoint, cubeSlotParam, cubeJointReachable } from './cubeSim.js';
 import { LEVELS } from './levels.js';
 import {
@@ -28,7 +28,11 @@ try { const n = +new URLSearchParams(location.search).get('level'); if (n >= 1 &
 const KLAF_STAGES = [['build', 'בניית הקלף'], ['stakes', 'בז״נטים'], ['raise', 'הרמה'], ['anchor', 'עיגון']];
 function stageList() {
   const L = [];
-  LV.klafim.forEach((k, i) => KLAF_STAGES.forEach(([id, he]) => L.push({ key: LV.klafim.length > 1 ? `${id}:${i}` : id, id, k: i, he: LV.klafim.length > 1 ? `${he}, ${k.he}` : he })));
+  // Omer (2026-11-15): first every klaf is built on the ground, then they are raised
+  // one by one (stakes, raise, anchor), and only then joined
+  const st = ([id, he], k, i) => L.push({ key: LV.klafim.length > 1 ? `${id}:${i}` : id, id, k: i, he: LV.klafim.length > 1 ? `${he}, ${k.he}` : he });
+  LV.klafim.forEach((k, i) => st(KLAF_STAGES[0], k, i));
+  LV.klafim.forEach((k, i) => KLAF_STAGES.slice(1).forEach(s => st(s, k, i)));
   if (LV.cube) {
     L.push({ key: 'cube', id: 'cube', k: null, he: 'חיבור הקלפים לקובייה' });
     L.push({ key: 'unguy', id: 'unguy', k: null, he: 'הורדת היתרים הפנימיים' });
@@ -255,8 +259,7 @@ function stakeTopPos(st) {
 }
 // where a guy line's stake stands, for the current klaf
 function anchorPos(g) {
-  const c = K().cfg, u = slotById(g.leg).centre[0];
-  return [u * c.anchorX[g.side > 0 ? 'back' : 'front'], 0, c.z0 + g.side * (g.side > 0 ? c.backDist : c.frontDist)];
+  return guyAnchor(K().cfg, g);
 }
 // inner guy lines stand inside the cube: +1 the back ones, −1 the front ones, 'both' for a middle klaf
 const innerSide = (cfg, g) => cfg.inner === 'both' || (cfg.inner !== 0 && Math.sign(g.side) === cfg.inner);
@@ -1174,9 +1177,10 @@ function refreshActions() {
   if (G.falling || G.check?.running) return;
   const nx = nextStage();
   const go = label => add(label, () => goStage(nx.key));
-  if (G.stage === 'build' && stageDone('build')) go('המשך לבז״נטים');
+  if (G.stage === 'build' && stageDone('build')) go(nx.id === 'build' ? `המשך לבניית ה${LV.klafim[nx.k].he}` : LV.klafim.length > 1 ? `המשך לבז״נטים, ${LV.klafim[nx.k].he}` : 'המשך לבז״נטים');
   if (G.stage === 'stakes' && stageDone('stakes')) go('המשך להרמה');
-  if (G.stage === 'anchor' && G.raisedOnce) go(nx.id === 'check' ? 'למסדר המדריך' : nx.id === 'cube' ? 'המשך לחיבור הקובייה' : `המשך ל${nx.he.split(', ')[1] || nx.he}`);
+  // a raised klaf must be anchored (guy lines fixed, legs lashed to their stakes) before moving on
+  if (G.stage === 'anchor' && G.raisedOnce && stageDone('anchor')) go(nx.id === 'check' ? 'למסדר המדריך' : nx.id === 'cube' ? 'המשך לחיבור הקובייה' : `המשך להרמת ה${LV.klafim[nx.k].he}`);
   if (G.stage === 'cube' && cubeComplete()) go('המשך להורדת היתרים הפנימיים');
   if (G.stage === 'unguy' && stageDone('unguy')) go('למסדר המדריך');
   if (G.stage === 'check' && !G.check) add('קוראים למדריך למסדר', runCheck);
@@ -1199,7 +1203,8 @@ function hintText() {
       }
       if (nPoles < 6) return `בחרו בערימה <b>סנדה באורך הנכון</b> וגררו אותה אל קו כחול. הסנדות מוגבלות! · ${nPoles}/6`;
       if (nJ < 9) return `הקישו על <b>טבעת</b> במפגש סנדות ובחרו כפיתה · כפיתות ${nJ}/9`;
-      return 'הקלף מוכן על הקרקע. המשיכו ל<b>דפיקת בז״נטים</b>';
+      { const nx = nextStage(); if (nx?.id === 'build') return `הקלף מוכן על הקרקע. קודם בונים את כל הקלפים: המשיכו ל<b>${LV.klafim[nx.k].he}</b>`; }
+      return LV.klafim.length > 1 ? 'כל הקלפים מוכנים על הקרקע. עכשיו מרימים אותם אחד אחד, מהקדמי: המשיכו ל<b>דפיקת בז״נטים</b>' : 'הקלף מוכן על הקרקע. המשיכו ל<b>דפיקת בז״נטים</b>';
     }
     case 'stakes': {
       const d = LEG_STAKES.filter(s => (b.stakes[s.id] || 0) >= LEG_STAKE_HITS).length;
@@ -1256,8 +1261,8 @@ function statusText(nPoles, nJ) {
       return `סנדות בקובייה ${LV.cube.slots.filter(s => cb.poles[s.id]).length}/${LV.cube.slots.length} · כפיתות ${LV.cube.joints.filter(j => cb.joints[j.id]).length}/${LV.cube.joints.length}`;
     }
     case 'unguy': {
-      let n = 0; eachKlaf(() => { n += GUYS.filter(g => isInnerGuy(g) && G.build.guyOff[g.id]).length; });
-      return `יתרים פנימיים שירדו ${n}/4`;
+      let n = 0, all = 0; eachKlaf(() => { n += GUYS.filter(g => isInnerGuy(g) && G.build.guyOff[g.id]).length; all += GUYS.filter(isInnerGuy).length; });
+      return `יתרים פנימיים שירדו ${n}/${all}`;
     }
     case 'check': return G.check?.running ? (G.check.label || 'מסדר…') : 'מסדר: המדריך דוחף, תולה משקל ובודק כל כפיתה';
   }
@@ -1627,11 +1632,12 @@ function makeDisplay(L) {
     // a klaf standing alone keeps its guy lines; inside a cube the inner ones are down
     if (!L.cube) for (const gl of GUYS) {
       const u = slotById(gl.leg).centre[0];
-      const a = [u * cfg.anchorX[gl.side > 0 ? 'back' : 'front'], 0.3, cfg.z0 + gl.side * (gl.side > 0 ? cfg.backDist : cfg.frontDist)];
+      const a = guyAnchor(cfg, gl); a[1] = 0.3;
       const top = at(u, slotById(gl.leg).length, slotById(gl.leg));
       const r = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 1, 5), new THREE.MeshStandardMaterial({ color: 0xd8b878, roughness: 1 }));
       placeCylinder(r, top, a); g.add(r);
-      const sk = makeStake(ANCHOR_LEN); sk.position.set(a[0], -0.25, a[2]); sk.rotation.x = gl.side * 0.35; g.add(sk);
+      const sk = makeStake(ANCHOR_LEN); poseAnchorStake(sk, gl, a, ANCHOR_HITS); g.add(sk);
+      { const ax = anchorStakeAxis(gl); const t = add3([a[0], -0.25, a[2]], [ax.x, ax.y, ax.z], ANCHOR_LEN - 0.06); placeCylinder(r, top, t); }
     }
   }
   if (L.cube) for (const sl of L.cube.slots) {
@@ -1668,7 +1674,9 @@ function saveStars(n, stars) {
 }
 let memStars = loadStars();
 const starsOf = n => Math.max(memStars[n] || 0, loadStars()[n] || 0);
-const unlocked = n => n === 1 || starsOf(n - 1) >= 1;
+// test builds for Omer: every level is open, so he never has to start from the beginning
+const ALL_LEVELS_OPEN = true;
+const unlocked = n => ALL_LEVELS_OPEN || n === 1 || starsOf(n - 1) >= 1;
 // structures that come after the playable ones, shown on the path as coming soon
 const COMING = [];
 const ICONS = {
@@ -2010,6 +2018,22 @@ function coilProgress(g, id) {
   const n = G.tying && G.tying.id === id ? Math.ceil(Math.min(1, G.tying.t / 0.32) * g.children.length) : g.children.length;
   g.children.forEach((c, i) => { c.visible = i < n; });
 }
+// A guy stake leans away from the klaf along its line (out at 45°), and the line is
+// fixed (קיבוע) just below its top
+const STAKE_LEAN = 0.35, UPV3 = new THREE.Vector3(0, 1, 0);
+function anchorStakeAxis(g) {
+  const u = slotById(g.leg).centre[0], s = Math.SQRT1_2;
+  return new THREE.Vector3(Math.sign(u) * s * Math.sin(STAKE_LEAN), Math.cos(STAKE_LEAN), g.side * s * Math.sin(STAKE_LEAN));
+}
+function poseAnchorStake(m, g, a, hits) {
+  m.position.set(a[0], -0.25 * Math.min(hits, ANCHOR_HITS) / ANCHOR_HITS, a[2]);
+  m.quaternion.setFromUnitVectors(UPV3, anchorStakeAxis(g));
+}
+function anchorTie(g) {
+  const a = anchorPos(g), hits = G.build.anchors[g.id] || 0, ax = anchorStakeAxis(g);
+  const base = [a[0], -0.25 * Math.min(hits, ANCHOR_HITS) / ANCHOR_HITS, a[2]];
+  return add3(base, [ax.x, ax.y, ax.z], ANCHOR_LEN - 0.06);
+}
 function drawStakes() {
   const b = G.build;
   for (const st of LEG_STAKES) {
@@ -2021,9 +2045,7 @@ function drawStakes() {
   for (const g of GUYS) {
     const m = stakeMeshes['A' + g.id], hits = b.anchors[g.id] || 0;
     m.visible = hits > 0 || jobs.some(j => j.id === g.id && j.k === G.ki);
-    const a = anchorPos(g);
-    m.position.set(a[0], -0.25 * Math.min(hits, ANCHOR_HITS) / ANCHOR_HITS, a[2]);
-    m.rotation.x = g.side * 0.35; // anchor stakes lean away from the load
+    poseAnchorStake(m, g, anchorPos(g), hits);
   }
 }
 function drawCrew() {
@@ -2061,7 +2083,7 @@ function drawKlafCrew(withPeople) {
     const top = legTop(g.leg); if (!top) continue;
     const a = anchorPos(g);
     if (con.tied) {
-      guyRopes[g.id].set(top, [a[0], 0.32, a[2] - g.side * 0.08], 0.02);
+      guyRopes[g.id].set(top, anchorTie(g), 0.02);
     } else if (con.pull || g.side < 0) {
       const h = sim.pullHand(slotById(g.leg).centre[0]);
       const lean = con.force > 30 ? -0.35 : -0.1;
@@ -2162,7 +2184,8 @@ function frame(now) {
         const h = Math.min(1 / 30, dt * Math.min(1, warp - w));
         push = checkPush(h);
         const load = G.check?.loading ? TUNING.loadForce : 0;
-        if (cs) cs.step(h, { push, load }); else sim.step(h, { wobble, push, load });
+        // the joined structure stands still while it is built: it is tested only in the check (Omer)
+        if (cs) { if (G.check?.running || G.falling) cs.step(h, { push, load }); } else sim.step(h, { wobble, push, load });
         record(h);
         // beyond a single klaf, the structure is tested only in the check at the end (Omer)
         if (cs) { if (G.check?.running) watchCube(h); } else watchSim(h);
