@@ -310,3 +310,48 @@ button { font-family: inherit; }
 .inspect li::before { position: absolute; inset-inline-start: 0; font-weight: 800; }
 .inspect li.ok::before { content: '✓'; color: #3f8a2e; }
 .inspect li.no::before { content: '✗'; color: var(--bad); }
+
+/* ---- wooden look (Omer's reference images, 2026-11-15) ----
+   panels are wooden planks with a dark rim, the main action is a big gold button,
+   the level name sits on a dark title panel */
+:root {
+  --wood: #9a6234; --wood-2: #b5793f; --wood-dark: #5a3418; --wood-edge: #3e2410;
+  --gold: #f2b632; --gold-2: #ffd463; --gold-dark: #a8720c;
+  --planks:
+    repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0 26px, rgba(62,36,16,.55) 26px 28px),
+    repeating-linear-gradient(97deg, rgba(255,255,255,.05) 0 3px, rgba(0,0,0,.05) 3px 7px, rgba(255,255,255,0) 7px 13px),
+    linear-gradient(to bottom, var(--wood-2), var(--wood));
+}
+.side, .picker {
+  background: var(--planks); border: 3px solid var(--wood-edge);
+  box-shadow: inset 0 2px 0 rgba(255,220,160,.35), inset 0 -3px 0 rgba(0,0,0,.25), 0 6px 16px rgba(0,0,0,.35);
+}
+.tray-title, .rp-title, .picker-title { color: #ffe7b0; text-shadow: 0 1px 0 var(--wood-edge); }
+.tray-count, .tray-pole small, .lp-value span, .lp-plan { color: #f6dcb0; }
+.tray-pole, .pile-item { background: rgba(62,36,16,.35); border-color: rgba(255,220,160,.35); }
+.tool {
+  background: linear-gradient(to bottom, #7a4a24, #5e361a); border: 2px solid var(--wood-edge); color: #fff3dc;
+  box-shadow: inset 0 1px 0 rgba(255,220,160,.3), 0 3px 0 var(--wood-edge);
+}
+.tool:active { transform: translateY(2px); box-shadow: inset 0 1px 0 rgba(255,220,160,.3), 0 1px 0 var(--wood-edge); }
+.tool.ghost { background: transparent; box-shadow: none; border-color: transparent; }
+.tool.primary, #actions .tool.primary, .card-actions .tool.primary {
+  background: linear-gradient(to bottom, var(--gold-2), var(--gold)); color: #3a2405; border: 2px solid var(--gold-dark);
+  font-weight: 800; text-shadow: 0 1px 0 rgba(255,255,255,.4);
+  box-shadow: inset 0 2px 0 rgba(255,255,255,.5), 0 4px 0 var(--gold-dark), 0 8px 18px rgba(0,0,0,.3);
+}
+#actions .tool.primary { font-size: 16px; padding: 10px 22px; min-height: 44px; border-radius: 12px; }
+#topbar { background: none; }
+.level-tag {
+  background: rgba(30, 24, 16, .88); border: 2px solid var(--wood-edge); border-radius: 12px; padding: 5px 12px;
+  box-shadow: inset 0 1px 0 rgba(255,220,160,.2), 0 4px 10px rgba(0,0,0,.3);
+}
+.level-tag .lvl { color: var(--gold-2); }
+.top-tools .tool.icon { min-width: 40px; }
+#hint-text { background: rgba(30, 24, 16, .88); border: 2px solid var(--wood-edge); }
+.card { background: #f6ead0; border: 4px solid var(--wood); box-shadow: inset 0 0 0 2px #e2c48f, 0 20px 50px rgba(0,0,0,.5); }
+.card-actions .tool { background: linear-gradient(to bottom, #7a4a24, #5e361a); }
+.timer { background: rgba(30, 24, 16, .88); border: 2px solid var(--wood-edge); border-radius: 10px; padding: 6px 10px; }
+.crew-row { background: rgba(40, 22, 8, .45); border-color: rgba(255,220,160,.35); }
+.crew-role, .crew-free { color: #f3d9ae; }
+.crew-row.off { opacity: .6; }

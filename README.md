@@ -48,3 +48,10 @@ Real blueprints have not arrived yet, so every size is an assumption from the de
 | `lib/` | three.js 0.160 (MIT licence), vendored so the page works offline |
 | `tools/simtest.mjs`, `tools/cubetest.mjs` | Check the physics without a browser: `npm test` |
 | `tools/build-single.mjs` | Packs everything into one HTML file: `npm install`, then `npm run build:single` |
+
+## Spatial Xs and the look (2026-11-15)
+
+- Every cube needs an איקס מרחבי on both side faces and one lying flat in its top; the 2×4 base also needs one at 2 m across the shared klaf (`flatX`, `topX`, `linkX` in `src/levels.js`). The top view has its own drawing sheet.
+- Beyond a single klaf, the structure is tested only in the final check. If any required X is missing or not fully lashed, the Xs that were built work loose when the guy lines come down (`CubeSim.unbrace`), and the structure falls with the rule explained.
+- A klaf can be raised only with all 6 crew assigned and at their posts.
+- Look follows Omer's reference images: a larger sand plaza in a forest clearing, a narrow-lens three-quarter camera, stocky scouts in green caps, wooden UI panels.

@@ -10,11 +10,11 @@ import { makePerson, posePerson, walkPose } from './scene.js';
 
 export const CREW = { waitAtSide: false, speed: 5.5 };
 const SIDE_X = 2.9;   // the waiting row, beside the drawing (left on screen)
-const OFF_X = 7.5;    // where scouts walk off to (past the plaza edge)
+const OFF_X = 15.5;   // where scouts walk off to (into the trees at the plaza edge)
 
 export class Actor {
-  constructor(scene, i) {
-    this.mesh = makePerson(i);
+  constructor(scene, i, look = {}) {
+    this.mesh = makePerson(i, look);
     this.mesh.visible = false;
     scene.add(this.mesh);
     this.home = new THREE.Vector3(SIDE_X, 0, -1.6 + (i % 9) * 0.5);

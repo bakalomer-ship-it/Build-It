@@ -10,7 +10,7 @@ function klafBuild() {
   return { poles, joints, stakes: { BL: 4, BR: 4 }, guyTop: all(true), anchors: all(3), guyTies: all('guy'),
     stakeJoints: Object.fromEntries(STAKE_JOINTS.map(s => [s.id, 'parallel'])), guyOff: {} };
 }
-function run(name, { skipSlots = [], skipJoints = [], innerOff = true, outerOff = false } = {}, LV = LEVELS[1]) {
+function run(name, { skipSlots = [], skipJoints = [], innerOff = true, outerOff = false, unbrace = false } = {}, LV = LEVELS[1]) {
   const cube = LV.cube;
   const poles = {}; for (const s of cube.slots) if (!skipSlots.some(k => k.endsWith('$') ? s.id === k.slice(0, -1) : s.id.includes(k))) poles[s.id] = { length: s.length };
   const joints = {}; for (const j of cube.joints) if (!skipJoints.some(k => j.id.includes(k))) joints[j.id] = j.correct;
@@ -26,7 +26,7 @@ function run(name, { skipSlots = [], skipJoints = [], innerOff = true, outerOff 
   const pushes = [[1.5, 3, [140, 0, 0]], [3.5, 5, [0, 0, 140]], [5.5, 7, [0, 0, -140]],
     [10, 11.5, [140, 0, 0]], [12, 13.5, [-140, 0, 0]], [14, 15.5, [0, 0, 140]], [16, 17.5, [0, 0, -140]]];
   while (t < 19) {
-    if (t >= 8 && !sim.released) { sim.releaseAllGuys(); sim.released = true; }
+    if (t >= 8 && !sim.released) { sim.releaseAllGuys(); sim.released = true; if (unbrace) sim.unbrace(); }
     let p = null; for (const [a, b, f] of pushes) if (t > a && t < b) p = f;
     sim.step(dt, { push: p }); t += dt;
     maxSway = Math.max(maxSway, sim.sway());
@@ -54,3 +54,7 @@ run('no X on the right side of the front cube', { skipSlots: ['C.dAR$', 'C.dBR$'
 run('one X lashing missing in the back cube', { skipJoints: ['j6L2'] }, L3);
 run('no X on either side of the front cube', { skipSlots: ['C.dAR$', 'C.dBR$', 'C.dAL$', 'C.dBL$'] }, L3);
 run('no spatial X at all', { skipSlots: ['dA', 'dB'] }, L3);
+
+// built against the plan: the Xs work loose in the check, and it must fall
+run('full cube, Xs loose (an X missing elsewhere)', { unbrace: true });
+run('full, Xs loose (an X missing elsewhere)', { unbrace: true }, L3);

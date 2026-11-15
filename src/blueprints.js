@@ -34,6 +34,8 @@ export const SIZES = {
     sideDiagLow: 0.62,      // spatial X (איקס מרחבי) on each side, low and high ends on the legs
     sideDiagHigh: 1.68,
     sideDiagLength: 2.4,
+    topDiagLength: 2.6,     // the flat X in the top of each cube (diagonal about 2.4 m)
+    linkDiagLength: 2.4,    // the flat X where two cubes meet, across the shared klaf (about 2.3 m)
     innerGuyDistance: 0.75, // inner guy lines are staked inside the cube and come down once it is braced
   },
 };

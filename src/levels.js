@@ -33,7 +33,7 @@ function sideSlots(side, bay = 0, n = 1) {
   const d = (id, he, v0, v1) => {
     const a = [x, r + v0 + dv, z0], b = [x, r + v1 + dv, z0 + D];
     const L = Math.hypot(b[1] - a[1], b[2] - a[2]);
-    return { id: `C.${id}${S}`, he: `${he} (${name})`, side, bay, kind: 'd', layer: id === 'dA' ? 2 : 3,
+    return { id: `C.${id}${S}`, he: `${he} (${name})`, side, bay, kind: 'd', layer: -1, // like the klaf's own X: on the inside of the legs, touching them
       centre: [x, (a[1] + b[1]) / 2, z0 + D / 2], dir: [0, (b[1] - a[1]) / L, (b[2] - a[2]) / L], length: C.sideDiagLength };
   };
   return [
@@ -58,9 +58,52 @@ function sideJoints(side, bay = 0) {
       at: [side * LEG_X, r + (C.sideDiagLow + C.sideDiagHigh) / 2 + dv, bay * D + D / 2] },
   ];
 }
+// ---- flat Xs at the 2 m level (Omer, 2026-11-15) ----
+// Every cube also has an איקס מרחבי lying flat in its top face, and where two
+// cubes meet there is one more at the 2 m level, across the shared klaf.
+// A flat X is two diagonals resting on the top side poles (side 0 = the top),
+// each lashed to a top side pole at both ends, and to each other at the centre.
+const TOP_INSET = 0.12;       // how far in from the klaf the top X's ends sit
+const LINK_REACH = 0.7;       // the connection X reaches this far into each cube
+function flatX(tag, name, bay, ends, length) {
+  // ends: for each diagonal, [slot id, z] at its two ends on the top side poles
+  const pt = (sid, z) => { const sp = sid.endsWith('2') ? BAY_DV : 0; return [(sid.includes('topL') ? 1 : -1) * LEG_X, r + C.sideTopHeight + sp, z]; };
+  const slots = [], joints = [];
+  ends.forEach(([[s1, z1], [s2, z2]], i) => {
+    const a = pt(s1, z1), b = pt(s2, z2), d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], L = Math.hypot(...d);
+    const id = `C.x${'AB'[i]}${tag}`;
+    slots.push({ id, he: `איקס מרחבי עליון, ${i ? 'מימין לשמאל' : 'משמאל לימין'} (${name})`, side: 0, bay, kind: 'd', layer: 2 + i,
+      centre: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2], dir: d.map(v => v / L), length });
+    joints.push({ id: `C.t${2 * i + 1}${tag}`, a: id, b: s1, correct: 'cross', side: 0, bay, at: a },
+      { id: `C.t${2 * i + 2}${tag}`, a: id, b: s2, correct: 'cross', side: 0, bay, at: b });
+  });
+  const [A, B] = slots;
+  joints.push({ id: `C.t5${tag}`, a: A.id, b: B.id, correct: 'cross', side: 0, bay, at: A.centre });
+  return { slots, joints };
+}
+function topX(bay, n) {
+  const S = bay ? String(bay + 1) : '', z0 = bay * D;
+  return flatX('T' + S, 'מבט על' + bayName(bay, n), bay, [
+    [[`C.topR${S}`, z0 + TOP_INSET], [`C.topL${S}`, z0 + D - TOP_INSET]],
+    [[`C.topL${S}`, z0 + TOP_INSET], [`C.topR${S}`, z0 + D - TOP_INSET]],
+  ], C.topDiagLength);
+}
+// the connection X between cube `bay` and cube `bay+1`, across the klaf they share
+function linkX(bay) {
+  const S0 = bay ? String(bay + 1) : '', S1 = String(bay + 2), z = (bay + 1) * D;
+  return flatX('K' + (bay ? bay + 1 : ''), 'מבט על, בחיבור בין הקוביות', bay + 0.5, [
+    [[`C.topR${S0}`, z - LINK_REACH], [`C.topL${S1}`, z + LINK_REACH]],
+    [[`C.topL${S0}`, z - LINK_REACH], [`C.topR${S1}`, z + LINK_REACH]],
+  ], C.linkDiagLength);
+}
 function makeCube(bays) {
   const slots = [], joints = [];
-  for (let b = 0; b < bays; b++) for (const side of [-1, 1]) { slots.push(...sideSlots(side, b, bays)); joints.push(...sideJoints(side, b)); }
+  const add = x => { slots.push(...x.slots); joints.push(...x.joints); };
+  for (let b = 0; b < bays; b++) {
+    for (const side of [-1, 1]) { slots.push(...sideSlots(side, b, bays)); joints.push(...sideJoints(side, b)); }
+    add(topX(b, bays));
+    if (b < bays - 1) add(linkX(b));
+  }
   return { depth: D, bays, span: bays * D, slots, joints };
 }
 // heights on each leg where a side pole is lashed (the legs need a point there)

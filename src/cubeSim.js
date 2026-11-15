@@ -121,6 +121,17 @@ export class CubeSim {
     if (p1 == null || p2 == null) return;
     this.braces[sid] = this.world.add('buckle', p1, p2, { cap: TUNING.sideDiagCap, tag: 'brace:' + sid });
   }
+  // A structure built against the plan doesn't pass the check: its Xs work loose.
+  // The braces stop holding and the diagonals' lashings go slack (they stay on, but
+  // no longer stiffen anything), so the structure racks on its corner lashings.
+  unbrace() {
+    for (const id in this.braces) this.braces[id].active = false;
+    for (const j of this.cube.joints) {
+      const con = this.jointCons[j.id];
+      if (con && this.slot(j.a).kind === 'd') con.compliance = TUNING.looseCompliance;
+    }
+    this.unbraced = true;
+  }
   // the last part of the check: the outer guy lines come down too, and a
   // braced cube has to stand by itself on its staked legs
   releaseAllGuys() { for (const k of this.klafim) for (const g in k.guys) { k.guys[g].active = false; k.guys[g].released = true; } }

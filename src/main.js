@@ -13,14 +13,15 @@ import { KlafSim, TUNING, jointReachable, slotById, slotParam, slotPoint, klafTo
 import { CubeSim, cubeSlotPoint, cubeSlotParam, cubeJointReachable } from './cubeSim.js';
 import { LEVELS } from './levels.js';
 import {
-  R, makeRenderer, makeWorld, makeBlueprintMesh, drawBlueprint, BP, makePoleMesh, placeCylinder, makeSideSheet, drawSideSheet,
+  R, makeRenderer, makeWorld, makeBlueprintMesh, drawBlueprint, BP, makePoleMesh, placeCylinder, makeSideSheet, drawSideSheet, makeTopSheet, drawTopSheet, POLE_LOOK,
   makeLashing, placeLashing, placeParallelLashing, RopeViz, makeStake, makeDriver,
 } from './scene.js';
 import { sfx, buzz } from './sound.js';
 import { Actor, makeCrew, freeActors, CREW } from './crew.js';
 
 const $ = id => document.getElementById(id);
-const GAP = 1.9 * R;
+// poles that cross are drawn side by side, just touching (at their drawn thickness)
+const GAP = 2 * R * POLE_LOOK;
 // the level being played (?level=2 in the address opens level 2 directly)
 let LV = LEVELS[0];
 try { const n = +new URLSearchParams(location.search).get('level'); if (n >= 1 && n <= LEVELS.length) LV = LEVELS[n - 1]; } catch { /* no address here */ }
@@ -77,13 +78,13 @@ const canvas = $('scene');
 const renderer = makeRenderer(canvas);
 const scene = new THREE.Scene();
 makeWorld(scene);
-const camera = new THREE.PerspectiveCamera(34, 1, 0.15, 300);
+const camera = new THREE.PerspectiveCamera(22, 1, 0.2, 400) // narrow lens: almost isometric, like the reference;
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.dampingFactor = 0.12;
 controls.maxPolarAngle = Math.PI * 0.495;
 controls.minDistance = 1.2;
-controls.maxDistance = 34;
+controls.maxDistance = 55;
 controls.target.set(0, 1, 0.4);
 controls.enabled = false;
 
@@ -130,10 +131,14 @@ for (const m of KM) {
   for (const g of GUYS) { m.ropes[g.id] = new RopeViz(scene); m.ropes[g.id].show(false); }
 }
 {
-  const cubeSlots = LEVELS.find(l => l.cube)?.cube.slots || [];
-  cubeSlots.forEach((s, i) => { const a = makePoleMesh((i % 3) / 2); a.visible = false; scene.add(a); CM.poles[s.id] = [a]; });
-  for (const j of LEVELS.find(l => l.cube)?.cube.joints || []) { const g = makeLashing(); g.visible = false; scene.add(g); CM.lash[j.id] = g; }
+  // meshes for every side pole and lashing of every cube level (ids repeat between levels)
+  let i = 0;
+  for (const L of LEVELS.filter(l => l.cube)) {
+    for (const s of L.cube.slots) if (!CM.poles[s.id]) { const a = makePoleMesh((i++ % 3) / 2); a.visible = false; scene.add(a); CM.poles[s.id] = [a]; }
+    for (const j of L.cube.joints) if (!CM.lash[j.id]) { const g = makeLashing(); g.visible = false; scene.add(g); CM.lash[j.id] = g; }
+  }
   for (const side of [-1, 1]) { const m = makeSideSheet(); m.visible = false; scene.add(m); CM.sheets[side] = m; }
+  { const m = makeTopSheet(); m.visible = false; scene.add(m); CM.sheets[0] = m; }
 }
 useKlaf(0);
 
@@ -146,13 +151,13 @@ const allActors = [...Object.values(people), ...crew];
 window.CREW = CREW;
 
 // the מדריך who runs the inspection (מסדר): a scout leader in a wide-brimmed hat
-const inspector = new Actor(scene, 3);
+const inspector = new Actor(scene, 3, { noCap: true });
 {
   const mat = new THREE.MeshStandardMaterial({ color: 0x5b4a2c, roughness: 0.9 });
   const hat = new THREE.Group();
-  const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.025, 18), mat);
-  const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 0.14, 14), mat); crown.position.y = 0.075;
-  hat.add(brim, crown); hat.position.y = 0.9;
+  const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.025, 18), mat);
+  const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.21, 0.16, 14), mat); crown.position.y = 0.075;
+  hat.add(brim, crown); hat.position.y = 1.06;
   inspector.mesh.userData.torso.add(hat);
   allActors.push(inspector);
 }
@@ -353,9 +358,30 @@ function rebuildCube() { if (G.cube?.sim) { G.cube.sim = null; enterCube(); } }
 function cubeSides() {
   const b = G.cube.build;
   const done = side => LV.cube.slots.filter(s => s.side === side).every(s => b.poles[s.id]) && LV.cube.joints.filter(j => j.side === side).every(j => b.joints[j.id]);
-  return { [-1]: done(-1), [1]: done(1) };
+  return { [-1]: done(-1), [1]: done(1), 0: done(0) };
 }
-function cubeComplete() { const d = cubeSides(); return d[-1] && d[1]; }
+function cubeComplete() { const d = cubeSides(); return d[-1] && d[1] && d[0]; }
+// Every איקס מרחבי the plan calls for (Omer, 2026-11-15): one on each side face of
+// every cube, one flat in the top of every cube, and in the base one more at the
+// 2 m level where the cubes meet. Each is listed with whether it is complete:
+// both diagonals in place and every lashing on them tied.
+function cubeXs() {
+  const b = G.cube.build, c = LV.cube, bays = c.bays ?? 1, out = [];
+  const one = (ids, where, side) => {
+    const js = c.joints.filter(j => ids.includes(j.a) || (j.b && ids.includes(j.b) && ids.includes(j.a)));
+    const missingPoles = ids.filter(id => !b.poles[id]);
+    const missingJoints = js.filter(j => !b.joints[j.id] || !cubeJointReachable(j, c, b.poles)).map(j => j.id);
+    out.push({ ids, where, side, ok: !missingPoles.length && !missingJoints.length, missingPoles, missingJoints, ends: js.map(j => j.id) });
+  };
+  const bayOf = bay => bays > 1 ? (bay ? ' של הקובייה האחורית' : ' של הקובייה הקדמית') : '';
+  for (let bay = 0; bay < bays; bay++) {
+    const S = bay ? String(bay + 1) : '';
+    for (const side of [-1, 1]) one([`C.dA${side > 0 ? 'L' : 'R'}${S}`, `C.dB${side > 0 ? 'L' : 'R'}${S}`], `${side > 0 ? 'בצד השמאלי' : 'בצד הימני'}${bayOf(bay)}`, side);
+    one([`C.xAT${S}`, `C.xBT${S}`], `בחלק העליון${bayOf(bay)}`, 0);
+    if (bay < bays - 1) one([`C.xAK${bay ? bay + 1 : ''}`, `C.xBK${bay ? bay + 1 : ''}`], 'בגובה 2 מ׳, בחיבור בין הקוביות', 0);
+  }
+  return out;
+}
 function startSim() {
   G.sim = new KlafSim(G.build, K().cfg);
   G.uprightFor = 0;
@@ -374,13 +400,14 @@ let camMode = null, camTween = null, closeup = null;
 function stagePose(mode) {
   const aspect = window.innerWidth / window.innerHeight;
   const far = aspect < 1.6 ? 1.25 : 1; // narrower screens step back a little
-  // seen from high above, so the klaf and the scouts stay small in a big plaza (Omer)
+  // Omer's reference: a fixed high three-quarter view (about 50 to 60 degrees up),
+  // turned about 45 degrees so the structure is seen corner-on, through a narrow lens
   const at = (target, dist, elev, azim) => ({ target, pos: target.clone().add(new THREE.Vector3(Math.sin(azim) * Math.cos(elev), Math.sin(elev), -Math.cos(azim) * Math.cos(elev)).multiplyScalar(dist * far)) });
   const z = LV.cube && cubeStage(G.stage) ? (LV.cube.span ?? LV.cube.depth) / 2 : z0();
-  if (mode === 'buildView') return at(new THREE.Vector3(0, 0, z + 1.0), 10.5, 1.05, 0.3);
-  if (mode === 'workView') return at(new THREE.Vector3(0, 0.5, z + 0.2), 9, 0.8, 0.55);
-  if (mode === 'cubeView') return at(new THREE.Vector3(0, 0.9, z), 11 + 2.5 * ((LV.cube?.bays ?? 1) - 1), 0.75, 0.75);
-  return at(new THREE.Vector3(0, 0.7, z + 0.4), 17, 0.85, 0.55);
+  if (mode === 'buildView') return at(new THREE.Vector3(0, 0, z + 1.0), 16.5, 1.08, 0.5);
+  if (mode === 'workView') return at(new THREE.Vector3(0, 0.6, z + 0.2), 15, 0.95, 0.72);
+  if (mode === 'cubeView') return at(new THREE.Vector3(0, 0.9, z), 17 + 4 * ((LV.cube?.bays ?? 1) - 1), 0.92, 0.78);
+  return at(new THREE.Vector3(0, 0.7, z + 0.4), 26, 0.98, 0.78);
 }
 function setCameraMode(mode) {
   // a stage change during a lashing close-up: finish the tie at once and leave the close-up
@@ -424,7 +451,7 @@ function lashCloseup(pos, onTied, hold = 420, withTier = true) {
   if (dir.lengthSq() < 1e-6) dir.set(0, 0, -1);
   dir.normalize();
   // a short, pulled-back look from above: the coils and the scout both in view
-  const near = P.clone().addScaledVector(dir, withTier ? 3.0 : 1.8).add(new THREE.Vector3(0, withTier ? 4.0 : 2.4, 0));
+  const near = P.clone().addScaledVector(dir, withTier ? 4.6 : 2.8).add(new THREE.Vector3(0, withTier ? 6.0 : 3.7, 0));
   const look = withTier ? P.clone().add(new THREE.Vector3(0, 0.5, 0)).addScaledVector(dir, -0.15) : P;
   const mine = closeup = { phase: 'in', tier: withTier ? pos : null };
   camTween = {
@@ -959,6 +986,14 @@ function toggleCrew(gid) {
   }
   sfx.tick(); renderCrew(); refreshAll();
 }
+// Omer: a klaf is raised only once the whole crew is assigned and everyone is at their post
+const crewActor = g => g.lifter ? people[g.leg === 'legR' ? 'lift1' : 'lift2'] : people['guy' + g.id];
+function crewReady() {
+  const b = G.build, roles = crewRoles();
+  const missing = roles.filter(g => b.crew[g.id] == null).length;
+  const walking = !missing && roles.some(g => !crewActor(g).arrived());
+  return { missing, walking, ok: !missing && !walking };
+}
 let crewKey = '';
 function renderCrew() {
   const b = G.build; if (!b) return;
@@ -983,6 +1018,11 @@ $('crew-list').addEventListener('click', e => { const r = e.target.closest('.cre
     const dy = e.clientY - lastY; lastY = e.clientY;
     if (dy <= 0) return;
     if (!G.sim.canPull()) { flashHint('המושכים מושכים ב<b>יתרים הקדמיים</b>: כפתו אותם קודם לראש הקלף'); return; }
+    if (G.sim.angle() < 8) {
+      const cr = crewReady();
+      if (cr.missing) { flashHint(`<b>צריך צוות של ${crewSize()} כדי להרים קלף.</b> שבצו עוד ${cr.missing === 1 ? 'צופה אחד' : cr.missing + ' צופים'} בחלון הצוות`); return; }
+      if (cr.walking) { flashHint('הצוות עוד בדרך למקומות. מושכים כשכולם במקום'); return; }
+    }
     ropeOff += dy;
     $('rp-rope').style.backgroundPosition = `0 ${ropeOff}px`;
     G.sim.pullTo(G.sim.target + dy * 0.16);
@@ -1014,13 +1054,14 @@ function clearJobs() { while (jobs.length) endJob(jobs[0]); }
 function requestDrive(kind, id) {
   const store = kind === 'leg' ? G.build.stakes : G.build.anchors;
   const max = kind === 'leg' ? LEG_STAKE_HITS : ANCHOR_HITS;
-  let job = jobs.find(j => j.type === 'drive' && j.id === id);
+  // stake ids repeat on every klaf: a job belongs to the klaf it was started on
+  let job = jobs.find(j => j.type === 'drive' && j.id === id && j.k === G.ki);
   if ((store[id] || 0) + (job ? job.queued : 0) >= max) return;
   if (!job) {
     const [x, z] = kind === 'leg' ? [LEG_STAKES.find(s => s.id === id).u, stakeZ()] : (a => [a[0], a[2]])(anchorPos(GUYS.find(g => g.id === id)));
     const two = freeActors(crew, 2, new THREE.Vector3(x, 0, z));
     if (!two) { flashHint('כל הצופים עסוקים, עוד רגע…'); return; }
-    job = { type: 'drive', kind, id, x, z, actors: two, queued: 0, t: 0, idle: 0, mesh: getDriver() };
+    job = { type: 'drive', k: G.ki, kind, id, x, z, actors: two, queued: 0, t: 0, idle: 0, mesh: getDriver() };
     two.forEach(a => { a.busy = job; });
     jobs.push(job);
   }
@@ -1082,7 +1123,7 @@ function klafRestEnds(sid) {
 function carryStands(job) {
   const [e1, e2] = job.fin();
   let d = [e2[0] - e1[0], 0, e2[2] - e1[2]]; const dl = Math.hypot(d[0], d[2]) || 1; d = [d[0] / dl, 0, d[2] / dl];
-  const n = job.cube ? [cubeSlot(job.sid).side, 0, 0] : [-d[2], 0, d[0]];
+  const n = job.cube ? (cubeSlot(job.sid).side ? [cubeSlot(job.sid).side, 0, 0] : [-d[2], 0, d[0]]) : [-d[2], 0, d[0]];
   const off = job.cube ? 0.45 : 0.38;
   return [[e1, 1], [e2, -1]].map(([e, k]) => [e[0] + d[0] * 0.3 * k + n[0] * off, 0, e[2] + d[2] * 0.3 * k + n[2] * off]);
 }
@@ -1117,7 +1158,10 @@ function carriedSegs(job) {
   return [[add3(c, d, -len / 2), add3(c, d, len / 2)]];
 }
 function updateJobs(dt) {
-  for (const job of [...jobs]) (job.type === 'drive' ? updateDrive : updateCarry)(job, dt);
+  for (const job of [...jobs]) {
+    if (job.type !== 'drive') { updateCarry(job, dt); continue; }
+    const keep = G.ki; useKlaf(job.k); updateDrive(job, dt); useKlaf(keep);
+  }
 }
 
 // ---------------- action buttons and hints ----------------
@@ -1142,7 +1186,7 @@ function flashHint(html) { $('hint-text').innerHTML = html; flashUntil = perform
 function hintText() {
   const b = G.build, sim = G.sim;
   if (G.replay) return '<b>הילוך חוזר איטי</b> · מה שגרם לקריסה מסומן באדום · הקישו כדי לדלג';
-  if (G.falling) return '<b>הקלף קורס…</b>';
+  if (G.falling) return G.falling.cube ? '<b>המבנה קורס…</b>' : '<b>הקלף קורס…</b>';
   const nPoles = SLOTS.filter(s => b.poles[s.id]).length;
   const nJ = JOINTS.filter(j => b.joints[j.id]).length;
   // after the first structure's tutorial: no step guidance, only where things stand
@@ -1263,7 +1307,12 @@ function checkPush(dt) {
   c.loading = false;
   c.label = c.t < 1.5 ? 'כולם עוזבים…' : 'המדריך עובר לבדיקה הבאה…';
   if (c.release != null && c.t >= c.release) {
-    if (!c.released) { c.released = true; G.cube.sim.releaseAllGuys(); }
+    if (!c.released) {
+      c.released = true; G.cube.sim.releaseAllGuys();
+      // built against the plan (an X missing or not fully lashed), the bracing doesn't
+      // hold: the Xs that are there work loose and the structure racks on its corners
+      if (cubeXs().some(x => !x.ok)) G.cube.sim.unbrace();
+    }
     c.label = 'מורידים את כל היתרים: קובייה עם איקסים עומדת בעצמה';
   }
   for (const p of c.pushes || PUSHES) if (c.t >= p.from && c.t <= p.to) {
@@ -1328,26 +1377,21 @@ function watchCube(dt) {
 function explainCube(kind) {
   if (kind === 'load') return { ...loadRule(G.klafim.some(k => topMissing(k.build))), focus: { cubePoles: [], cubeGhosts: [], cubeJoints: [] } };
   const b = G.cube.build, cs = G.cube.sim;
-  const sideName = side => side > 0 ? 'הצד השמאלי' : 'הצד הימני';
   const focus = { cubePoles: [], cubeGhosts: [], cubeJoints: [] };
-  const badSides = [];
-  for (const side of [-1, 1]) {
-    let full = true;
-    for (let bay = 0; bay < (LV.cube.bays ?? 1); bay++) for (const d of ['dA', 'dB']) {
-      const id = `C.${d}${side > 0 ? 'L' : 'R'}${bay ? bay + 1 : ''}`;
-      const ends = LV.cube.joints.filter(j => j.a === id && !j.b);
-      if (!b.poles[id]) { full = false; focus.cubeGhosts.push(ends.map(j => j.id)); }
-      else if (ends.some(j => !b.joints[j.id])) { full = false; focus.cubePoles.push(id); focus.cubeJoints.push(...ends.filter(j => !b.joints[j.id]).map(j => j.id)); }
-    }
-    if (!full) badSides.push(side);
+  const bad = cubeXs().filter(x => !x.ok);
+  for (const x of bad) {
+    // a ghost of each missing diagonal, between its two end lashings (not the centre one)
+    for (const pid of x.missingPoles) focus.cubeGhosts.push(x.ends.filter(id => { const j = cubeJoint(id); return j.a === pid && !(j.b && x.ids.includes(j.b)); }));
+    for (const id of x.ids) if (b.poles[id] && x.missingJoints.some(j => cubeJoint(j).a === id)) focus.cubePoles.push(id);
+    focus.cubeJoints.push(...x.missingJoints.filter(j => !x.missingPoles.includes(cubeJoint(j).a)));
   }
   const top = cs.klafim[0].topCentre();
   const dir = top[2] > 0 ? 'אחורה' : 'קדימה';
   if (kind === 'slid') return { rule: 'רגלי הקלפים עומדות ליד בז״נטים ונכפתות אליהם', detail: 'רגלי הקובייה החליקו על הקרקע.', focus: { feet: true } };
   if (kind === 'rack') return { rule: 'כל קלף צריך איקס מלא, כפי שהוא מופיע בשרטוט', detail: 'אחד הקלפים התעקם למקבילית והקובייה קרסה.', focus };
-  if (badSides.length) return {
-    rule: 'כל צד של קובייה צריך איקס מרחבי מלא, כפי שהוא מופיע בשרטוט',
-    detail: `ב${badSides.map(sideName).join(' וב')} אין איקס מלא. בלי איקס, צד של סנדות עם כפיתות בפינות בלבד מתקפל למקבילית: כל עוד היתרים מחזיקים לא רואים את זה, אבל כשהורידו אותם הקובייה נטתה ${dir}. אלכסון לבד מחזיק רק כשמושכים אותו.`,
+  if (bad.length) return {
+    rule: 'כל קובייה צריכה איקס מרחבי מלא בשני הצדדים ובחלק העליון' + (LV.cube.bays > 1 ? ', ועוד אחד בגובה 2 מ׳ בחיבור בין הקוביות' : ''),
+    detail: `אין איקס מלא ${bad.map(x => x.where).join(', ')}. מבנה שלא נבנה לפי השרטוט לא עומד: כל עוד היתרים מחזיקים לא רואים את זה, אבל כשהורידו אותם האיקסים שכן נבנו השתחררו, והמבנה נטה ${dir} ונפל.`,
     focus };
   const missH = LV.cube.slots.filter(s => s.kind === 'h' && !b.poles[s.id]);
   if (missH.length) return { rule: 'שני הקלפים מחוברים בחיבור תחתון ועליון בכל צד', detail: `חסרות ${missH.length} סנדות חיבור, והקלפים זזו זה מול זה.`, focus: { cubeGhosts: [] } };
@@ -1476,6 +1520,7 @@ function finish() {
     <div class="stars">${stars}</div>
     <ul class="inspect">
       <li class="ok">${LV.cube ? 'הקובייה עמדה' : 'הקלף עמד'} בדחיפות מכל הכיוונים${LV.cube ? ', גם בלי יתרים' : ''}</li>
+      ${LV.cube ? `<li class="ok">איקס מרחבי מלא בכל צד ובחלק העליון${LV.cube.bays > 1 ? ', וגם בחיבור בין הקוביות' : ''}</li>` : ''}
       <li class="ok">החזיק את דלי המים על הרוחב העליון</li>
       <li class="${s.tied === s.total ? 'ok' : 'no'}">${s.tied === s.total ? 'כל הכפיתות במקום' : 'המדריך מצא כפיתות חסרות'}</li>
       <li class="${s.correct === s.total ? 'ok' : 'no'}">${s.correct === s.total ? 'כל כפיתה מהסוג הנכון' : 'יש כפיתות מסוג לא נכון'}</li>
@@ -1510,6 +1555,7 @@ function reopenForFixes() {
 function sheetOf(j) {
   const band = y => y < 1.0 ? 'גובה 0–1 מ׳' : 'גובה 1–2 מ׳';
   const of = LV.klafim.length > 1 && j.klaf != null ? `, ${LV.klafim[j.klaf].he}` : '';
+  if (j.cube && j.side === 0) return 'שרטוט מבט על' + (LV.cube.bays > 1 ? (j.bay % 1 ? ', בחיבור בין הקוביות' : j.bay ? ', קובייה אחורית' : ', קובייה קדמית') : '');
   if (j.cube) return `שרטוט ${j.side > 0 ? 'הצד השמאלי' : 'הצד הימני'}${LV.cube.bays > 1 ? (j.bay ? ', קובייה אחורית' : ', קובייה קדמית') : ''}, ${band(j.at[1])}`;
   if (j.guy) return 'מפת יתרים' + of;
   if (j.stake) return 'מפת בסיסים (רגליים לבז״נטים)' + of;
@@ -1544,7 +1590,7 @@ function restart() {
     m.blueprint.material.opacity = 0; m.blueprint.visible = false;
     if (used) m.blueprint.position.z = BP.v0 + LV.klafim[i].z0;
   });
-  if (LV.cube) for (const side of [-1, 1]) drawSideSheet(CM.sheets[side], LV.cube, side, LV.klafim.map(k => k.he));
+  if (LV.cube) { for (const side of [-1, 1]) drawSideSheet(CM.sheets[side], LV.cube, side, LV.klafim.map(k => k.he)); drawTopSheet(CM.sheets[0], LV.cube, LV.klafim.map(k => k.he)); }
   $('timer').textContent = '0:00';
   drawPlaza();
   goStage(STAGES[0].key);
@@ -1559,12 +1605,12 @@ function switchLevel(n) {
 // ---------------- the growing plaza ----------------
 // Every structure the player has passed stays standing on the plaza, in its
 // own spot around the building ground, so the camp grows level by level.
-const PLAZA_SPOTS = { 1: { x: -5.6, z: 3.6, yaw: 0.35 }, 2: { x: 5.4, z: 3.2, yaw: -0.3 }, 3: { x: -5.4, z: -3.4, yaw: 1.2 } };
+const PLAZA_SPOTS = { 1: { x: -9, z: 6.5, yaw: 0.35 }, 2: { x: 8.5, z: 7, yaw: -0.3 }, 3: { x: -9.5, z: -5.5, yaw: 1.2 } };
 const plazaShown = {};
 function makeDisplay(L) {
   const g = new THREE.Group();
   const pole = (a, b) => { const m = makePoleMesh(0); placeCylinder(m, a, b); g.add(m); };
-  const knot = (p, dA, dB) => { const k = makeLashing(); placeLashing(k, p, dA, dB); g.add(k); };
+  const knot = (p, dA, dB, sep) => { const k = makeLashing(); placeLashing(k, p, dA, dB, sep); g.add(k); };
   const N = [0, 0, -1]; // a standing klaf faces the pullers
   for (const cfg of L.klafim) {
     const at = (u, v, slot) => { const p = klafToWorld(u, v, 90); p[2] += cfg.z0; return add3(p, N, slot ? layerOff(slot) : 0); };
@@ -1574,7 +1620,8 @@ function makeDisplay(L) {
     }
     for (const j of JOINTS) {
       const A = slotById(j.a), B = slotById(j.b);
-      knot(at(j.at[0], j.at[1], A), [A.dir[0], A.dir[1], 0], [B.dir[0], B.dir[1], 0]);
+      const pa = at(j.at[0], j.at[1], A), pb = at(j.at[0], j.at[1], B);
+      knot(pa.map((v, i) => (v + pb[i]) / 2), [A.dir[0], A.dir[1], 0], [B.dir[0], B.dir[1], 0], pa.map((v, i) => (v - pb[i]) / 2));
     }
     for (const st of LEG_STAKES) { const m = makeStake(LEG_STAKE_LEN); m.position.set(st.u, -0.3, cfg.z0 - GAP); g.add(m); }
     // a klaf standing alone keeps its guy lines; inside a cube the inner ones are down
@@ -1729,7 +1776,7 @@ function mark(i) {
   return marks[i];
 }
 const ghostMat = new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.5, depthWrite: false });
-const ghostPoles = [0, 1, 2, 3].map(() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1, 10), ghostMat); m.visible = false; scene.add(m); return m; });
+const ghostPoles = [...Array(12).keys()].map(() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1, 10), ghostMat); m.visible = false; scene.add(m); return m; });
 function startReplay() {
   if (rec.length < 2 || !G.falling.t0) { collapseCard(); return; }
   const t0 = Math.max(rec[0].t, G.falling.t0 - REPLAY.before);
@@ -1756,7 +1803,12 @@ function drawFocus() {
   for (const sid of f.cubePoles || []) CM.poles[sid].forEach(m => m.material[0].emissive.setRGB(0.55 + 0.4 * pulse, 0.05, 0));
   (f.cubeGhosts || []).forEach((js, i) => {
     const cs = G.cube.sim; if (!cs) return;
-    const [pa, pb] = js.map(id => { const q = cs.legParticle(cubeJoint(id)); return q == null ? null : cs.pos(q); });
+    const [pa, pb] = js.map(id => {
+      const j = cubeJoint(id);
+      // a flat X ends on a top side pole, a side X on a klaf leg
+      const q = j.b ? cs.findParticle(j.b, cubeSlotParam(cubeSlot(j.b), j.at)) : cs.legParticle(j);
+      return q == null ? null : cs.pos(q);
+    });
     if (pa && pb && ghostPoles[i]) placeCylinder(ghostPoles[i], pa, pb);
   });
   const spots = [...(f.joints || []).map(id => jointPos(JOINTS.find(j => j.id === id))), ...(f.cubeJoints || []).map(id => cubeJointPos(cubeJoint(id)))];
@@ -1789,7 +1841,7 @@ function setPolesOpacity(o) {
 // through. The work order and the lashing guide are part of the first
 // structure's tutorial only.
 function folderTabs() {
-  if (LV.cube) return [['drawing', 'שרטוט קלף (קדמי ואחורי)'], ['sideR', 'שרטוט הצד הימני'], ['sideL', 'שרטוט הצד השמאלי'], ['poles', 'רשימת סנדות']];
+  if (LV.cube) return [['drawing', 'שרטוט קלף'], ['sideR', 'שרטוט הצד הימני'], ['sideL', 'שרטוט הצד השמאלי'], ['top', 'שרטוט מבט על'], ['poles', 'רשימת סנדות']];
   return [['drawing', 'שרטוט הקלף'], ['poles', 'רשימת סנדות'], ...(LV.tutorial ? [['order', 'סדר עבודה (הדרכה)'], ['lashings', 'איזו כפיתה איפה (הדרכה)']] : [])];
 }
 function poleTable() {
@@ -1802,8 +1854,11 @@ function poleTable() {
   ];
   if (LV.cube) {
     const c = SIZES.cube;
-    rows.push(['חיבורים בין הקלפים (תחתון ועליון בכל צד)', 4, m(c.sideHorizontalLength)]);
-    rows.push(['אלכסונים לאיקסים מרחביים (שניים בכל צד)', 4, m(c.sideDiagLength)]);
+    const bays = LV.cube.bays ?? 1;
+    rows.push(['חיבורים בין הקלפים (תחתון ועליון בכל צד)', 4 * bays, m(c.sideHorizontalLength)]);
+    rows.push(['אלכסונים לאיקסים מרחביים בצדדים (שניים בכל צד)', 4 * bays, m(c.sideDiagLength)]);
+    rows.push(['אלכסונים לאיקס המרחבי העליון (שניים בכל קובייה)', 2 * bays, m(c.topDiagLength)]);
+    if (bays > 1) rows.push(['אלכסונים לאיקס בגובה 2 מ׳ בחיבור בין הקוביות', 2 * (bays - 1), m(c.linkDiagLength)]);
   }
   rows.push(['בז״נטים לרגליים', 2 * n, m(k.legStakeLength)], ['בז״נטים ליתרים', 4 * n, m(k.guyStakeLength)]);
   return `<table><thead><tr><th>סנדה</th><th>כמות</th><th>אורך</th></tr></thead><tbody>
@@ -1824,6 +1879,10 @@ function openFolder(tab = 'drawing') {
   } else if (tab === 'sideR' || tab === 'sideL') {
     const c = document.createElement('canvas');
     drawSideSheet(null, LV.cube, tab === 'sideL' ? 1 : -1, LV.klafim.map(k => k.he), c);
+    body.appendChild(c);
+  } else if (tab === 'top') {
+    const c = document.createElement('canvas');
+    drawTopSheet(null, LV.cube, LV.klafim.map(k => k.he), c);
     body.appendChild(c);
   } else if (tab === 'poles') {
     body.innerHTML = poleTable();
@@ -1857,10 +1916,12 @@ $('btn-full').addEventListener('click', async () => {
 
 // ---------------- the cube's side poles ----------------
 // segments of a side pole: from the simulation, or (plan) where the drawing puts it
+// side poles are drawn a little outside their side, flat Xs a little above the poles they rest on
+const cubeOff = (slot, layer) => slot.side ? [slot.side * layer * GAP, 0, 0] : [0, (layer - 1) * GAP, 0];
 function cubeSegs(sid, plan = false, len = null) {
   const slot = cubeSlot(sid); const L = len ?? G.cube.build.poles[sid]?.length;
   if (L == null) return null;
-  const off = [slot.side * slot.layer * GAP, 0, 0];
+  const off = cubeOff(slot, slot.layer);
   const cs = G.cube.sim;
   if (!plan && cs) {
     const P = cs.poleParticles[sid]; if (!P) return null;
@@ -1868,10 +1929,16 @@ function cubeSegs(sid, plan = false, len = null) {
   }
   return [[add3(cubeSlotPoint(slot, -L / 2), off, 1), add3(cubeSlotPoint(slot, L / 2), off, 1)]];
 }
+// from the lashing's centre to pole A's drawn axis
+function cubeJointSep(j) {
+  const slot = cubeSlot(j.a), oa = cubeOff(slot, slot.layer), ob = j.b ? cubeOff(cubeSlot(j.b), cubeSlot(j.b).layer) : [0, 0, 0];
+  return oa.map((v, i) => (v - ob[i]) / 2);
+}
 function cubeJointPos(j) {
   const slot = cubeSlot(j.a), cs = G.cube.sim;
-  const layer = j.b ? (slot.layer + cubeSlot(j.b).layer) / 2 : slot.layer / 2;
-  const off = [slot.side * layer * GAP, 0, 0];
+  // halfway between the two poles' drawn centres (a klaf leg is drawn where it is)
+  const oa = cubeOff(slot, slot.layer), ob = j.b ? cubeOff(cubeSlot(j.b), cubeSlot(j.b).layer) : [0, 0, 0];
+  const off = oa.map((v, i) => (v + ob[i]) / 2);
   if (cs) {
     const id = cs.findParticle(j.a, cubeSlotParam(slot, j.at));
     if (id != null) return add3(cs.pos(id), off, 1);
@@ -1892,13 +1959,13 @@ function drawCube(dt) {
     const j = on && cubeJoint(jid);
     if (!j || !G.cube.build.joints[jid] || !cubeJointReachable(j, LV.cube, G.cube.build.poles) || G.cube.carrying[j.a] || (j.b && G.cube.carrying[j.b])) { g.visible = false; continue; }
     const da = cubeSlot(j.a).dir, db = j.b ? cubeSlot(j.b).dir : [0, 1, 0];
-    placeLashing(g, cubeJointPos(j), da, db);
+    placeLashing(g, cubeJointPos(j), da, db, cubeJointSep(j));
     g.visible = !fadedOut();
     coilProgress(g, jid);
   }
   // the side drawings lie on the ground beside each side while it is built
   const done = on ? cubeSides() : {};
-  for (const side of [-1, 1]) {
+  for (const side of [-1, 1, 0]) {
     const m = CM.sheets[side];
     const show = on && G.stage === 'cube' && !done[side];
     m.material.opacity = Math.max(0, Math.min(0.92, m.material.opacity + (show ? 1 : -1) * dt / 0.5));
@@ -1924,7 +1991,8 @@ function drawLashings() {
     if (!on) { g.visible = false; continue; }
     const p = jointPos(j); if (!p) { g.visible = false; continue; }
     g.visible = !fadedOut();
-    placeLashing(g, p, poleDir(j.a), poleDir(j.b));
+    const n = G.sim ? visNormal() : [0, 1, 0], h = (layerOff(slotById(j.a)) - layerOff(slotById(j.b))) / 2;
+    placeLashing(g, p, poleDir(j.a), poleDir(j.b), n.map(v => v * h));
     coilProgress(g, j.id);
   }
   for (const sj of STAKE_JOINTS) {
@@ -1946,13 +2014,13 @@ function drawStakes() {
   const b = G.build;
   for (const st of LEG_STAKES) {
     const m = stakeMeshes[st.id], hits = b.stakes[st.id] || 0;
-    m.visible = hits > 0 || jobs.some(j => j.id === st.id);
+    m.visible = hits > 0 || jobs.some(j => j.id === st.id && j.k === G.ki);
     const top = stakeTopPos(st)[1];
     m.position.set(st.u, top - LEG_STAKE_LEN, stakeZ());
   }
   for (const g of GUYS) {
     const m = stakeMeshes['A' + g.id], hits = b.anchors[g.id] || 0;
-    m.visible = hits > 0 || jobs.some(j => j.id === g.id);
+    m.visible = hits > 0 || jobs.some(j => j.id === g.id && j.k === G.ki);
     const a = anchorPos(g);
     m.position.set(a[0], -0.25 * Math.min(hits, ANCHOR_HITS) / ANCHOR_HITS, a[2]);
     m.rotation.x = g.side * 0.35; // anchor stakes lean away from the load
@@ -1971,13 +2039,10 @@ function drawKlafCrew(withPeople) {
   const place = withPeople ? placeActor : () => {};
   const ang = sim.angle();
   const holding = !sim.lettingGo;
-  // base holders keep the feet in place while it goes up
-  if (holding && ang < 85 && (st === 'raise')) {
-    place(people.baseL, [-0.9, 0, z0() - 0.65], 0, 0.25, 0.9);
-    place(people.baseR, [0.9, 0, z0() - 0.65], 0, 0.25, 0.9);
-  }
+  // no separate base holders: the crew is exactly 6 (Omer), and the two lifters steady the klaf
   // lifters carry the top until the guy lines take over
-  if (holding && sim.target > 0 && sim.target < 55 && ang < 60) {
+  // (they stand ready at the top before the pull starts, too)
+  if (holding && sim.target < 55 && ang < 60 && st === 'raise') {
     const tp = sim.topCentre();
     const reach = Math.min(Math.PI * 0.9, 0.6 + ang / 40);
     if (sim.lifted('legR')) place(people.lift1, [0.5, 0, tp[2] + 0.3], Math.PI, 0.15, reach);
@@ -2099,7 +2164,8 @@ function frame(now) {
         const load = G.check?.loading ? TUNING.loadForce : 0;
         if (cs) cs.step(h, { push, load }); else sim.step(h, { wobble, push, load });
         record(h);
-        if (cs) watchCube(h); else watchSim(h);
+        // beyond a single klaf, the structure is tested only in the check at the end (Omer)
+        if (cs) { if (G.check?.running) watchCube(h); } else watchSim(h);
         if (G.falling) break;
       }
     }
@@ -2133,4 +2199,4 @@ restart();
 requestAnimationFrame(frame);
 
 // debug hook for automated tests
-window.__game = { get state() { return G; }, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, toScreen, targets: () => targets };
+window.__game = { get state() { return G; }, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };

@@ -19,6 +19,7 @@ export const TUNING = {
   loadForce: 300,        // N the inspection's bucket of water on the top horizontal (about 30 kg)
   tiedGuyCompliance: 1e-5, // a guy line fixed to its stake stretches very little
   cubeGuyCompliance: 4e-4, // ... but a few centimetres under a push, which the cube's Xs take over
+  looseCompliance: 0.05,   // a diagonal's lashing that worked loose (structure built against the plan)
   sideDiagCap: 60,         // N a cube side diagonal carries in compression before its lashings slip
   cubeSwayLimit: 0.25,     // m the cube may lean in the push test before it counts as falling
 };

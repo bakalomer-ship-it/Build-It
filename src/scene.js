@@ -4,6 +4,8 @@ import { SLOTS, LEVEL, LEG_STAKES } from './level1.js';
 import { slotPoint } from './klafSim.js';
 
 export const R = LEVEL.poleRadius;
+// poles are drawn a little thicker than the physics radius: chunky, like the reference
+export const POLE_LOOK = 1.3;
 
 export function makeRenderer(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -32,27 +34,32 @@ function rand(seed) { let s = seed; return () => (s = (s * 16807) % 2147483647) 
 // high above (the feel of a mobile base-building game, in a look of our own):
 // soft bright colours, a green meadow, a sandy plaza in the middle, round
 // cartoon trees. Realism lives in the building rules and the physics.
+// Omer's reference images (2026-11-15): a warm sand plaza in a clearing ringed by
+// dense forest, rocks, a tent and crates; chunky wooden poles with thick rope.
 export const PALETTE = {
-  skyTop: '#4fa8e8', skyBottom: '#c9ecff',
-  grass: '#79c24a', grassDark: '#5fa83a', grassLight: '#97d665',
-  plaza: '#e6cd93', plazaEdge: '#c9a86a',
-  leaf: [0x5cb23a, 0x4a9e30, 0x74c445], trunk: 0x8a5a33, rock: 0xb9b2a6,
+  skyTop: '#6fb7e6', skyBottom: '#dff1ff',
+  grass: '#5e9f36', grassDark: '#477f27', grassLight: '#7dbb47',
+  plaza: '#e8bf6a', plazaEdge: '#c79447',
+  leaf: [0x4f9a2c, 0x3f8424, 0x66b23a], pine: [0x2f7d32, 0x3b8f3a, 0x276b2b], trunk: 0x7a4a26, rock: 0xa9a49a, moss: 0x6f9e35,
 };
+// the plaza: bigger than in the reference images (Omer), so many structures fit
+export const PLAZA = { w: 30, d: 26, r: 7, cz: 0.5 };
 export function makeWorld(scene) {
   scene.background = canvasTex(4, 256, (g, w, h) => {
     const gr = g.createLinearGradient(0, 0, 0, h);
     gr.addColorStop(0, PALETTE.skyTop); gr.addColorStop(1, PALETTE.skyBottom);
     g.fillStyle = gr; g.fillRect(0, 0, w, h);
   });
-  scene.fog = new THREE.Fog(0xbfe2c8, 50, 120);
+  scene.fog = new THREE.Fog(0x9cc58a, 70, 160);
 
-  const hemi = new THREE.HemisphereLight(0xd8efff, 0x6f9a45, 1.35);
+  const hemi = new THREE.HemisphereLight(0xe4f2ff, 0x6b8a3a, 1.15);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff0d0, 2.3);
-  sun.position.set(-6, 14, -7);
+  // a warm late-morning sun from the upper left, long soft shadows
+  const sun = new THREE.DirectionalLight(0xffe6b8, 2.7);
+  sun.position.set(-9, 15, -8);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  Object.assign(sun.shadow.camera, { left: -20, right: 20, top: 20, bottom: -20, near: 1, far: 60 });
+  Object.assign(sun.shadow.camera, { left: -24, right: 24, top: 24, bottom: -24, near: 1, far: 70 });
   sun.shadow.bias = -0.0008;
   sun.shadow.normalBias = 0.02;
   sun.shadow.radius = 4;
@@ -82,7 +89,7 @@ export function makeWorld(scene) {
   scene.add(ground);
 
   // the plaza: a soft rounded patch of packed sand where the scouts build
-  const PW = 16, PD = 14, PR = 3;
+  const PW = PLAZA.w, PD = PLAZA.d, PR = PLAZA.r;
   const shape = new THREE.Shape();
   shape.moveTo(-PW / 2 + PR, -PD / 2);
   shape.lineTo(PW / 2 - PR, -PD / 2); shape.quadraticCurveTo(PW / 2, -PD / 2, PW / 2, -PD / 2 + PR);
@@ -91,52 +98,96 @@ export function makeWorld(scene) {
   shape.lineTo(-PW / 2, -PD / 2 + PR); shape.quadraticCurveTo(-PW / 2, -PD / 2, -PW / 2 + PR, -PD / 2);
   const sandTex = canvasTex(256, 256, (g, w, h) => {
     g.fillStyle = PALETTE.plaza; g.fillRect(0, 0, w, h);
+    // soft packed-sand tiles, as in the reference, plus grit
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
+      g.fillStyle = (x + y) % 2 ? 'rgba(255,240,200,.05)' : 'rgba(160,110,40,.03)';
+      g.fillRect(x * w / 4, y * h / 4, w / 4, h / 4);
+    }
     for (let i = 0; i < 900; i++) {
       g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,.18)' : 'rgba(150,110,60,.14)';
       g.beginPath(); g.arc(rnd() * w, rnd() * h, 0.8 + rnd() * 2.2, 0, Math.PI * 2); g.fill();
     }
   });
-  sandTex.wrapS = sandTex.wrapT = THREE.RepeatWrapping; sandTex.repeat.set(0.25, 0.25);
+  sandTex.wrapS = sandTex.wrapT = THREE.RepeatWrapping; sandTex.repeat.set(0.18, 0.18);
   const edge = new THREE.Mesh(new THREE.ShapeGeometry(shape, 12), new THREE.MeshStandardMaterial({ color: PALETTE.plazaEdge, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }));
   edge.rotation.x = -Math.PI / 2; edge.position.set(0, 0.001, 0.5); edge.scale.set(1.04, 1.045, 1); edge.receiveShadow = true;
   const plaza = new THREE.Mesh(new THREE.ShapeGeometry(shape, 12), new THREE.MeshStandardMaterial({ map: sandTex, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 }));
-  plaza.rotation.x = -Math.PI / 2; plaza.position.set(0, 0.002, 0.5); plaza.receiveShadow = true;
+  plaza.rotation.x = -Math.PI / 2; plaza.position.set(0, 0.002, PLAZA.cz); plaza.receiveShadow = true;
   scene.add(edge, plaza);
 
-  // round cartoon trees, bushes and rocks around the plaza
+  // a dense forest ring around the clearing (instanced, so a phone can draw hundreds of trees)
   const trunkMat = new THREE.MeshStandardMaterial({ color: PALETTE.trunk, roughness: 1 });
   const leafMats = PALETTE.leaf.map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.95, flatShading: true }));
+  const pineMats = PALETTE.pine.map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.9, flatShading: true }));
   const rockMat = new THREE.MeshStandardMaterial({ color: PALETTE.rock, roughness: 1, flatShading: true });
-  const away = (x, z) => Math.abs(x) > PW / 2 + 1.2 || Math.abs(z - 0.5) > PD / 2 + 1.2;
-  const tree = (x, z, sc) => {
-    const t = new THREE.Group();
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, 1.4, 7), trunkMat); trunk.position.y = 0.7;
-    t.add(trunk);
-    const n = 2 + (rnd() * 2 | 0);
-    for (let k = 0; k < n; k++) {
-      const r = 0.9 + rnd() * 0.5;
-      const c = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), leafMats[(rnd() * 3) | 0]);
-      c.position.set((rnd() - .5) * 0.8, 1.7 + k * 0.6 + rnd() * 0.3, (rnd() - .5) * 0.8);
-      t.add(c);
-    }
-    t.traverse(o => { if (o.isMesh) o.castShadow = true; });
-    t.scale.setScalar(sc); t.position.set(x, 0, z); t.rotation.y = rnd() * 6;
-    scene.add(t);
+  const mossMat = new THREE.MeshStandardMaterial({ color: PALETTE.moss, roughness: 1, flatShading: true });
+  const edgeDist = (x, z) => { // how far outside the plaza's rounded rectangle a point is
+    const dx = Math.max(0, Math.abs(x) - (PW / 2 - PR)), dz = Math.max(0, Math.abs(z - PLAZA.cz) - (PD / 2 - PR));
+    return Math.hypot(dx, dz) - PR;
   };
-  for (let i = 0; i < 70; i++) {
-    const a = rnd() * Math.PI * 2, d = 11 + rnd() * 24;
-    const x = Math.cos(a) * d * 1.1, z = Math.sin(a) * d + 0.5;
-    if (away(x, z)) tree(x, z, 0.9 + rnd() * 0.7);
+  const spots = { pine: [], round: [] };
+  for (let i = 0; i < 2600 && spots.pine.length + spots.round.length < 520; i++) {
+    const x = (rnd() - 0.5) * 90, z = PLAZA.cz + (rnd() - 0.5) * 80;
+    const e = edgeDist(x, z);
+    if (e < 0.8 || e > 26) continue;
+    if (e > 6 && rnd() < 0.35) continue; // thinner far away, where the fog takes over
+    (rnd() < 0.62 ? spots.pine : spots.round).push([x, z, 0.85 + rnd() * 0.7 + Math.min(0.5, e * 0.03), rnd() * 6]);
   }
-  for (let i = 0; i < 40; i++) {
-    const a = rnd() * Math.PI * 2, d = 9.5 + rnd() * 10;
-    const x = Math.cos(a) * d, z = Math.sin(a) * d + 0.5;
-    if (!away(x, z)) continue;
-    const bush = rnd() < 0.6;
-    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(bush ? 0.45 + rnd() * 0.3 : 0.3 + rnd() * 0.35, bush ? 1 : 0), bush ? leafMats[(rnd() * 3) | 0] : rockMat);
-    m.position.set(x, bush ? 0.25 : 0.1, z); m.scale.y = bush ? 0.8 : 0.6; m.castShadow = true;
-    scene.add(m);
+  const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), P = new THREE.Vector3(), UPV = new THREE.Vector3(0, 1, 0);
+  const instanced = (geo, mat, list, place) => {
+    const m = new THREE.InstancedMesh(geo, mat, list.length);
+    list.forEach((it, i) => { place(it, P, S); Q.setFromAxisAngle(UPV, it[3]); M.compose(P, Q, S); m.setMatrixAt(i, M); });
+    m.castShadow = true; m.receiveShadow = true; scene.add(m); return m;
+  };
+  // pines: a trunk and three stacked cones
+  instanced(new THREE.CylinderGeometry(0.14, 0.2, 1.2, 6), trunkMat, spots.pine, ([x, z, sc], p, s) => { p.set(x, 0.6 * sc, z); s.setScalar(sc); });
+  [[1.35, 1.6, 1.4], [1.05, 1.4, 2.2], [0.7, 1.2, 2.9]].forEach(([r, h, y], k) => {
+    const groups = [[], [], []]; spots.pine.forEach((it, i) => groups[(i + k) % 3].push(it));
+    groups.forEach((g, gi) => instanced(new THREE.ConeGeometry(r, h, 8), pineMats[gi], g, ([x, z, sc], p, s) => { p.set(x, y * sc, z); s.setScalar(sc); }));
+  });
+  // round leafy trees: a trunk and a lumpy crown
+  instanced(new THREE.CylinderGeometry(0.16, 0.24, 1.4, 6), trunkMat, spots.round, ([x, z, sc], p, s) => { p.set(x, 0.7 * sc, z); s.setScalar(sc); });
+  [[1.1, 2.0, 0], [0.85, 2.6, 0.5], [0.8, 2.3, -0.55]].forEach(([r, y, off], k) => {
+    const groups = [[], [], []]; spots.round.forEach((it, i) => groups[(i + k) % 3].push(it));
+    groups.forEach((g, gi) => instanced(new THREE.IcosahedronGeometry(r, 1), leafMats[gi], g, ([x, z, sc, a], p, s) => { p.set(x + Math.cos(a) * off * sc, y * sc, z + Math.sin(a) * off * sc); s.setScalar(sc); }));
+  });
+  // rocks with mossy tops and bushes along the edge of the clearing
+  const rocks = [], bushes = [];
+  for (let i = 0; i < 400 && rocks.length + bushes.length < 120; i++) {
+    const x = (rnd() - 0.5) * (PW + 10), z = PLAZA.cz + (rnd() - 0.5) * (PD + 10), e = edgeDist(x, z);
+    if (e < -2.2 || e > 2.5) continue;
+    (rnd() < 0.35 ? rocks : bushes).push([x, z, 0.5 + rnd() * 1.1, rnd() * 6]);
   }
+  instanced(new THREE.DodecahedronGeometry(0.6, 0), rockMat, rocks, ([x, z, sc], p, s) => { p.set(x, 0.18 * sc, z); s.set(sc * 1.2, sc * 0.75, sc); });
+  instanced(new THREE.DodecahedronGeometry(0.5, 0), mossMat, rocks, ([x, z, sc], p, s) => { p.set(x, 0.42 * sc, z); s.set(sc * 1.0, sc * 0.35, sc * 0.85); });
+  instanced(new THREE.IcosahedronGeometry(0.5, 1), leafMats[2], bushes, ([x, z, sc], p, s) => { p.set(x, 0.22 * sc, z); s.set(sc, sc * 0.75, sc); });
+  // grass tufts scattered on the sand near the edge
+  const tufts = [];
+  for (let i = 0; i < 900 && tufts.length < 220; i++) {
+    const x = (rnd() - 0.5) * PW, z = PLAZA.cz + (rnd() - 0.5) * PD, e = edgeDist(x, z);
+    if (e > -0.3 || e < -4) continue;
+    tufts.push([x, z, 0.5 + rnd() * 0.6, rnd() * 6]);
+  }
+  instanced(new THREE.ConeGeometry(0.18, 0.4, 4), leafMats[0], tufts, ([x, z, sc], p, s) => { p.set(x, 0.18 * sc, z); s.setScalar(sc); });
+
+  // camp corner: a tent, crates and a barrel at the edge of the plaza
+  const camp = new THREE.Group();
+  const canvasMat = new THREE.MeshStandardMaterial({ color: 0x8f8a5a, roughness: 0.95, flatShading: true, side: THREE.DoubleSide });
+  const tent = new THREE.Mesh(new THREE.CylinderGeometry(1.25, 1.25, 3.0, 3, 1), canvasMat);
+  tent.rotation.z = Math.PI / 2; tent.rotation.y = Math.PI / 2; tent.position.y = 0.62; tent.scale.set(1, 1, 1);
+  camp.add(tent);
+  const crateMat = new THREE.MeshStandardMaterial({ color: 0xb07a43, roughness: 0.9 });
+  const crateEdge = new THREE.MeshStandardMaterial({ color: 0x7a4f27, roughness: 0.9 });
+  const crate = (x, z, sz, y = 0) => {
+    const c = new THREE.Mesh(new THREE.BoxGeometry(sz, sz, sz), [crateMat, crateMat, crateEdge, crateMat, crateMat, crateMat]);
+    c.position.set(x, y + sz / 2, z); c.rotation.y = x * 0.7; camp.add(c);
+  };
+  crate(2.0, 0.6, 0.55); crate(2.5, 0.1, 0.5); crate(2.15, 0.45, 0.42, 0.55); crate(1.4, -1.6, 0.5); crate(1.9, -1.9, 0.45);
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.65, 12), new THREE.MeshStandardMaterial({ color: 0x8a5a30, roughness: 0.8 }));
+  barrel.position.set(1.6, 0.33, 1.3); camp.add(barrel);
+  camp.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  camp.position.set(PW / 2 - 3.2, 0, PLAZA.cz - 3.5); camp.rotation.y = -0.2;
+  scene.add(camp);
   return { sun };
 }
 
@@ -282,7 +333,7 @@ export function makePoleMesh(tint = 0) {
   woodTextures();
   const side = new THREE.MeshStandardMaterial({ map: barkTex, roughness: 0.9, color: new THREE.Color().setHSL(0.09, 0.25, 0.78 + tint * 0.08) });
   const end = new THREE.MeshStandardMaterial({ map: endTex, roughness: 0.8 });
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(R, R, 1, 14, 1), [side, end, end]);
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(R * POLE_LOOK, R * POLE_LOOK, 1, 14, 1), [side, end, end]);
   m.castShadow = true; m.receiveShadow = true;
   return m;
 }
@@ -302,20 +353,24 @@ export function placeCylinder(mesh, a, b) {
 
 // ---------- lashing coils ----------
 const ropeMat = new THREE.MeshStandardMaterial({ color: 0xd8b878, roughness: 0.95 });
-const coilGeo = new THREE.TorusGeometry(R + 0.012, 0.011, 6, 18);
+// snug on the pole: the rope's inner edge just touches the drawn wood
+const coilGeo = new THREE.TorusGeometry(R * POLE_LOOK + 0.011, 0.014, 6, 18);
 const Z = new THREE.Vector3(0, 0, 1);
 export function makeLashing() {
   const g = new THREE.Group();
   for (let i = 0; i < 6; i++) { const t = new THREE.Mesh(coilGeo, ropeMat); t.castShadow = true; g.add(t); }
   return g;
 }
-// coils around pole A on both sides of pole B, and around B on both sides of A
-export function placeLashing(g, p, dA, dB) {
+// coils around pole A on both sides of pole B, and around B on both sides of A.
+// p is between the two poles; sep runs from there to pole A's axis (B's is the other way),
+// so each coil sits on its own pole instead of hanging in the gap between them
+export function placeLashing(g, p, dA, dB, sep = [0, 0, 0]) {
   const P = new THREE.Vector3(...p), A = new THREE.Vector3(...dA).normalize(), B = new THREE.Vector3(...dB).normalize();
+  const S = new THREE.Vector3(...sep);
   const offs = [[A, B, -1], [A, B, 1], [A, B, -1.7], [B, A, -1], [B, A, 1], [B, A, 1.7]];
   g.children.forEach((t, i) => {
     const [axis, along, s] = offs[i];
-    t.position.copy(P).addScaledVector(along, s * 0.055);
+    t.position.copy(P).addScaledVector(along, s * 0.075).addScaledVector(S, axis === A ? 1 : -1);
     t.quaternion.setFromUnitVectors(Z, axis);
     t.scale.setScalar(1);
   });
@@ -393,29 +448,38 @@ const shirt = new THREE.MeshStandardMaterial({ color: 0xd9bf82, roughness: 0.85 
 const pants = new THREE.MeshStandardMaterial({ color: 0xa08a5a, roughness: 0.9 }); // khaki uniform
 const hair = new THREE.MeshStandardMaterial({ color: 0x4a2c18, roughness: 1 });
 const scarfColors = [0x2f7fe0, 0xe0473a, 0x2fae5f, 0x8a52d0];
-export function makePerson(i = 0) {
+// Small, stocky scouts with big heads and green caps (Omer's reference images),
+// about 1.4 m tall: roughly two thirds of a 2 m klaf leg.
+const cap = new THREE.MeshStandardMaterial({ color: 0x3f7d2c, roughness: 0.85 });
+export function makePerson(i = 0, { noCap = false } = {}) {
   const g = new THREE.Group();
   const scarf = new THREE.MeshStandardMaterial({ color: scarfColors[i % scarfColors.length] });
-  const legGeo = new THREE.CapsuleGeometry(0.065, 0.62, 4, 8);
+  const legGeo = new THREE.CapsuleGeometry(0.085, 0.42, 4, 8);
   // legs hang from hip pivots so they can swing while walking
-  const lL = new THREE.Group(); lL.position.set(-0.09, 0.8, 0);
-  const lR = new THREE.Group(); lR.position.set(0.09, 0.8, 0);
-  for (const l of [lL, lR]) { const m = new THREE.Mesh(legGeo, pants); m.position.y = -0.37; l.add(m); }
-  const torso = new THREE.Group(); torso.position.y = 0.82;
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.32, 4, 10), shirt); body.position.y = 0.3; body.scale.z = 0.75;
-  const sc = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.2, 6), scarf); sc.position.set(0, 0.5, 0.11); sc.rotation.x = Math.PI;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 16, 12), skin); head.position.y = 0.78;
-  const hr = new THREE.Mesh(new THREE.SphereGeometry(0.157, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), hair); hr.position.y = 0.8; hr.rotation.x = -0.25;
-  const armGeo = new THREE.CapsuleGeometry(0.045, 0.5, 4, 8);
-  const aL = new THREE.Group(); aL.position.set(-0.2, 0.55, 0);
-  const aR = new THREE.Group(); aR.position.set(0.2, 0.55, 0);
-  for (const a of [aL, aR]) { const m = new THREE.Mesh(armGeo, shirt); m.position.y = -0.27; m.castShadow = true; a.add(m); }
-  torso.add(body, sc, head, hr, aL, aR);
+  const lL = new THREE.Group(); lL.position.set(-0.1, 0.62, 0);
+  const lR = new THREE.Group(); lR.position.set(0.1, 0.62, 0);
+  for (const l of [lL, lR]) { const m = new THREE.Mesh(legGeo, pants); m.position.y = -0.3; l.add(m); }
+  const torso = new THREE.Group(); torso.position.y = 0.62;
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.26, 4, 10), shirt); body.position.y = 0.3; body.scale.z = 0.8;
+  const sc = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.22, 6), scarf); sc.position.set(0, 0.46, 0.15); sc.rotation.x = Math.PI;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 16, 12), skin); head.position.y = 0.82;
+  const hr = new THREE.Mesh(new THREE.SphereGeometry(0.237, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), hair); hr.position.y = 0.84; hr.rotation.x = -0.25;
+  torso.add(body, sc, head, hr);
+  if (!noCap) {
+    const crown = new THREE.Mesh(new THREE.SphereGeometry(0.245, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2.4), cap); crown.position.y = 0.87;
+    const peak = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.03, 16, 1, false, -Math.PI / 2, Math.PI), cap);
+    peak.position.set(0, 0.9, 0.16); peak.scale.z = 1.1;
+    torso.add(crown, peak);
+  }
+  const armGeo = new THREE.CapsuleGeometry(0.06, 0.36, 4, 8);
+  const aL = new THREE.Group(); aL.position.set(-0.25, 0.5, 0);
+  const aR = new THREE.Group(); aR.position.set(0.25, 0.5, 0);
+  for (const a of [aL, aR]) { const m = new THREE.Mesh(armGeo, shirt); m.position.y = -0.2; m.castShadow = true; a.add(m); }
+  torso.add(aL, aR);
   g.add(lL, lR, torso);
   g.traverse(o => { if (o.isMesh) o.castShadow = true; });
   g.userData = { torso, aL, aR, lL, lR };
   const outer = new THREE.Group();
-  g.scale.setScalar(0.9); // about 1.5 m tall next to a 2 m klaf
   outer.add(g);
   outer.userData = g.userData;
   return outer;
@@ -516,5 +580,77 @@ export function drawSideSheet(mesh, cube, side, klafNames, canvas = null) {
     mesh.position.set(side * (SIDE.x0 + (hc - SIDE.hMin)), 0.006, span / 2);
     mesh.scale.set(spanZ / SIDE.spanZ, 1, 1);
     mesh.rotation.set(0, side > 0 ? -Math.PI / 2 : Math.PI / 2, 0);
+  }
+}
+
+// ---------- the top drawing (מבט על) ----------
+// The flat Xs at the 2 m level, seen from above: the klafim as grey lines, the
+// top side poles they rest on, and the diagonals to add (blue). It lies on the
+// ground in front of the structure, turned like the structure itself.
+const TOP = { w: 2.8, px: 1024 };
+export function makeTopSheet() {
+  const c = document.createElement('canvas');
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+  const geo = new THREE.PlaneGeometry(1, 1); geo.rotateX(-Math.PI / 2);
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, transparent: true, opacity: 0, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 }));
+  m.receiveShadow = true;
+  m.userData = { canvas: c, tex };
+  return m;
+}
+export function drawTopSheet(mesh, cube, klafNames, canvas = null) {
+  const c = canvas || mesh.userData.canvas;
+  const D = cube.depth, span = cube.span ?? D, depth = span + 1.0, W = TOP.px, k = W / TOP.w, Hp = Math.round(depth * k);
+  c.width = W; c.height = Hp;
+  const g = c.getContext('2d');
+  // seen from above with the front klaf at the bottom: +x (the left side) on the left
+  const cx = x => (TOP.w / 2 - x) * k, cy = z => (span + 0.5 - z) * k;
+  g.fillStyle = '#f5f2e6'; g.fillRect(0, 0, W, Hp);
+  for (let i = -20; i <= 40; i++) {
+    g.strokeStyle = i % 5 === 0 ? 'rgba(47,99,176,.22)' : 'rgba(47,99,176,.08)'; g.lineWidth = i % 5 === 0 ? 2 : 1;
+    g.beginPath(); g.moveTo(cx(i * 0.1), 0); g.lineTo(cx(i * 0.1), Hp); g.stroke();
+    g.beginPath(); g.moveTo(0, cy(i * 0.1)); g.lineTo(W, cy(i * 0.1)); g.stroke();
+  }
+  const r = R, bar = (a, b, fill, stroke) => {
+    const ax = cx(a[0]), ay = cy(a[2]), bx = cx(b[0]), by = cy(b[2]);
+    const ang = Math.atan2(by - ay, bx - ax), len = Math.hypot(bx - ax, by - ay), w = 2 * r * k;
+    g.save(); g.translate(ax, ay); g.rotate(ang); g.fillStyle = fill; g.strokeStyle = stroke; g.lineWidth = 3;
+    g.beginPath(); g.rect(0, -w / 2, len, w); g.fill(); g.stroke(); g.restore();
+    return ang;
+  };
+  g.font = '700 24px Rubik, Arial'; g.textAlign = 'center'; g.direction = 'rtl';
+  // the klafim (their top horizontals) and the top side poles, already there (grey)
+  klafNames.forEach((name, i) => {
+    bar([1.1, 0, i * D], [-1.1, 0, i * D], 'rgba(120,110,95,.35)', 'rgba(90,80,70,.7)');
+    g.fillStyle = '#6b5f50'; g.fillText(name, cx(0), cy(i * D) + (i === 0 ? 40 : -18));
+  });
+  for (const s of cube.slots.filter(q => q.kind === 'h' && q.centre[1] > 1)) {
+    const h = s.length / 2;
+    bar([s.centre[0], 0, s.centre[2] - h], [s.centre[0], 0, s.centre[2] + h], 'rgba(120,110,95,.25)', 'rgba(90,80,70,.55)');
+  }
+  // the flat Xs to add (blue), with their lengths
+  for (const s of cube.slots.filter(q => q.side === 0)) {
+    const h = s.length / 2;
+    const a = [s.centre[0] - s.dir[0] * h, 0, s.centre[2] - s.dir[2] * h], b = [s.centre[0] + s.dir[0] * h, 0, s.centre[2] + s.dir[2] * h];
+    let rot = bar(a, b, 'rgba(47,99,176,.12)', '#2f63b0');
+    if (rot > Math.PI / 2) rot -= Math.PI; if (rot < -Math.PI / 2) rot += Math.PI;
+    const t = s.id.includes('xA') ? 0.27 : 0.73, x = cx(a[0] + (b[0] - a[0]) * t), y = cy(a[2] + (b[2] - a[2]) * t);
+    g.save(); g.translate(x, y); g.rotate(rot); g.font = '700 26px Rubik, Arial'; g.direction = 'ltr'; g.textAlign = 'center';
+    const text = `${s.length.toFixed(1)} מ׳`, tw = g.measureText(text).width;
+    g.fillStyle = 'rgba(245,242,230,.92)'; g.fillRect(-tw / 2 - 6, -22, tw + 12, 30); g.fillStyle = '#2f63b0'; g.fillText(text, 0, 2); g.restore();
+  }
+  for (const j of cube.joints.filter(q => q.side === 0)) {
+    g.fillStyle = '#f5f2e6'; g.strokeStyle = '#2f63b0'; g.lineWidth = 4;
+    g.beginPath(); g.arc(cx(j.at[0]), cy(j.at[2]), 11, 0, Math.PI * 2); g.fill(); g.stroke();
+  }
+  g.font = '700 30px Rubik, Arial'; g.fillStyle = '#2f63b0'; g.direction = 'rtl';
+  g.fillText('שרטוט מבט על · בגובה 2 מ׳', W / 2, Hp - 16);
+  g.font = '500 22px Rubik, Arial'; g.fillStyle = '#444';
+  g.fillText('צד שמאל', cx(1.2), 30); g.fillText('צד ימין', cx(-1.2), 30);
+  if (mesh) {
+    mesh.userData.tex.needsUpdate = true;
+    // in front of the front klaf, past the front guy stakes' row
+    mesh.scale.set(TOP.w, 1, depth);
+    mesh.rotation.set(0, Math.PI, 0); // its +x drawn on the left, as the pullers see it
+    mesh.position.set(0, 0.006, -(depth / 2 + 2.9));
   }
 }
