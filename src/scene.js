@@ -454,18 +454,20 @@ export function makeSideSheet() {
 // draw a side's drawing; with a mesh, also place the mesh beside that side
 export function drawSideSheet(mesh, cube, side, klafNames, canvas = null) {
   const c = canvas || mesh.userData.canvas;
-  const H = SIDE.hMax - SIDE.hMin, W = SIDE.px, Hp = Math.round(W * H / SIDE.spanZ);
+  // a longer structure (several cubes in a row) gets a longer sheet at the same scale
+  const D = cube.depth, span = cube.span ?? D, spanZ = SIDE.spanZ + (span - D);
+  const H = SIDE.hMax - SIDE.hMin, W = Math.round(SIDE.px * spanZ / SIDE.spanZ), Hp = Math.round(SIDE.px * H / SIDE.spanZ);
   c.width = W; c.height = Hp;
   const g = c.getContext('2d');
-  const D = cube.depth, zMin = D / 2 - SIDE.spanZ / 2, k = W / SIDE.spanZ;
+  const zMin = span / 2 - spanZ / 2, k = W / spanZ;
   // seen from outside the side: on the left side +z runs right, on the right side it runs left
-  const cx = z => side > 0 ? (z - zMin) * k : (zMin + SIDE.spanZ - z) * k;
+  const cx = z => side > 0 ? (z - zMin) * k : (zMin + spanZ - z) * k;
   const cy = h => (SIDE.hMax - h) * k;
   g.fillStyle = '#f5f2e6'; g.fillRect(0, 0, W, Hp);
   for (let i = -30; i <= 30; i++) {
     const m = i * 0.1;
     g.strokeStyle = i % 5 === 0 ? 'rgba(47,99,176,.22)' : 'rgba(47,99,176,.08)'; g.lineWidth = i % 5 === 0 ? 2 : 1;
-    g.beginPath(); g.moveTo(cx(D / 2 + m), 0); g.lineTo(cx(D / 2 + m), Hp); g.stroke();
+    g.beginPath(); g.moveTo(cx(span / 2 + m), 0); g.lineTo(cx(span / 2 + m), Hp); g.stroke();
     g.beginPath(); g.moveTo(0, cy(m + 1)); g.lineTo(W, cy(m + 1)); g.stroke();
   }
   g.strokeStyle = '#8a6a43'; g.lineWidth = 4; g.setLineDash([18, 10]);
@@ -473,7 +475,7 @@ export function drawSideSheet(mesh, cube, side, klafNames, canvas = null) {
   // the klaf legs, already standing (grey)
   const r = R;
   g.font = '700 24px Rubik, Arial'; g.textAlign = 'center'; g.direction = 'rtl';
-  [0, D].forEach((z, i) => {
+  klafNames.map((_, i) => i * D).forEach((z, i) => {
     g.fillStyle = 'rgba(120,110,95,.35)'; g.strokeStyle = 'rgba(90,80,70,.7)'; g.lineWidth = 3;
     g.fillRect(cx(z) - r * k, cy(2.0), 2 * r * k, 2.0 * k); g.strokeRect(cx(z) - r * k, cy(2.0), 2 * r * k, 2.0 * k);
     g.fillStyle = '#6b5f50'; g.fillText(`רגל ה${klafNames[i]}`, cx(z), cy(2.0) - 14);
@@ -504,14 +506,15 @@ export function drawSideSheet(mesh, cube, side, klafNames, canvas = null) {
   // heights of the side poles on the legs
   g.fillStyle = '#444'; g.font = '500 22px Rubik, Arial'; g.direction = 'rtl'; g.textAlign = 'center';
   const hs = [...new Set(cube.joints.filter(q => q.side === side && !q.b).map(q => Math.round((q.at[1] - r) * 100)))].sort((a, b) => a - b);
-  const zOut = D + 0.32;
+  const zOut = span + 0.32;
   for (const h of hs) g.fillText(`${h} ס״מ`, cx(zOut) + (side > 0 ? 18 : -18), cy(h / 100) + 8);
   g.font = '700 30px Rubik, Arial'; g.fillStyle = '#2f63b0';
   g.fillText(`שרטוט ${side > 0 ? 'הצד השמאלי' : 'הצד הימני'} · מבט מבחוץ`, W / 2, Hp - 24);
   if (mesh) {
     mesh.userData.tex.needsUpdate = true;
     const hc = (SIDE.hMax + SIDE.hMin) / 2;
-    mesh.position.set(side * (SIDE.x0 + (hc - SIDE.hMin)), 0.006, D / 2);
+    mesh.position.set(side * (SIDE.x0 + (hc - SIDE.hMin)), 0.006, span / 2);
+    mesh.scale.set(spanZ / SIDE.spanZ, 1, 1);
     mesh.rotation.set(0, side > 0 ? -Math.PI / 2 : Math.PI / 2, 0);
   }
 }

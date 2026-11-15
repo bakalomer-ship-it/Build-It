@@ -157,7 +157,7 @@ const inspector = new Actor(scene, 3);
   allActors.push(inspector);
 }
 // the inspection's buckets of water, one per klaf
-const buckets = [0, 1].map(() => {
+const buckets = [0, 1, 2].map(() => {
   const g = new THREE.Group();
   const pail = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.1, 0.24, 14), new THREE.MeshStandardMaterial({ color: 0x5f86b8, roughness: 0.5, metalness: 0.3 }));
   pail.position.y = -0.5; pail.castShadow = true;
@@ -253,7 +253,9 @@ function anchorPos(g) {
   const c = K().cfg, u = slotById(g.leg).centre[0];
   return [u * c.anchorX[g.side > 0 ? 'back' : 'front'], 0, c.z0 + g.side * (g.side > 0 ? c.backDist : c.frontDist)];
 }
-const isInnerGuy = g => K().cfg.inner !== 0 && Math.sign(g.side) === K().cfg.inner;
+// inner guy lines stand inside the cube: +1 the back ones, −1 the front ones, 'both' for a middle klaf
+const innerSide = (cfg, g) => cfg.inner === 'both' || (cfg.inner !== 0 && Math.sign(g.side) === cfg.inner);
+const isInnerGuy = g => innerSide(K().cfg, g);
 
 // ---------------- UI: stage chips ----------------
 const stagesEl = $('stages');
@@ -277,7 +279,7 @@ function stageDone(key) {
   if (st && st.k != null && st.k !== G.ki) { const keep = G.ki; useKlaf(st.k); const d = stageDone(st.id); useKlaf(keep); return d; }
   const id = st ? st.id : key;
   if (id === 'cube') return !!G.cube && cubeComplete();
-  if (id === 'unguy') return !!G.cube && G.klafim.every((k, i) => GUYS.every(g => Math.sign(g.side) !== k.cfg.inner || k.build.guyOff[g.id]));
+  if (id === 'unguy') return !!G.cube && G.klafim.every((k, i) => GUYS.every(g => !innerSide(k.cfg, g) || k.build.guyOff[g.id]));
   const b = G.build;
   if (id === 'build') return SLOTS.every(s => b.poles[s.id]) && JOINTS.every(j => b.joints[j.id]);
   if (id === 'stakes') return LEG_STAKES.every(s => (b.stakes[s.id] || 0) >= LEG_STAKE_HITS);
@@ -331,7 +333,7 @@ const nextStage = () => STAGES[STAGES.findIndex(s => s.key === G.stageKey) + 1];
 // simulation is rebuilt from the builds each time it is needed
 function enterCube() {
   const ready = G.klafim.every((k, i) => k.raisedOnce && stageDone(STAGES.find(s => s.id === 'anchor' && s.k === i).key));
-  if (!ready) { infoCard('קודם מרימים ומעגנים את שני הקלפים', 'את הקובייה מחברים בין שני קלפים שכבר עומדים, כשהיתרים שלהם מקובעים לבז״נטים והרגליים כפותות לבז״נטים.'); return false; }
+  if (!ready) { infoCard(LV.klafim.length > 2 ? 'קודם מרימים ומעגנים את כל הקלפים' : 'קודם מרימים ומעגנים את שני הקלפים', 'את הקובייה מחברים בין קלפים שכבר עומדים, כשהיתרים שלהם מקובעים לבז״נטים והרגליים כפותות לבז״נטים.'); return false; }
   if (!G.cube.sim) {
     clearJobs();
     G.cube.sim = new CubeSim(G.klafim.map(k => ({ build: k.build, cfg: k.cfg })), LV.cube, G.cube.build);
@@ -374,10 +376,10 @@ function stagePose(mode) {
   const far = aspect < 1.6 ? 1.25 : 1; // narrower screens step back a little
   // seen from high above, so the klaf and the scouts stay small in a big plaza (Omer)
   const at = (target, dist, elev, azim) => ({ target, pos: target.clone().add(new THREE.Vector3(Math.sin(azim) * Math.cos(elev), Math.sin(elev), -Math.cos(azim) * Math.cos(elev)).multiplyScalar(dist * far)) });
-  const z = LV.cube && cubeStage(G.stage) ? LV.cube.depth / 2 : z0();
+  const z = LV.cube && cubeStage(G.stage) ? (LV.cube.span ?? LV.cube.depth) / 2 : z0();
   if (mode === 'buildView') return at(new THREE.Vector3(0, 0, z + 1.0), 10.5, 1.05, 0.3);
   if (mode === 'workView') return at(new THREE.Vector3(0, 0.5, z + 0.2), 9, 0.8, 0.55);
-  if (mode === 'cubeView') return at(new THREE.Vector3(0, 0.9, z), 11, 0.75, 0.75);
+  if (mode === 'cubeView') return at(new THREE.Vector3(0, 0.9, z), 11 + 2.5 * ((LV.cube?.bays ?? 1) - 1), 0.75, 0.75);
   return at(new THREE.Vector3(0, 0.7, z + 0.4), 17, 0.85, 0.55);
 }
 function setCameraMode(mode) {
@@ -929,22 +931,31 @@ function renderPile() {
 // The player sends the scouts of the level's crew to the guy lines: pullers
 // on the front lines, holders on the back ones. A line nobody holds lies
 // slack, and the physics shows what that means.
-const CREW_NAMES = ['נועה', 'איתי', 'מאיה', 'יונתן', 'תמר', 'עידו'];
-function crewRole(g) { return `${g.side < 0 ? 'מושכים' : 'מחזיקים'} · ${g.side < 0 ? 'קדמי' : 'אחורי'} ${slotById(g.leg).he.replace('רגל ', '')}`; }
+// A proper klaf raise takes 6 (Omer): 4 on the guy lines and 2 lifting the top of the klaf.
+// Every role is one entry here, so roles are easy to change.
+const CREW_NAMES = ['נועה', 'איתי', 'מאיה', 'יונתן', 'תמר', 'עידו', 'שירה', 'אורי'];
+const LIFTERS = [{ id: 'L1', leg: 'legL', lifter: true }, { id: 'L2', leg: 'legR', lifter: true }];
+const crewRoles = () => [...GUYS, ...LIFTERS];
+function crewRole(g) {
+  const side = slotById(g.leg).he.replace('רגל ', '');
+  if (g.lifter) return `בקלף · מרים ומייצב, ${side}`;
+  return `${g.side < 0 ? 'מושכים' : 'מחזיקים'} · ${g.side < 0 ? 'קדמי' : 'אחורי'} ${side}`;
+}
+const crewSize = () => LV.crew || 6;
 function freeCrew() {
   const used = new Set(Object.values(G.build.crew).filter(v => v != null));
-  return [...Array(LV.crew || 4).keys()].filter(i => !used.has(i));
+  return [...Array(crewSize()).keys()].filter(i => !used.has(i));
 }
 function toggleCrew(gid) {
-  const b = G.build, sim = G.sim, g = GUYS.find(q => q.id === gid);
+  const b = G.build, sim = G.sim, g = crewRoles().find(q => q.id === gid);
   if (!sim || sim.angle() > 8 || b.guyTies[gid]) return flashHint('את הצוות משבצים לפני שמתחילים למשוך');
-  if (!b.guyTop[gid]) return flashHint('קודם כופתים את היתר לראש הרגל');
-  if (b.crew[gid] != null) { delete b.crew[gid]; sim.dropGuy(gid); }
+  if (!g.lifter && !b.guyTop[gid]) return flashHint('קודם כופתים את היתר לראש הרגל');
+  if (b.crew[gid] != null) { delete b.crew[gid]; if (!g.lifter) sim.dropGuy(gid); }
   else {
     const free = freeCrew();
-    if (!free.length) return flashHint(`<b>כל ${LV.crew || 4} הצופים כבר משובצים.</b> הקישו על יתר כדי לשחרר צופה`);
+    if (!free.length) return flashHint(`<b>כל ${crewSize()} הצופים כבר משובצים.</b> הקישו על תפקיד כדי לשחרר צופה`);
     b.crew[gid] = free[0];
-    sim.addGuy(g);
+    if (!g.lifter) sim.addGuy(g);
   }
   sfx.tick(); renderCrew(); refreshAll();
 }
@@ -954,11 +965,11 @@ function renderCrew() {
   const key = JSON.stringify([b.crew, b.guyTop, G.ki, LV.number]);
   if (key === crewKey) return;
   crewKey = key;
-  $('crew-free').textContent = `${freeCrew().length} מתוך ${LV.crew || 4} פנויים`;
-  $('crew-list').innerHTML = GUYS.map(g => {
-    const who = b.crew[g.id];
-    return `<button type="button" class="crew-row${who != null ? ' on' : ''}${b.guyTop[g.id] ? '' : ' off'}" data-gid="${g.id}">
-      <span class="crew-role">${crewRole(g)}</span><span class="crew-who">${who != null ? CREW_NAMES[who] : b.guyTop[g.id] ? '+ צופה' : 'יתר לא כפות'}</span></button>`;
+  $('crew-free').textContent = `${freeCrew().length} מתוך ${crewSize()} פנויים`;
+  $('crew-list').innerHTML = crewRoles().map(g => {
+    const who = b.crew[g.id], ready = g.lifter || b.guyTop[g.id];
+    return `<button type="button" class="crew-row${who != null ? ' on' : ''}${ready ? '' : ' off'}" data-gid="${g.id}">
+      <span class="crew-role">${crewRole(g)}</span><span class="crew-who">${who != null ? CREW_NAMES[who] : ready ? '+ צופה' : 'יתר לא כפות'}</span></button>`;
   }).join('');
 }
 $('crew-list').addEventListener('click', e => { const r = e.target.closest('.crew-row'); if (r) toggleCrew(r.dataset.gid); });
@@ -1156,8 +1167,8 @@ function hintText() {
       const ang = sim.angle();
       const g = GUYS.filter(q => b.guyTop[q.id]).length;
       if (ang < 6 && g < 4) return `כפתו <b>4 יתרים</b> לראש הקלף (הקישו על הטבעות) · ${g}/4`;
-      const manned = GUYS.filter(q => b.crew[q.id] != null).length;
-      if (ang < 6 && manned < 4) return `שלחו צופה לכל יתר בלוח <b>הצוות</b>: מושכים בקדמיים, מחזיקים באחוריים · ${manned}/4`;
+      const manned = crewRoles().filter(q => b.crew[q.id] != null).length;
+      if (ang < 6 && manned < crewRoles().length) return `שבצו <b>${crewSize()} צופים</b>: מושכים מקדימה, מחזיקים מאחור, ושניים בקלף · ${manned}/${crewRoles().length}`;
       if (ang < 6) return 'החליקו את היתרים <b>למטה</b> כדי למשוך. לאט ובשליטה';
       if (ang < 80) return 'ממשיכים למשוך, לאט ובשליטה…';
       if (ang <= 97) return '<b>עצרו!</b> הקלף ניצב';
@@ -1186,7 +1197,7 @@ function statusText(nPoles, nJ) {
     case 'raise': {
       if (!sim) return kn;
       const ang = sim.angle();
-      if (ang < 6) return `${kn}יתרים בראש הקלף ${GUYS.filter(q => b.guyTop[q.id]).length}/4 · צוות ${GUYS.filter(q => b.crew[q.id] != null).length}/${LV.crew || 4}`;
+      if (ang < 6) return `${kn}יתרים בראש הקלף ${GUYS.filter(q => b.guyTop[q.id]).length}/4 · צוות ${crewRoles().filter(q => b.crew[q.id] != null).length}/${crewSize()}`;
       if (ang < 82) return `${kn}עולה…`;
       return ang <= 97 ? `${kn}<b>הקלף ניצב</b>` : `${kn}<b>הקלף עובר את האנך!</b>`;
     }
@@ -1322,8 +1333,8 @@ function explainCube(kind) {
   const badSides = [];
   for (const side of [-1, 1]) {
     let full = true;
-    for (const d of ['dA', 'dB']) {
-      const id = `C.${d}${side > 0 ? 'L' : 'R'}`;
+    for (let bay = 0; bay < (LV.cube.bays ?? 1); bay++) for (const d of ['dA', 'dB']) {
+      const id = `C.${d}${side > 0 ? 'L' : 'R'}${bay ? bay + 1 : ''}`;
       const ends = LV.cube.joints.filter(j => j.a === id && !j.b);
       if (!b.poles[id]) { full = false; focus.cubeGhosts.push(ends.map(j => j.id)); }
       else if (ends.some(j => !b.joints[j.id])) { full = false; focus.cubePoles.push(id); focus.cubeJoints.push(...ends.filter(j => !b.joints[j.id]).map(j => j.id)); }
@@ -1499,7 +1510,7 @@ function reopenForFixes() {
 function sheetOf(j) {
   const band = y => y < 1.0 ? 'גובה 0–1 מ׳' : 'גובה 1–2 מ׳';
   const of = LV.klafim.length > 1 && j.klaf != null ? `, ${LV.klafim[j.klaf].he}` : '';
-  if (j.cube) return `שרטוט ${j.side > 0 ? 'הצד השמאלי' : 'הצד הימני'}, ${band(j.at[1])}`;
+  if (j.cube) return `שרטוט ${j.side > 0 ? 'הצד השמאלי' : 'הצד הימני'}${LV.cube.bays > 1 ? (j.bay ? ', קובייה אחורית' : ', קובייה קדמית') : ''}, ${band(j.at[1])}`;
   if (j.guy) return 'מפת יתרים' + of;
   if (j.stake) return 'מפת בסיסים (רגליים לבז״נטים)' + of;
   return `שרטוט ${LV.klafim.length > 1 ? 'ה' + LV.klafim[j.klaf].he : 'הקלף'}, ${band(j.at[1])}`;
@@ -1548,7 +1559,7 @@ function switchLevel(n) {
 // ---------------- the growing plaza ----------------
 // Every structure the player has passed stays standing on the plaza, in its
 // own spot around the building ground, so the camp grows level by level.
-const PLAZA_SPOTS = { 1: { x: -5.6, z: 3.6, yaw: 0.35 }, 2: { x: 5.4, z: 3.2, yaw: -0.3 } };
+const PLAZA_SPOTS = { 1: { x: -5.6, z: 3.6, yaw: 0.35 }, 2: { x: 5.4, z: 3.2, yaw: -0.3 }, 3: { x: -5.4, z: -3.4, yaw: 1.2 } };
 const plazaShown = {};
 function makeDisplay(L) {
   const g = new THREE.Group();
@@ -1612,10 +1623,11 @@ let memStars = loadStars();
 const starsOf = n => Math.max(memStars[n] || 0, loadStars()[n] || 0);
 const unlocked = n => n === 1 || starsOf(n - 1) >= 1;
 // structures that come after the playable ones, shown on the path as coming soon
-const COMING = [{ name: 'בסיס מתקן 2×4', sub: 'שתי קוביות בשורה' }];
+const COMING = [];
 const ICONS = {
   1: '<svg viewBox="0 0 64 46"><g stroke="#6b4423" stroke-width="4" stroke-linecap="round"><path d="M14 44V4M50 44V4M8 36h48M8 8h48M14 36L50 8M14 8l36 28"/></g></svg>',
   2: '<svg viewBox="0 0 64 46"><g stroke="#6b4423" stroke-width="3.5" stroke-linecap="round" fill="none"><path d="M8 44V12M38 44V12M8 38h30M8 14h30M8 38L38 14M8 14l30 24"/><path d="M38 12l18-8M38 44l18-8M56 36V4M8 12l18-8h30" opacity=".6"/></g></svg>',
+  3: '<svg viewBox="0 0 64 46"><g stroke="#6b4423" stroke-width="3" stroke-linecap="round" fill="none"><path d="M4 44V12M22 44V12M40 44V12M4 38h36M4 14h36M4 38L22 14M4 14l18 24M22 38L40 14M22 14l18 24"/><path d="M40 12l16-8M40 44l16-8M56 36V4M4 12l16-8h36" opacity=".6"/></g></svg>',
   soon: '<svg viewBox="0 0 64 46"><g stroke="#3a3a30" stroke-width="3.5" stroke-linecap="round" fill="none" opacity=".7"><path d="M4 44V14M30 44V14M56 44V14M4 16h52M4 38h52"/></g></svg>',
 };
 const starRow = n => [1, 2, 3].map(i => `<span class="${i <= n ? 'on' : ''}">★</span>`).join('');
@@ -1968,8 +1980,8 @@ function drawKlafCrew(withPeople) {
   if (holding && sim.target > 0 && sim.target < 55 && ang < 60) {
     const tp = sim.topCentre();
     const reach = Math.min(Math.PI * 0.9, 0.6 + ang / 40);
-    place(people.lift1, [0.5, 0, tp[2] + 0.3], Math.PI, 0.15, reach);
-    place(people.lift2, [-0.5, 0, tp[2] + 0.3], Math.PI, 0.15, reach);
+    if (sim.lifted('legR')) place(people.lift1, [0.5, 0, tp[2] + 0.3], Math.PI, 0.15, reach);
+    if (sim.lifted('legL')) place(people.lift2, [-0.5, 0, tp[2] + 0.3], Math.PI, 0.15, reach);
   }
   // guy lines: the front ones are the pullers' lines, the back ones are paid out
   for (const g of GUYS) {

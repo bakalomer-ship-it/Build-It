@@ -213,6 +213,8 @@ export class KlafSim {
   }
 
   // is someone on this guy line? (the player sends a scout to each line; with no crew plan, everyone is)
+  // is a lifter at this leg's top? (L1 lifts legL, L2 lifts legR; with no crew plan, both are)
+  lifted(leg) { const c = this.build.crew; return !c || c[leg === 'legL' ? 'L1' : 'L2'] != null; }
   manned(g) { const c = this.build.crew; return !c || c[g.id] != null || !!this.build.guyTies[g.id]; }
   // nobody on the line: it lies slack
   dropGuy(gid) { const con = this.guys[gid]; if (!con || con.tied) return; con.active = false; delete this.guys[gid]; }
@@ -363,6 +365,7 @@ export class KlafSim {
     // then the guy lines take over
     if (this.target > 0 && this.target <= 55 && !this.lettingGo) {
       for (const leg of ['legL', 'legR']) {
+        if (!this.lifted(leg)) continue; // nobody lifting this side
         const p = this.poleParticles[leg]; if (!p) continue;
         const id = p[p.length - 1].id, q = W.p[id];
         const goal = this.kw(q.x[0], LEVEL.height, Math.min(this.target, 50));

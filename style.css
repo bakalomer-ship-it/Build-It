@@ -280,7 +280,7 @@ button { font-family: inherit; }
 /* the raise crew */
 #crew-panel { width: 150px; }
 .crew-free { text-align: center; font-size: 12px; color: var(--muted); }
-.crew-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
+.crew-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; flex: 1; min-height: 0; }
 .crew-row {
   appearance: none; display: flex; flex-direction: column; align-items: stretch; gap: 2px; text-align: right;
   padding: 7px 9px; border-radius: 10px; border: 1px dashed rgba(243,234,214,.3); background: rgba(0,0,0,.18); color: var(--canvas); cursor: pointer;
@@ -292,7 +292,12 @@ button { font-family: inherit; }
 .crew-row.off { opacity: .45; }
 @media (max-height: 420px) {
   #crew-panel { width: 132px; }
-  .crew-row { padding: 5px 8px; }
+  .crew-row { padding: 2px 8px; gap: 0; line-height: 1.15; }
+  .crew-role { font-size: 10px; }
+  .crew-who { font-size: 13px; }
+  #crew-panel .tray-title, .crew-free { display: none; }
+  #crew-panel { gap: 4px; padding: 6px; }
+  .crew-list { gap: 4px; }
   .pile-item { padding: 3px 7px; grid-template-rows: auto; }
   .pile-stick { display: none; }
   #tray .tray-title, #tray .tray-count { display: none; }
