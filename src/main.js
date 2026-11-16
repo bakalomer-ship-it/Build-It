@@ -19,6 +19,7 @@ import {
   makeLashing, placeLashing, placeParallelLashing, RopeViz, makeStake, makeDriver, makeFreeGrid, makeTripodSheet, drawTripodFolder,
 } from './scene.js';
 import { sfx, buzz } from './sound.js';
+import { makeDecor } from './decor.js';
 import { Actor, makeCrew, freeActors, CREW } from './crew.js';
 
 const $ = id => document.getElementById(id);
@@ -94,6 +95,7 @@ const canvas = $('scene');
 const renderer = makeRenderer(canvas);
 const scene = new THREE.Scene();
 makeWorld(scene);
+const decorTick = makeDecor(scene); // the scout camp around the building ground
 const camera = new THREE.PerspectiveCamera(22, 1, 0.2, 400) // narrow lens: almost isometric, like the reference;
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
@@ -2851,6 +2853,7 @@ function frame(now) {
   updateCamera(dt);
   hintTimer += dt;
   if (hintTimer > 0.25) { hintTimer = 0; refreshHint(); $('timer').textContent = fmt(elapsed()); $('tray-count').textContent = G.stage === 'cube' ? `${LV.cube.slots.filter(s => G.cube.build.poles[s.id]).length}/${LV.cube.slots.length} בקובייה` : `${SLOTS.filter(s => G.build.poles[s.id]).length}/${SLOTS.length || 6} על השרטוט`; }
+  decorTick(now / 1000);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
