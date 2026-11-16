@@ -654,3 +654,133 @@ export function drawTopSheet(mesh, cube, klafNames, canvas = null) {
     mesh.position.set(0, 0.006, -(depth / 2 + 2.9));
   }
 }
+
+// ---------- free build: the ground grid a klaf is designed on ----------
+// No drawing to follow: a squared sheet with the foot line, the middle line
+// and the heights marked. grid: { uMax, vMin, vMax } in metres.
+export function makeFreeGrid(grid) {
+  const W = 2 * grid.uMax + 0.4, H = grid.vMax - grid.vMin + 0.1, k = 256; // px per metre
+  const c = document.createElement('canvas'); c.width = Math.round(W * k); c.height = Math.round(H * k);
+  const g = c.getContext('2d');
+  const cx = u => (W / 2 - u) * k, cy = v => (grid.vMax + 0.1 - v) * k;
+  g.fillStyle = '#f5f2e6'; g.fillRect(0, 0, c.width, c.height);
+  for (let i = -Math.round(grid.uMax * 10); i <= Math.round(grid.uMax * 10); i++) {
+    g.strokeStyle = i % 10 === 0 ? 'rgba(47,99,176,.34)' : i % 5 === 0 ? 'rgba(47,99,176,.2)' : 'rgba(47,99,176,.08)';
+    g.lineWidth = i % 5 === 0 ? 2 : 1;
+    g.beginPath(); g.moveTo(cx(i / 10), cy(grid.vMax)); g.lineTo(cx(i / 10), cy(0)); g.stroke();
+  }
+  for (let i = 0; i <= Math.round(grid.vMax * 10); i++) {
+    g.strokeStyle = i % 10 === 0 ? 'rgba(47,99,176,.34)' : i % 5 === 0 ? 'rgba(47,99,176,.2)' : 'rgba(47,99,176,.08)';
+    g.lineWidth = i % 5 === 0 ? 2 : 1;
+    g.beginPath(); g.moveTo(cx(-grid.uMax), cy(i / 10)); g.lineTo(cx(grid.uMax), cy(i / 10)); g.stroke();
+  }
+  // the middle of the klaf
+  g.strokeStyle = 'rgba(47,99,176,.45)'; g.lineWidth = 3; g.setLineDash([14, 12]);
+  g.beginPath(); g.moveTo(cx(0), cy(grid.vMax)); g.lineTo(cx(0), cy(0)); g.stroke();
+  // the foot line: legs stand here
+  g.strokeStyle = '#8a6a43'; g.lineWidth = 6; g.setLineDash([22, 12]);
+  g.beginPath(); g.moveTo(cx(-grid.uMax), cy(0)); g.lineTo(cx(grid.uMax), cy(0)); g.stroke(); g.setLineDash([]);
+  g.fillStyle = '#8a6a43'; g.font = '700 30px Rubik, Arial'; g.textAlign = 'center'; g.direction = 'rtl';
+  g.fillText('קו הרגליים: כאן עומדות רגלי הקלף', cx(0), cy(0) + 44);
+  g.fillStyle = '#2f63b0'; g.font = '700 28px Rubik, Arial'; g.textAlign = 'left';
+  for (let m = 1; m <= Math.floor(grid.vMax); m++) g.fillText(`${m} מ׳`, cx(grid.uMax) - 78, cy(m) - 8);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, transparent: true, opacity: 0, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 }));
+  m.rotation.set(-Math.PI / 2, 0, Math.PI);
+  m.position.set(0, 0.004, (grid.vMax + 0.1 + grid.vMin - 0.0) / 2 + (H - (grid.vMax + 0.1 - grid.vMin)) / 2);
+  m.receiveShadow = true; m.visible = false;
+  return m;
+}
+
+// ---------- tripod (חצובה) ----------
+// The sheet the three legs are laid on: three lines side by side, and where the
+// tripod lashing goes. plan: { slots, lashV, legLength } in the klaf-plane (u across, v along).
+const TRI_SHEET = { uMax: 0.8, v0: -0.3, v1: 4.9, k: 200 };
+function drawTripodSheet(c, plan) {
+  const S = TRI_SHEET, W = 2 * S.uMax, H = S.v1 - S.v0;
+  c.width = Math.round(W * S.k); c.height = Math.round(H * S.k);
+  const g = c.getContext('2d');
+  const cx = u => (S.uMax - u) * S.k, cy = v => (S.v1 - v) * S.k;
+  g.fillStyle = '#f5f2e6'; g.fillRect(0, 0, c.width, c.height);
+  for (let i = 0; i <= Math.round(H * 10); i++) {
+    const v = S.v0 + i / 10;
+    g.strokeStyle = Math.round(v * 10) % 10 === 0 ? 'rgba(47,99,176,.3)' : 'rgba(47,99,176,.08)'; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(0, cy(v)); g.lineTo(c.width, cy(v)); g.stroke();
+  }
+  // the feet line
+  g.strokeStyle = '#8a6a43'; g.lineWidth = 5; g.setLineDash([18, 10]);
+  g.beginPath(); g.moveTo(10, cy(0)); g.lineTo(c.width - 10, cy(0)); g.stroke(); g.setLineDash([]);
+  g.fillStyle = '#8a6a43'; g.font = '700 24px Rubik, Arial'; g.textAlign = 'center'; g.direction = 'rtl';
+  g.fillText('כאן הרגליים', cx(0), cy(0) + 34);
+  for (const s of plan.slots) {
+    const w = R * 2 * S.k;
+    g.fillStyle = 'rgba(47,99,176,.16)'; g.strokeStyle = '#2f63b0'; g.lineWidth = 3;
+    g.beginPath(); g.rect(cx(s.centre[0]) - w / 2, cy(s.centre[1] + s.length / 2), w, s.length * S.k); g.fill(); g.stroke();
+  }
+  // the lashing: a band across the three
+  g.strokeStyle = '#c8452c'; g.lineWidth = 6;
+  g.beginPath(); g.moveTo(cx(0.3), cy(plan.lashV)); g.lineTo(cx(-0.3), cy(plan.lashV)); g.stroke();
+  g.fillStyle = '#c8452c'; g.font = '700 24px Rubik, Arial'; g.textAlign = 'left';
+  g.fillText(`${Math.round((plan.legLength - plan.lashV) * 100)} ס״מ מהראש`, cx(0.36) - 4, cy(plan.lashV) + 9);
+  g.fillStyle = '#2f63b0'; g.textAlign = 'right';
+  g.fillText(`${plan.legLength.toFixed(1)} מ׳`, cx(-0.3) + 0, cy(plan.legLength / 2));
+}
+export function makeTripodSheet(plan) {
+  const S = TRI_SHEET, c = document.createElement('canvas');
+  drawTripodSheet(c, plan);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(2 * S.uMax, S.v1 - S.v0), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, transparent: true, opacity: 0, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 }));
+  m.rotation.set(-Math.PI / 2, 0, Math.PI);
+  m.userData.z = (S.v0 + S.v1) / 2;
+  m.position.set(0, 0.004, m.userData.z);
+  m.receiveShadow = true; m.visible = false;
+  if (document.fonts?.ready) document.fonts.ready.then(() => { drawTripodSheet(c, plan); tex.needsUpdate = true; });
+  return m;
+}
+// The tripod's page in the structure file: seen from the side and from above, with its sizes.
+export function drawTripodFolder(c, T) {
+  c.width = 1024; c.height = 760;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f5f2e6'; g.fillRect(0, 0, c.width, c.height);
+  g.direction = 'rtl';
+  const k = 130;
+  const pole = (x1, y1, x2, y2, w = 9) => { g.strokeStyle = '#2f63b0'; g.lineWidth = w; g.lineCap = 'round'; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); };
+  const dim = (x1, y1, x2, y2, text, dx = 0, dy = -10) => {
+    g.strokeStyle = '#8a6a43'; g.lineWidth = 2; g.setLineDash([8, 6]);
+    g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); g.setLineDash([]);
+    g.fillStyle = '#6b4423'; g.font = '700 24px Rubik, Arial'; g.textAlign = 'center';
+    g.fillText(text, (x1 + x2) / 2 + dx, (y1 + y2) / 2 + dy);
+  };
+  const title = (t, x, y) => { g.fillStyle = '#2b2b22'; g.font = '800 28px Rubik, Arial'; g.textAlign = 'center'; g.fillText(t, x, y); };
+  // ---- from the side ----
+  const gx = 300, gy = 680, rad = T.footApart / Math.sqrt(3), s = T.legLength - T.lashFromTop;
+  title('מבט מהצד', gx, 50);
+  g.strokeStyle = '#8a6a43'; g.lineWidth = 4; g.beginPath(); g.moveTo(gx - 250, gy); g.lineTo(gx + 250, gy); g.stroke();
+  const ax = gx, ay = gy - T.height * k;
+  // two legs in front (their feet half a side each way), one behind
+  for (const fx of [-T.footApart / 2, T.footApart / 2, 0]) {
+    const d = [ax - (gx + fx * k), ay - gy], l = Math.hypot(d[0], d[1]), e = T.lashFromTop * k * (l / (s * k));
+    pole(gx + fx * k, gy, ax + d[0] / l * e, ay + d[1] / l * e, fx ? 9 : 6);
+  }
+  g.strokeStyle = '#c8452c'; g.lineWidth = 7; g.beginPath(); g.arc(ax, ay, 16, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = '#c8452c'; g.font = '700 22px Rubik, Arial'; g.textAlign = 'right'; g.fillText('כפיתה אחת סביב שלוש הרגליים', ax - 28, ay - 8);
+  // braces
+  const bh = T.braceHeight * k, bw = (T.footApart / 2) * (1 - T.braceHeight / T.height) * k;
+  pole(gx - bw - 22, gy - bh, gx + bw + 22, gy - bh, 7);
+  dim(gx + 235, gy, gx + 235, ay, `גובה ${T.height.toFixed(1)} מ׳`, -62, 0);
+  dim(gx - bw, gy - bh - 26, gx + bw, gy - bh - 26, `חיזוק בגובה ${Math.round(T.braceHeight * 100)} ס״מ`, 0, -10);
+  dim(gx - T.footApart / 2 * k, gy + 26, gx + T.footApart / 2 * k, gy + 26, `${T.footApart.toFixed(1)} מ׳ בין רגל לרגל`, 0, 30);
+  // ---- from above ----
+  const tx = 770, ty = 330, kt = 110;
+  title('מבט מלמעלה', tx, 50);
+  const F = [210, 90, 330].map(d => [tx + rad * kt * Math.cos(d * Math.PI / 180), ty - rad * kt * Math.sin(d * Math.PI / 180)]);
+  for (const f of F) pole(f[0], f[1], tx, ty, 8);
+  const q = 1 - T.braceHeight / T.height;
+  const Bp = F.map(f => [tx + (f[0] - tx) * q, ty + (f[1] - ty) * q]);
+  for (let i = 0; i < 3; i++) { const a = Bp[i], b = Bp[(i + 1) % 3], d = [b[0] - a[0], b[1] - a[1]], l = Math.hypot(d[0], d[1]); pole(a[0] - d[0] / l * 20, a[1] - d[1] / l * 20, b[0] + d[0] / l * 20, b[1] + d[1] / l * 20, 6); }
+  for (const f of F) { g.fillStyle = '#8a6a43'; g.beginPath(); g.arc(f[0], f[1], 9, 0, Math.PI * 2); g.fill(); }
+  g.strokeStyle = '#c8452c'; g.lineWidth = 6; g.beginPath(); g.arc(tx, ty, 13, 0, Math.PI * 2); g.stroke();
+  dim(F[0][0], F[0][1] + 34, F[2][0], F[2][1] + 34, `${T.footApart.toFixed(1)} מ׳`, 0, 30);
+  g.fillStyle = '#2b2b22'; g.font = '500 22px Rubik, Arial'; g.textAlign = 'center';
+  ['שלוש רגליים במרחקים שווים', 'שלושה חיזוקים, אחד בין כל שתי רגליים', 'בז״נט ליד כל רגל, והרגל כפותה אליו'].forEach((t, i) => g.fillText(t, tx, 560 + i * 34));
+}

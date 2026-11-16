@@ -13,6 +13,7 @@ export class World {
     this.groundY = 0;
     this.time = 0;
     this.damping = 0.6;   // 1/s, mild air and rope friction
+    this.mu = 0.7;        // ground friction (share of a sliding step that the ground takes away)
     this.iterations = 1;  // constraint passes per substep (more for big structures with long load paths)
   }
 
@@ -75,7 +76,7 @@ export class World {
         const floor = this.groundY + q.r;
         if (q.x[1] < floor) {
           q.x[1] = floor;
-          const mu = 0.7;
+          const mu = this.mu;
           q.x[0] = q.prev[0] + (q.x[0] - q.prev[0]) * (1 - mu);
           q.x[2] = q.prev[2] + (q.x[2] - q.prev[2]) * (1 - mu);
         }

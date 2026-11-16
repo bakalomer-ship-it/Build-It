@@ -8,7 +8,8 @@ import { SLOTS, JOINTS, LEVEL, GUYS, GUY_DIST, LEG_STAKES, STAKE_JOINTS } from '
 // outward at 45° (seen from above), and its stake stands one klaf-height from the
 // leg, so the line also rises at about 45° to the top of the leg.
 export function guyAnchor(cfg, g) {
-  const u = slotById(g.leg).centre[0], d = g.side > 0 ? cfg.backDist : cfg.frontDist, s = Math.SQRT1_2;
+  // (a free-build klaf may not have its legs yet: then where a 2×2 klaf's leg would be)
+  const u = slotById(g.leg)?.centre[0] ?? (g.leg === 'legR' ? 0.9 : -0.9), d = g.side > 0 ? cfg.backDist : cfg.frontDist, s = Math.SQRT1_2;
   return [u + Math.sign(u) * d * s, 0, cfg.z0 + g.side * d * s];
 }
 export const SOLO_CFG = { z0: 0, frontDist: GUY_DIST, backDist: GUY_DIST, pullDist: GUY_DIST + 1.4, anchorX: { front: 1.05, back: 1.05 }, inner: 0 };
@@ -91,7 +92,7 @@ export class KlafSim {
         // shared world; extra points on a lone klaf would only soften its legs)
         for (const v of world ? cfg.extraLegV || [] : []) { const s = v - slot.centre[1]; if (Math.abs(s) <= half - 0.04) ss.add(round(s)); }
       }
-      if (slot.id === 'topH' || slot.id.startsWith('diag')) ss.add(0);
+      if (slot.id === 'topH' || slot.load || slot.id.startsWith('diag')) ss.add(0);
       const list = [...ss].sort((x, y) => x - y);
       const mass = pole.length * LEVEL.kgPerMetre / list.length;
       const parts = list.map(s => {
@@ -236,7 +237,7 @@ export class KlafSim {
       // its stake will stand closer (the cube's inner guy lines)
       const d = Math.max(this.guyDist(g.side), GUY_DIST);
       const holder = W.addParticle([u, 0.05, this.z0 + g.side * d], 0);
-      const vertical = Math.hypot(LEVEL.height + r - 0.05, d);
+      const vertical = Math.hypot(this.legH(g.leg) + r - 0.05, d);
       con = W.add('grip', top, holder, { rest: vertical + 0.03, compliance: TUNING.guyCompliance, cap: TUNING.backGripCap, tag: g.id });
     } else {
       // front guy line: the pullers' line, they stand behind its stake
@@ -245,7 +246,7 @@ export class KlafSim {
       con.rest += 0.02;
       con.pull = true;
     }
-    con.held = true;
+    con.held = true; con.leg = g.leg;
     this.guys[g.id] = con;
     return true;
   }
@@ -266,9 +267,12 @@ export class KlafSim {
     cand.sort((a, b) => Math.abs(a.s) - Math.abs(b.s));
     return Math.abs(cand[0].s - s0) > 0.6 ? null : cand[0].id;
   }
+  // how high the top of a leg stands (legs can differ in a free-build klaf)
+  legH(leg) { const s = slotById(leg), p = this.build.poles[leg]; return s && p ? s.centre[1] + p.length / 2 : LEVEL.height; }
+  // the pole the inspection hangs its load from: the top horizontal (in free build, the pole marked `load`)
   topParticle() {
-    const t = this.poleParticles.topH;
-    if (t) return t.find(q => Math.abs(q.s) < 1e-6).id;
+    const t = this.poleParticles[SLOTS.find(s => s.load)?.id || 'topH'];
+    if (t) return (t.find(q => Math.abs(q.s) < 1e-6) || t[Math.floor(t.length / 2)]).id;
     for (const leg of ['legL', 'legR']) { const p = this.poleParticles[leg]; if (p) return p[p.length - 1].id; }
     return null;
   }
@@ -312,7 +316,7 @@ export class KlafSim {
     this.target = Math.min(angleDeg, 105);
     for (const con of lines) {
       const top = this.pos(con.i), h = this.pos(con.j);
-      const p = this.kw(top[0], LEVEL.height, this.target);
+      const p = this.kw(top[0], this.legH(con.leg), this.target);
       const want = Math.hypot(p[0] - h[0], p[1] - h[1], p[2] - h[2]) + 0.02;
       con.rest = Math.min(con.rest, want);
     }
@@ -373,7 +377,7 @@ export class KlafSim {
         if (!this.lifted(leg)) continue; // nobody lifting this side
         const p = this.poleParticles[leg]; if (!p) continue;
         const id = p[p.length - 1].id, q = W.p[id];
-        const goal = this.kw(q.x[0], LEVEL.height, Math.min(this.target, 50));
+        const goal = this.kw(q.x[0], this.legH(leg), Math.min(this.target, 50));
         const f = [0, 1, 2].map(k => 900 * (goal[k] - q.x[k]) - 120 * q.v[k]);
         const fl = Math.hypot(...f), cap = 420;
         if (fl > cap) for (let k = 0; k < 3; k++) f[k] *= cap / fl;

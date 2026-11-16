@@ -88,3 +88,25 @@ export const LEVEL = {
   poleRadius: 0.045,
   kgPerMetre: 4,  // 8 cm pole: π·4²·0.8·100/1000 ≈ 4 kg per metre
 };
+
+// ---------- swapping the plan (free build) ----------
+// Everything reads the klaf's plan from SLOTS / JOINTS / LEG_STAKES above. Free
+// build puts the player's own klaf into the same arrays (in place, so every
+// module sees it), and the standard plan comes back when a level is played.
+const STD = { slots: [...SLOTS], joints: [...JOINTS], stakeU: LEG_STAKES.map(s => s.u), height: LEVEL.height };
+export function setPlan(slots, joints) {
+  SLOTS.length = 0; SLOTS.push(...slots);
+  JOINTS.length = 0; JOINTS.push(...joints);
+  for (const st of LEG_STAKES) {
+    const leg = slots.find(s => s.id === st.leg);
+    if (leg) st.u = leg.centre[0] + Math.sign(leg.centre[0] || (st.leg === 'legR' ? 1 : -1)) * 0.09;
+  }
+  const legs = slots.filter(s => s.id.startsWith('leg'));
+  if (legs.length) LEVEL.height = Math.max(...legs.map(s => s.centre[1] + s.length / 2));
+}
+export function resetPlan() {
+  SLOTS.length = 0; SLOTS.push(...STD.slots);
+  JOINTS.length = 0; JOINTS.push(...STD.joints);
+  LEG_STAKES.forEach((s, i) => { s.u = STD.stakeU[i]; });
+  LEVEL.height = STD.height;
+}

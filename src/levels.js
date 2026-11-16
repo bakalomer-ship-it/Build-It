@@ -120,17 +120,8 @@ export const LEVELS = [
     cube: null,
   },
   {
-    number: 2, name: 'קובייה 2×2', tutorial: false, targetTimeSec: 16 * 60,
-    stockExtra: [3.0, 2.2, 1.6], ropeSpare: 2, crew: 6, // a proper klaf raise takes 6 (Omer)
-    klafim: [
-      { ...SOLO, he: 'קלף קדמי', short: 'א׳', backDist: IN, anchorX: { front: 1.05, back: 0.65 }, inner: 1, extraLegV: CUBE_LEG_V },
-      { ...SOLO, he: 'קלף אחורי', short: 'ב׳', z0: D, frontDist: C.innerGuyDistance, pullDist: 1.3, anchorX: { front: 0.65, back: 1.05 }, inner: -1, extraLegV: CUBE_LEG_V },
-    ],
-    cube: makeCube(1),
-  },
-  {
     // בסיס מתקן: two cubes in a row, three klafim, the middle one shared
-    number: 3, name: 'בסיס מתקן 2×4', tutorial: false, targetTimeSec: 26 * 60,
+    number: 2, name: 'בסיס מתקן 2×4', tutorial: false, targetTimeSec: 26 * 60,
     stockExtra: [3.0, 2.2, 1.6], ropeSpare: 3, crew: 6,
     klafim: [
       { ...SOLO, he: 'קלף קדמי', short: 'א׳', backDist: IN, anchorX: { front: 1.05, back: 0.65 }, inner: 1, extraLegV: BASE_LEG_V },
@@ -139,4 +130,23 @@ export const LEVELS = [
     ],
     cube: makeCube(2),
   },
+  {
+    // חצובה: three legs lashed at the top, stood up and spread (see tripod.js)
+    number: 3, name: 'חצובה 4 מ׳', tutorial: false, targetTimeSec: 10 * 60, tripod: true,
+    stockExtra: [5.0, 4.0, 3.0, 2.0, 2.0], ropeSpare: 2, crew: 6,
+    // where it is built: the legs lie from z0 towards +z, and it stands over `centre`
+    klafim: [{ ...SOLO, he: 'חצובה' }], centre: [0, 0.7],
+    cube: null,
+  },
 ];
+// The 2×2 cube is no longer a station of its own (Omer, 2026-11-16: station 2 is the
+// 2×4 base). It stays here for the physics tests.
+export const CUBE_LEVEL = {
+    number: 0, name: 'קובייה 2×2', tutorial: false, targetTimeSec: 16 * 60,
+    stockExtra: [3.0, 2.2, 1.6], ropeSpare: 2, crew: 6, // a proper klaf raise takes 6 (Omer)
+    klafim: [
+      { ...SOLO, he: 'קלף קדמי', short: 'א׳', backDist: IN, anchorX: { front: 1.05, back: 0.65 }, inner: 1, extraLegV: CUBE_LEG_V },
+      { ...SOLO, he: 'קלף אחורי', short: 'ב׳', z0: D, frontDist: C.innerGuyDistance, pullDist: 1.3, anchorX: { front: 0.65, back: 1.05 }, inner: -1, extraLegV: CUBE_LEG_V },
+    ],
+    cube: makeCube(1),
+  };

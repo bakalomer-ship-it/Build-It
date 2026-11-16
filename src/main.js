@@ -7,14 +7,16 @@
 // ...): useKlaf(i) points all of them at klaf i.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { SLOTS, JOINTS, STAKE_JOINTS, LEG_STAKES, GUYS, LASHINGS, LASHING_ORDER, GUY_LASHING_ORDER, LEVEL } from './level1.js';
+import { SLOTS, JOINTS, STAKE_JOINTS, LEG_STAKES, GUYS, LASHINGS, LASHING_ORDER, GUY_LASHING_ORDER, LEVEL, setPlan, resetPlan } from './level1.js';
+import { FREE_LEVEL, GRID, POLE_MIN, POLE_MAX, layPole, onSheet, idFor, slotFor, crossings, markLoad, freeCfg } from './free.js';
 import { SIZES } from './blueprints.js';
 import { KlafSim, TUNING, jointReachable, guyAnchor, slotById, slotParam, slotPoint, klafToWorld } from './klafSim.js';
 import { CubeSim, cubeSlotPoint, cubeSlotParam, cubeJointReachable } from './cubeSim.js';
 import { LEVELS } from './levels.js';
+import { TRI, TRI_SLOTS, TRI_JOINTS, LEG_IDS, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, TRI_TUNING, TripodSim, startFeet, planFeet, standing, braceReaches, fitsPlan } from './tripod.js';
 import {
   R, makeRenderer, makeWorld, makeBlueprintMesh, drawBlueprint, BP, makePoleMesh, placeCylinder, makeSideSheet, drawSideSheet, makeTopSheet, drawTopSheet, POLE_LOOK,
-  makeLashing, placeLashing, placeParallelLashing, RopeViz, makeStake, makeDriver,
+  makeLashing, placeLashing, placeParallelLashing, RopeViz, makeStake, makeDriver, makeFreeGrid, makeTripodSheet, drawTripodFolder,
 } from './scene.js';
 import { sfx, buzz } from './sound.js';
 import { Actor, makeCrew, freeActors, CREW } from './crew.js';
@@ -28,6 +30,12 @@ try { const n = +new URLSearchParams(location.search).get('level'); if (n >= 1 &
 const KLAF_STAGES = [['build', 'בניית הקלף'], ['stakes', 'בז״נטים'], ['raise', 'הרמה'], ['anchor', 'עיגון']];
 function stageList() {
   const L = [];
+  if (LV.tripod) return [
+    { key: 'build', id: 'build', k: 0, he: 'הרגליים וכפיתת החצובה' },
+    { key: 'spread', id: 'spread', k: null, he: 'הקמה ופישוק הרגליים' },
+    { key: 'brace', id: 'brace', k: null, he: 'חיזוקים ובז״נטים' },
+    { key: 'check', id: 'check', k: null, he: 'מסדר' },
+  ];
   // Omer (2026-11-15): first every klaf is built on the ground, then they are raised
   // one by one (stakes, raise, anchor), and only then joined
   const st = ([id, he], k, i) => L.push({ key: LV.klafim.length > 1 ? `${id}:${i}` : id, id, k: i, he: LV.klafim.length > 1 ? `${he}, ${k.he}` : he });
@@ -52,6 +60,7 @@ function freshKlaf(cfg) {
     cfg,
     build: { poles: {}, joints: {}, stakes: {}, guyTop: {}, anchors: {}, stakeJoints: {}, guyTies: {}, guyOff: {}, crew: {} },
     sim: null, raisedOnce: false, uprightFor: 0, carrying: {},
+    plan: { slots: [], joints: [] }, // free build: this klaf's own design
   };
 }
 function freshState() {
@@ -59,6 +68,9 @@ function freshState() {
     stage: 'build', stageKey: STAGES[0].key,
     ki: 0, klafim: LV.klafim.map(freshKlaf),
     cube: LV.cube ? { build: { poles: {}, joints: {} }, sim: null, carrying: {} } : null,
+    // the tripod once it leaves the ground: how far up it is (0 lying … 1 standing), where its
+    // feet stand, and what has been added to it
+    tri: LV.tripod ? { up: 0, raising: false, feet: null, braces: {}, joints: {}, stakes: {}, stakeJoints: {}, sim: null } : null,
     tying: null,
     selected: null,
     falling: null,
@@ -94,7 +106,7 @@ controls.enabled = false;
 
 // each klaf has its own set of meshes; useKlaf(i) points these names at klaf i's set
 let blueprint, poleMeshes, lashMeshes, stakeMeshes, guyRopes;
-const MAX_KLAFIM = Math.max(...LEVELS.map(l => l.klafim.length));
+const MAX_KLAFIM = Math.max(3, ...LEVELS.map(l => l.klafim.length));
 const KM = [];
 for (let k = 0; k < MAX_KLAFIM; k++) {
   const m = { poles: {}, lash: {}, stakes: {}, ropes: {} };
@@ -110,8 +122,36 @@ for (let k = 0; k < MAX_KLAFIM; k++) {
   });
   KM.push(m);
 }
+// free build: the player's own poles get meshes from this pool (ids as free.js gives them)
+for (const m of KM) {
+  let i = 0;
+  for (const pre of ['h', 'v', 'diag']) for (let n = 1; n <= 14; n++) {
+    const a = makePoleMesh((i++ % 3) / 2), b = makePoleMesh(0);
+    b.material = a.material; scene.add(a, b); a.visible = b.visible = false;
+    m.poles[pre + n] = [a, b];
+  }
+}
+const freeGrid = makeFreeGrid(GRID);
+freeGrid.userData.z = freeGrid.position.z;
+scene.add(freeGrid);
+// the tripod's legs and braces, its stakes, and the sheet its legs are laid on
+for (const id of [...LEG_IDS, ...BRACES.map(b => b.id)]) {
+  const a = makePoleMesh(0.5), b = makePoleMesh(0);
+  b.material = a.material; scene.add(a, b); a.visible = b.visible = false;
+  KM[0].poles[id] = [a, b];
+}
+const triStakeMeshes = TRI_STAKES.map(() => { const m = makeStake(TRI.stakeLength); m.visible = false; scene.add(m); return m; });
+const triSheet = makeTripodSheet({ slots: TRI_SLOTS, lashV: TRI_JOINTS[0].at[1], legLength: TRI.legLength });
+scene.add(triSheet);
+// a lashing's coils (made the first time a joint needs them: free build has joints of its own)
+function lashMesh(id) {
+  if (!lashMeshes[id]) { const g = makeLashing(); g.visible = false; scene.add(g); lashMeshes[id] = g; }
+  return lashMeshes[id];
+}
 function useKlaf(i) {
   G.ki = i;
+  // free build: every klaf is its own design, and the shared plan follows the current klaf
+  if (LV.free) { const pl = G.klafim[i].plan; setPlan(pl.slots, pl.joints); }
   ({ blueprint, poles: poleMeshes, lash: lashMeshes, stakes: stakeMeshes, ropes: guyRopes } = KM[i]);
 }
 // run fn for each klaf that is on the plaza, as the current klaf
@@ -192,6 +232,7 @@ const markerTex = {
   lash: ringTexture('#ffc046'),
   stake: ringTexture('#ff7a45', '▼'),
   guy: ringTexture('#7fd0ff', '∞'),
+  foot: ringTexture('#7fd0ff', '↔'),
   off: ringTexture('#ff8d8d', '✕'),
 };
 const markerPool = [];
@@ -213,6 +254,7 @@ function visNormal() {
   return n ? [-n[0], -n[1], -n[2]] : [0, 1, 0];
 }
 function poleSegs(sid) {
+  if (LV.tripod && G.tri.up > 0) return triLegSegs(sid);
   const slot = slotById(sid);
   const off = layerOff(slot);
   if (G.sim) {
@@ -232,6 +274,7 @@ function poleDir(sid) {
   return [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
 }
 function jointPos(j) {
+  if (LV.tripod && G.tri.up > 0) return triApex();
   const off = (layerOff(slotById(j.a)) + layerOff(slotById(j.b))) / 2;
   if (G.sim) {
     const id = G.sim.findParticle(j.a, slotParam(slotById(j.a), j.at));
@@ -278,7 +321,8 @@ function makeChips() {
     stagesEl.appendChild(b);
   });
   $('level-name').textContent = LV.name;
-  $('level-no').textContent = `שלב ${LV.number}`;
+  $('level-no').textContent = LV.free ? 'ארגז חול' : `שלב ${LV.number}`;
+  $('btn-folder').hidden = !!LV.free;
 }
 makeChips();
 // stageDone('anchor') asks about the current klaf; a key like 'anchor:1' names the klaf
@@ -288,7 +332,12 @@ function stageDone(key) {
   const id = st ? st.id : key;
   if (id === 'cube') return !!G.cube && cubeComplete();
   if (id === 'unguy') return !!G.cube && G.klafim.every((k, i) => GUYS.every(g => !innerSide(k.cfg, g) || k.build.guyOff[g.id]));
+  if (id === 'spread') return !!G.tri && G.tri.up >= 1;
+  if (id === 'brace') return !!G.tri && G.tri.up >= 1 && BRACES.every(q => G.tri.braces[q.id]) && BRACE_JOINTS.every(q => G.tri.joints[q.id])
+    && TRI_STAKES.every(q => (G.tri.stakes[q.id] || 0) >= TRI_STAKE_HITS) && TRI_STAKE_JOINTS.every(q => G.tri.stakeJoints[q.id]);
   const b = G.build;
+  // a free klaf is ready for the raise once it has its two legs; the rest is the player's call
+  if (id === 'build' && LV.free) return !!(b.poles.legL && b.poles.legR);
   if (id === 'build') return SLOTS.every(s => b.poles[s.id]) && JOINTS.every(j => b.joints[j.id]);
   if (id === 'stakes') return LEG_STAKES.every(s => (b.stakes[s.id] || 0) >= LEG_STAKE_HITS);
   if (id === 'raise') return G.raisedOnce;
@@ -314,6 +363,9 @@ function goStage(key) {
     if (st.k !== G.ki) { clearJobs(); selectPole(null); }
     leaveCube();
     useKlaf(st.k);
+    if (LV.tripod && (G.tri.up > 0 || G.tri.raising)) {
+      return confirmCard('להשכיב את החצובה?', 'כדי לשנות את הרגליים או את כפיתת החצובה צריך להשכיב אותה חזרה על הקרקע. החיזוקים והבז״נטים יורדים.', 'להשכיב', () => { layTripod(); goStage(st.key); });
+    }
     if (id === 'build' && G.sim && G.sim.angle() > 12 && !G.falling) {
       return confirmCard('להוריד את הקלף לקרקע?', 'כדי לשנות סנדות צריך להשכיב את הקלף חזרה על השרטוט. הבז״נטים נשארים במקומם.', 'להוריד', () => { lowerKlaf(); goStage(st.key); });
     }
@@ -322,17 +374,21 @@ function goStage(key) {
   } else if (LV.cube) {
     if (!enterCube()) return;
     if (id !== 'cube') selectPole(null);
+  } else if (LV.tripod) {
+    if (!stageDone('build')) { infoCard('קודם כופתים את החצובה על הקרקע', 'מניחים שלוש רגליים זו לצד זו וכופתים אותן יחד ליד הראש. רק אז אפשר להקים.'); return; }
+    if (id !== 'spread' && G.tri.up < 1) { infoCard('קודם מקימים את החצובה', 'חיזוקים ובז״נטים מוסיפים לחצובה שכבר עומדת, כשהרגליים שלה במקומן.'); return; }
+    selectPole(null); G.tri.sim = null;
   } else {
     selectPole(null); if (!G.sim) startSim();
   }
-  G.stage = id; G.stageKey = st.key;
+  G.stage = id; G.stageKey = st.key; G.armed = null;
   closePicker();
-  $('tray').hidden = id !== 'build' && id !== 'cube';
+  $('tray').hidden = id !== 'build' && id !== 'cube' && id !== 'brace';
   $('rope-panel').hidden = id !== 'raise';
   $('crew-panel').hidden = id !== 'raise';
   if (id !== 'build' && id !== 'cube') $('length-panel').hidden = true;
   // close enough to tap the small parts in stages with fine work, far and high otherwise
-  setCameraMode(id === 'build' ? 'buildView' : (id === 'stakes' || id === 'anchor' || id === 'unguy') ? 'workView' : id === 'cube' ? 'cubeView' : 'orbit');
+  setCameraMode(LV.tripod && id !== 'build' ? (id === 'brace' ? 'triWork' : 'triView') : id === 'build' ? 'buildView' : (id === 'stakes' || id === 'anchor' || id === 'unguy') ? 'workView' : id === 'cube' ? 'cubeView' : 'orbit');
   refreshChips(); refreshActions(); refreshHint();
 }
 const nextStage = () => STAGES[STAGES.findIndex(s => s.key === G.stageKey) + 1];
@@ -402,12 +458,19 @@ function lowerKlaf() {
 let camMode = null, camTween = null, closeup = null;
 function stagePose(mode) {
   const aspect = window.innerWidth / window.innerHeight;
-  const far = aspect < 1.6 ? 1.25 : 1; // narrower screens step back a little
+  // narrower screens step back a little; free build's sheet is bigger than a 2×2 klaf
+  const far = (aspect < 1.6 ? 1.25 : 1) * (LV.free ? (mode === 'buildView' ? 1.5 : Math.max(1, LEVEL.height / 2 * 1.1)) : 1);
   // Omer's reference: a fixed high three-quarter view (about 50 to 60 degrees up),
   // turned about 45 degrees so the structure is seen corner-on, through a narrow lens
   const at = (target, dist, elev, azim) => ({ target, pos: target.clone().add(new THREE.Vector3(Math.sin(azim) * Math.cos(elev), Math.sin(elev), -Math.cos(azim) * Math.cos(elev)).multiplyScalar(dist * far)) });
   const z = LV.cube && cubeStage(G.stage) ? (LV.cube.span ?? LV.cube.depth) / 2 : z0();
-  if (mode === 'buildView') return at(new THREE.Vector3(0, 0, z + 1.0), 16.5, 1.08, 0.5);
+  if (LV.tripod) {
+    const c = triCentre();
+    if (mode === 'buildView') return at(new THREE.Vector3(0, 0, z + 2.3), 23, 1.08, 0.5);
+    if (mode === 'triWork') return at(new THREE.Vector3(c[0], 0.6, c[1]), 17, 0.85, 0.72);
+    return at(new THREE.Vector3(c[0], 1.6, c[1]), 25, 0.8, 0.72);
+  }
+  if (mode === 'buildView') return at(new THREE.Vector3(0, 0, z + (LV.free ? 1.6 : 1.0)), 16.5, 1.08, 0.5);
   if (mode === 'workView') return at(new THREE.Vector3(0, 0.6, z + 0.2), 15, 0.95, 0.72);
   if (mode === 'cubeView') return at(new THREE.Vector3(0, 0.9, z), 17 + 4 * ((LV.cube?.bays ?? 1) - 1), 0.92, 0.78);
   return at(new THREE.Vector3(0, 0.7, z + 0.4), 26, 0.98, 0.78);
@@ -501,7 +564,8 @@ function collectTargets() {
   const T = [];
   const st = G.stage, sim = G.sim, b = G.build;
   const busy = G.falling || G.check?.running;
-  if (!busy && LV.cube && cubeStage(st)) collectCubeTargets(T);
+  if (!busy && LV.tripod && st !== 'build') collectTriTargets(T);
+  else if (!busy && LV.cube && cubeStage(st)) collectCubeTargets(T);
   else if (!busy) {
     // klaf lashings: tie (ring) or change (on the coil)
     // lashings on the klaf can only be tied or changed while it lies on the ground
@@ -509,6 +573,7 @@ function collectTargets() {
     for (const j of JOINTS) {
       if (!klafDown || G.carrying[j.a] || G.carrying[j.b]) continue;
       if (!jointReachable(j, b.poles)) continue;
+      if (j.all && !j.all.every(id => jointReachable({ a: id, b: id, at: j.at }, b.poles))) continue; // one lashing round several poles
       const p = jointPos(j); if (!p) continue;
       T.push({ kind: b.joints[j.id] ? 'lashed' : 'joint', id: j.id, pos: p, show: !b.joints[j.id] });
     }
@@ -547,7 +612,7 @@ function collectTargets() {
     const s = markerSprite(k++);
     s.visible = true;
     s.position.set(...t.pos);
-    s.material.map = t.kind === 'stake' || t.kind === 'anchor' ? markerTex.stake : t.kind === 'guyOff' ? markerTex.off : (t.kind === 'guyTop' || t.kind === 'guyTie') ? markerTex.guy : markerTex.lash;
+    s.material.map = t.kind === 'stake' || t.kind === 'anchor' || t.kind === 'tstake' ? markerTex.stake : t.kind === 'foot' ? markerTex.foot : t.kind === 'guyOff' ? markerTex.off : (t.kind === 'guyTop' || t.kind === 'guyTie') ? markerTex.guy : markerTex.lash;
     const pulse = 1 + 0.12 * Math.sin(performance.now() / 260);
     const base = 0.05;
     s.scale.setScalar(base * pulse);
@@ -612,14 +677,20 @@ canvas.addEventListener('pointerup', e => {
 function onTap(x, y) {
   if (G.falling || closeup) return;
   // a length picked from the pile goes on the line that was tapped
-  if (G.armed && (G.stage === 'build' || G.stage === 'cube')) {
+  if (G.armed && (G.stage === 'build' || G.stage === 'cube' || G.stage === 'brace')) {
     let slot = null;
     if (G.stage === 'cube') slot = nearestCubeSlot(x, y);
+    else if (G.stage === 'brace') slot = nearestBrace(x, y);
+    else if (LV.free) return; // free build lays the pole with a drag on the grid (see layFree)
     else { const p = groundAt(x, y); if (p) slot = nearestSlot(p.x, p.z - z0()); }
     if (slot) { G.lastLength = G.armed; placePole(slot); refreshAll(); return; }
   }
   const t = pickTarget(x, y);
   if (t) return onTarget(t, x, y);
+  if (G.stage === 'brace') { // a brace that was put in goes back to the pile with a tap
+    const sid = pickBrace(x, y);
+    if (sid) { delete G.tri.braces[sid]; for (const j of BRACE_JOINTS) if (j.brace === sid) delete G.tri.joints[j.id]; sfx.tick(); flashHint('החיזוק חזר לערימה'); return refreshAll(); }
+  }
   if (G.stage === 'build' || G.stage === 'cube') {
     const sid = pickPole(x, y);
     if (sid) { closePicker(); return selectPole(sid); }
@@ -641,6 +712,9 @@ function onTarget(t, x, y) {
       break;
     }
     case 'guyTie': case 'cjoint': case 'clashed': return openPicker(t, x, y);
+    case 'bjoint': case 'blashed': case 'tsj': case 'tsjd': return openPicker(t, x, y);
+    case 'tstake': G.tri.stakes[t.id] = (G.tri.stakes[t.id] || 0) + 1; sfx.hammer(); buzz(15); break;
+    case 'foot': flashHint('<b>גררו את הרגל</b> על הקרקע כדי להזיז אותה'); break;
     case 'guyOff': {
       // an inner guy line comes down: untie it from its stake
       const keep = G.ki; useKlaf(t.klaf);
@@ -652,6 +726,417 @@ function onTarget(t, x, y) {
     }
   }
   refreshChips(); refreshActions(); refreshHint();
+}
+
+// ---------------- free build: designing the klaf on the grid ----------------
+// The player picks a length in the pile, then drags on the grid: the pole starts
+// where the finger went down and points where it is dragged. A tap stands it upright.
+let lay = null;
+const toKlaf = (x, y) => { const p = groundAt(x, y); return p ? [p.x, p.z - z0()] : null; };
+const canLay = () => LV.free && G.stage === 'build' && G.armed && !G.falling && !closeup;
+function layGhost(pole) {
+  const h = pole.length / 2, e = k => [pole.centre[0] + pole.dir[0] * k, 0.12, pole.centre[1] + pole.dir[1] * k + z0()];
+  placeCylinder(ghost, e(-h), e(h));
+  ghost.visible = true;
+}
+canvas.addEventListener('pointerdown', e => {
+  if (!canLay()) return;
+  const a = toKlaf(e.clientX, e.clientY); if (!a) return;
+  lay = { a, len: G.armed, pole: layPole(a, a, G.armed) };
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* fine without it */ }
+  layGhost(lay.pole);
+});
+canvas.addEventListener('pointermove', e => {
+  if (!lay) return;
+  const b = toKlaf(e.clientX, e.clientY); if (!b) return;
+  lay.pole = layPole(lay.a, b, lay.len);
+  layGhost(lay.pole);
+  flashHint(`סנדה של <b>${lay.pole.length.toFixed(1)} מ׳</b>${lay.pole.kind === 'v' ? ' · זקופה' : lay.pole.kind === 'h' ? ' · מאוזנת' : ' · אלכסון'}`);
+});
+canvas.addEventListener('pointerup', () => { if (!lay) return; const pole = lay.pole; lay = null; ghost.visible = false; freePlace(pole); });
+canvas.addEventListener('pointercancel', () => { lay = null; ghost.visible = false; });
+function disarm() { G.armed = null; controls.enabled = true; renderPile(); }
+function freePlace(pole) {
+  startClock();
+  if (!onSheet(pole)) { flashHint('הסנדה יוצאת מהרשת או נכנסת לאדמה. נסו מקום או כיוון אחר'); return; }
+  const id = idFor(pole, SLOTS);
+  if (!id) { flashHint(pole.kind === 'v' && pole.foot ? '<b>בצד הזה כבר עומדת רגל.</b> לקלף שתי רגליים, אחת מכל צד של קו האמצע' : 'אין מקום לעוד סנדות בקלף הזה'); return; }
+  G.build.poles[id] = { length: pole.length };
+  G.lastLength = pole.length;
+  freeSync([...SLOTS, slotFor(id, pole)]);
+  startCarry(id);
+  sfx.tick();
+  disarm();
+  refreshAll();
+}
+// the plan follows the poles: joints are wherever poles cross, and lashings whose crossing is gone fall off
+function freeSync(slots) {
+  markLoad(slots);
+  K().plan = { slots, joints: crossings(slots) };
+  setPlan(K().plan.slots, K().plan.joints);
+  const b = G.build;
+  for (const id in b.joints) if (!JOINTS.some(j => j.id === id)) delete b.joints[id];
+  for (const id in b.poles) if (!slots.some(q => q.id === id)) delete b.poles[id];
+  // a leg that moved takes its stake, guy lines and crew posts with it
+  const legs = slots.filter(q => q.id.startsWith('leg')).map(q => q.id + q.centre[0] + ':' + q.length).join('|');
+  if (legs !== K().freeLegs) { K().freeLegs = legs; b.stakes = {}; b.guyTop = {}; b.anchors = {}; b.crew = {}; }
+  freeCfg(K().cfg, slots);
+}
+// another klaf of the same sandbox: it is designed and stands a little further back
+function addFreeKlaf() {
+  const n = LV.klafim.length;
+  if (n >= MAX_KLAFIM) return flashHint(`אפשר לבנות עד ${MAX_KLAFIM} קלפים`);
+  LV.klafim[0].he = 'קלף 1'; LV.klafim[0].short = '1';
+  const cfg = { ...LV.klafim[n - 1], z0: Math.round((LV.klafim[n - 1].z0 + 2.4) * 10) / 10, he: `קלף ${n + 1}`, short: String(n + 1) };
+  LV.klafim.push(cfg); G.klafim.push(freshKlaf(cfg));
+  KM[n].blueprint.visible = false;
+  STAGES = stageList(); makeChips();
+  goStage(`build:${n}`);
+  flashHint(`<b>קלף ${n + 1}</b> יעמוד ${(cfg.z0 - LV.klafim[n - 1].z0).toFixed(1)} מ׳ מאחורי הקודם. אפשר לקרב ולהרחיק אותו`);
+}
+// placing a klaf: nearer to the one before it, or further away (only while it lies on the ground)
+function moveFreeKlaf(d) {
+  const cfg = K().cfg, prev = LV.klafim[G.ki - 1]; if (!prev || G.sim) return;
+  const gap = Math.max(1.0, Math.min(6.0, Math.round((cfg.z0 - prev.z0 + d) * 10) / 10));
+  const shift = prev.z0 + gap - cfg.z0;
+  // the klafim behind it move with it
+  for (let i = G.ki; i < LV.klafim.length; i++) { if (G.klafim[i].sim) return flashHint('קלף שכבר הורם לא זז'); }
+  for (let i = G.ki; i < LV.klafim.length; i++) LV.klafim[i].z0 = Math.round((LV.klafim[i].z0 + shift) * 10) / 10;
+  camMode = null; setCameraMode('buildView');
+  sfx.tick(); flashHint(`<b>${cfg.he}</b> עומד ${gap.toFixed(1)} מ׳ מאחורי ${prev.he}`);
+}
+function freeHint(nPoles, nJ) {
+  const b = G.build;
+  if (G.armed) return '<b>ציירו את הסנדה על הרשת:</b> גררו מהמקום שבו היא מתחילה עד המקום שבו היא נגמרת. האורך נקבע לפי הגרירה';
+  if (!b.poles.legL || !b.poles.legR) return 'הקישו על <b>סנדה</b> וציירו רגל: גררו מ<b>קו הרגליים</b> ישר למעלה. לקלף שתי רגליים, אחת מכל צד של קו האמצע';
+  if (nPoles === 2) return 'יש רגליים. הוסיפו <b>רוחבים ואלכסונים</b>: לוקחים סנדה ומציירים אותה על הרשת';
+  if (nJ < JOINTS.length) return `סנדות ${nPoles} · כפיתות ${nJ}/${JOINTS.length} · הקישו על <b>טבעת</b> במפגש סנדות כדי לכפות`;
+  return `סנדות ${nPoles} · כפיתות ${nJ}/${JOINTS.length} · אפשר להוסיף עוד, או להמשיך ל<b>בז״נטים</b> ולהרמה`;
+}
+// why a free klaf fell: no drawing to compare with, so the reasons are the rules themselves
+function explainFree(kind) {
+  const sim = G.sim, b = G.build;
+  const untied = JOINTS.filter(j => !b.joints[j.id]).map(j => j.id);
+  const tiedOn = id => JOINTS.filter(j => (j.a === id || j.b === id) && b.joints[j.id]).length;
+  const diags = SLOTS.filter(q => q.kind === 'd' && b.poles[q.id] && tiedOn(q.id) >= 2);
+  const lean = q => Math.sign(q.dir[0] * q.dir[1]);
+  const xA = diags.some(q => lean(q) > 0), xB = diags.some(q => lean(q) < 0);
+  const loose = SLOTS.filter(q => !q.id.startsWith('leg') && b.poles[q.id] && tiedOn(q.id) < 2).map(q => q.id);
+  const focus = { joints: untied, poles: loose };
+  const top = sim.topCentre();
+  const dir = top[0] < 0 ? 'ימינה' : 'שמאלה';
+  const stakesIn = LEG_STAKES.every(q => (b.stakes[q.id] || 0) >= LEG_STAKE_HITS);
+  const xRule = () => (!xA && !xB)
+    ? { rule: 'קלף צריך איקס: שני אלכסונים, אחד לכל כיוון', detail: `אין בקלף אלכסון שכפות בשני הקצוות שלו. מסגרת של סנדות עם כפיתות בפינות בלבד מתעקמת למקבילית, והקלף נפל ${dir}.`, focus }
+    : { rule: 'קלף צריך איקס: שני אלכסונים, אחד לכל כיוון', detail: `יש בקלף אלכסון רק לכיוון אחד, והקלף נפל ${dir}. אלכסון מחזיק כשמושכים אותו ומתכופף כשדוחפים אותו, ולכן צריך אלכסון שני בכיוון ההפוך.`, focus };
+  if (kind === 'load') return { rule: 'סנדה שנושאת משקל נכפתת בשני הקצוות שלה', detail: 'הסנדה העליונה שקעה או נפלה כשהמדריך תלה עליה את דלי המים.', focus };
+  if (kind === 'slid' || (!stakesIn && sim.baseSlid() > 0.2))
+    return { rule: 'בז״נטים נדפקים ליד הרגליים לפני שמרימים את הקלף', detail: 'בלי בז״נטים, החבל גרר את רגלי הקלף על הקרקע והקלף לא נשאר במקומו.', focus: { feet: true } };
+  const grip = sim.brokenGrip();
+  if (grip && !(xA && xB)) return xRule();
+  if (grip) return { rule: 'מרימים לאט ובשליטה, ועוצרים כשהקלף ניצב', detail: `המשיכה הייתה חזקה מדי, או שהקלף כבד מדי לצוות: ה${GUYS.find(g => g.id === grip.tag).he} נקרע מידי המחזיקים.` };
+  if (G.check || sim.lettingGo) {
+    const off = GUYS.filter(g => !sim.guys[g.id]?.tied).length;
+    if (off) return { rule: 'לא עוזבים את הקלף לפני שכל 4 היתרים כפותים לבז״נטים', detail: `${off} יתרים לא היו כפותים לבז״נט, וכשהמחזיקים עזבו הקלף נפל.` };
+  }
+  if (!(xA && xB)) return xRule();
+  if (kind === 'over') return { rule: 'עוצרים את המשיכה כשהקלף ניצב', detail: 'הקלף עבר את האנך ונפל לכיוון המושכים.' };
+  if (untied.length) return { rule: 'כל מפגש של סנדות נכפת', detail: `${untied.length} מפגשים בקלף לא כפותים, והמסגרת התעקמה.`, focus };
+  return { rule: 'הקלף לא עמד', detail: 'נסו להוסיף רוחב או אלכסון, או לקצר את הקלף: קלף גבוה וצר קשה יותר להחזיק.', focus };
+}
+// the inspection of a free klaf: it stands or it falls, no stars
+function finishFree() {
+  G.endedAt = performance.now();
+  pushArrow.visible = false;
+  G.result = { stars: 0, free: true };
+  sfx.ok();
+  let nP = 0, nJ = 0, metres = 0, high = 0;
+  eachKlaf(() => {
+    const b = G.build;
+    nP += SLOTS.filter(q => b.poles[q.id]).length; nJ += JOINTS.filter(j => b.joints[j.id]).length;
+    metres += SLOTS.reduce((a, q) => a + (b.poles[q.id] ? q.length : 0), 0); high = Math.max(high, LEVEL.height);
+  });
+  const many = G.klafim.length > 1;
+  showModal(`
+    <div class="eyebrow">תוצאות המסדר · בנייה חופשית</div>
+    <h2>${many ? `כל ${G.klafim.length} הקלפים עומדים!` : 'הקלף שלכם עומד!'}</h2>
+    <ul class="inspect">
+      <li class="ok">${many ? 'עמדו' : 'עמד'} בדחיפות מכל הכיוונים</li>
+      <li class="ok">${many ? 'החזיקו' : 'החזיק'} את דלי המים</li>
+    </ul>
+    <div class="score-grid">
+      <span>גובה</span><b>${high.toFixed(1)} מ׳</b>
+      <span>סנדות</span><b>${nP} (${metres.toFixed(1)} מ׳ עץ)</b>
+      <span>כפיתות בקלפים</span><b>${nJ}</b>
+      <span>זמן</span><b>${fmt(elapsed())}</b>
+    </div>
+  `, [
+    ['לבנות מחדש', restart, true],
+    [many ? 'לשנות את הקלף האחרון' : 'לשנות את הקלף הזה', () => { closeModal(); G.check = null; G.result = null; lowerKlaf(); goStage('build'); }],
+    ['למסך הבית', () => { closeModal(); showHome(); }],
+  ]);
+  refreshAll();
+}
+
+// ---------------- the tripod (station 3) ----------------
+// On the ground the three legs are ordinary poles on a plan (see tripod.js). From
+// the moment it is stood up, the tripod is drawn from where its feet stand.
+function triCentre() { return [LV.centre?.[0] ?? 0, z0() + (LV.centre?.[1] ?? 0.7)]; }
+const triLens = () => LEG_IDS.map(id => G.build.poles[id]?.length ?? TRI.legLength);
+const freshTri = () => ({ up: 0, raising: false, feet: null, braces: {}, joints: {}, stakes: {}, stakeJoints: {}, sim: null });
+let triCache = null;
+function triState() {
+  const t = G.tri; if (!t?.feet) return null;
+  const key = JSON.stringify([t.feet, triLens()]);
+  if (!triCache || triCache.key !== key) triCache = { key, st: standing(t.feet, triLens()) };
+  return triCache.st;
+}
+const norm2 = (x, z) => { const l = Math.hypot(x, z) || 1; return [x / l, 0, z / l]; };
+// at the head the three legs sit side by side round the lashing, each on its own foot's side
+function headOffset(i, st = triState()) {
+  const f = st.legs[i].foot, n = norm2(f[0] - st.apex[0], f[2] - st.apex[2]);
+  return [n[0] * 0.06, 0, n[2] * 0.06];
+}
+function triLegSegs(sid) {
+  const i = LEG_IDS.indexOf(sid), t = G.tri, st = triState();
+  if (i < 0 || !st || !G.build.poles[sid]) return null;
+  const o = headOffset(i, st);
+  if (t.sim) { const [a, b] = t.sim.legEnds(i); return [[add3(a, o, 1), add3(b, o, 1)]]; }
+  const stand = [add3(st.legs[i].foot, o, 1), add3(st.legs[i].top, o, 1)];
+  if (t.up >= 1) return [stand];
+  // on its way up: the foot walks to its place while the pole swings upright
+  const lie = klafRestEnds(sid), k = ease(Math.max(0, t.up)), len = G.build.poles[sid].length;
+  const mix = (a, b) => a.map((v, c) => v + (b[c] - v) * k);
+  const foot = mix(lie[0], stand[0]);
+  const d = mix(lie[1].map((v, c) => v - lie[0][c]), stand[1].map((v, c) => v - stand[0][c])), dl = Math.hypot(...d) || 1;
+  return [[foot, add3(foot, d.map(v => v / dl), len)]];
+}
+function triApex() {
+  const t = G.tri;
+  if (t.sim) return t.sim.apex();
+  if (t.up >= 1) return triState().apex;
+  const seg = triLegSegs('t2'); if (!seg) return null;
+  const [a, b] = seg[0], len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+  return add3(a, [(b[0] - a[0]) / len, (b[1] - a[1]) / len, (b[2] - a[2]) / len], len - TRI.lashFromTop);
+}
+// where a leg is at the braces' height, and at the height it is lashed to its stake
+const triLegPoint = (i, what) => (what === 'brace' && G.tri.sim) ? G.tri.sim.bracePoint(i) : triState().legs[i][what];
+// a brace lies on the outside of its two legs
+function braceSide(brace, st) {
+  const [a, b] = brace.legs.map(i => st.legs[i].brace);
+  return norm2((a[0] + b[0]) / 2 - st.apex[0], (a[2] + b[2]) / 2 - st.apex[2]);
+}
+function braceEnds(brace, len, st = triState()) {
+  const live = st === triState() && G.tri?.sim;
+  const [a, b] = brace.legs.map(i => live ? G.tri.sim.bracePoint(i) : st.legs[i].brace);
+  const mid = a.map((v, c) => (v + b[c]) / 2), d = b.map((v, c) => v - a[c]), dl = Math.hypot(...d) || 1, n = braceSide(brace, st);
+  const m = add3(mid, n, GAP);
+  return [add3(m, d.map(v => v / dl), -len / 2), add3(m, d.map(v => v / dl), len / 2)];
+}
+function braceJointPos(j) {
+  const brace = BRACES.find(q => q.id === j.brace);
+  return add3(triLegPoint(j.leg, 'brace'), braceSide(brace, triState()), GAP / 2);
+}
+function triStakePos(i) {
+  const st = triState(), f = st.legs[i].foot, n = norm2(f[0] - st.apex[0], f[2] - st.apex[2]);
+  return [f[0] - n[2] * GAP * 1.1, f[2] + n[0] * GAP * 1.1];
+}
+const braceOn = id => { const b = BRACES.find(q => q.id === id), p = G.tri.braces[id]; return !!p && braceReaches(triState(), b, p.length); };
+function nearestBrace(x, y) {
+  let best = null, bd = 70;
+  for (const b of BRACES) {
+    if (G.tri.braces[b.id]) continue;
+    const [p, q] = braceEnds(b, b.length), A = toScreen(p), B = toScreen(q); if (!A || !B) continue;
+    const d = distToSeg(x, y, A, B);
+    if (d < bd) { bd = d; best = b; }
+  }
+  return best;
+}
+function pickBrace(x, y) {
+  let best = null, bd = 22;
+  for (const b of BRACES) {
+    const pl = G.tri.braces[b.id]; if (!pl) continue;
+    const [p, q] = braceEnds(b, pl.length), A = toScreen(p), B = toScreen(q); if (!A || !B) continue;
+    const d = distToSeg(x, y, A, B);
+    if (d < bd) { bd = d; best = b.id; }
+  }
+  return best;
+}
+function collectTriTargets(T) {
+  const t = G.tri, st = triState();
+  if (!st || t.up < 1) return;
+  if (G.stage === 'spread') st.legs.forEach((L, i) => { if (!footFixed(i)) T.push({ kind: 'foot', id: 'F' + i, pos: [L.foot[0], 0.12, L.foot[2]], show: true }); });
+  if (G.stage !== 'brace') return;
+  for (const j of BRACE_JOINTS) {
+    if (!braceOn(j.brace)) continue;
+    T.push({ kind: t.joints[j.id] ? 'blashed' : 'bjoint', id: j.id, pos: braceJointPos(j), show: !t.joints[j.id] });
+  }
+  TRI_STAKES.forEach((sk, i) => {
+    const [x, z] = triStakePos(i);
+    if ((t.stakes[sk.id] || 0) < TRI_STAKE_HITS) return T.push({ kind: 'tstake', id: sk.id, pos: [x, 0.12, z], show: true });
+    const sj = TRI_STAKE_JOINTS[i], p = st.legs[i].stake;
+    T.push({ kind: t.stakeJoints[sj.id] ? 'tsjd' : 'tsj', id: sj.id, pos: [(p[0] + x) / 2, p[1], (p[2] + z) / 2], show: !t.stakeJoints[sj.id] });
+  });
+}
+// a foot that already has a stake or a brace stays where it is
+const footFixed = i => (G.tri.stakes[TRI_STAKES[i].id] || 0) > 0 || BRACES.some(b => b.legs.includes(i) && G.tri.braces[b.id]);
+// spreading the legs: drag a foot over the ground, and the head follows
+let footDrag = null;
+canvas.addEventListener('pointerdown', e => {
+  if (!LV.tripod || G.stage !== 'spread' || G.tri.up < 1 || G.falling) return;
+  const st = triState(); let best = null, bd = 42;
+  st.legs.forEach((L, i) => { const sp = toScreen([L.foot[0], 0.1, L.foot[2]]); if (!sp) return; const d = Math.hypot(sp[0] - e.clientX, sp[1] - e.clientY); if (d < bd) { bd = d; best = i; } });
+  if (best == null) return;
+  if (footFixed(best)) { flashHint('<b>הרגל הזו כבר מחוברת</b> לחיזוק או לבז״נט, ולא זזה'); return; }
+  startClock();
+  footDrag = { i: best }; controls.enabled = false;
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* fine without it */ }
+});
+canvas.addEventListener('pointermove', e => {
+  if (!footDrag) return;
+  const p = groundAt(e.clientX, e.clientY); if (!p) return;
+  const c = triCentre(), snap = v => Math.round(v * 10) / 10;
+  let x = snap(p.x), z = snap(p.z);
+  const far = Math.hypot(x - c[0], z - c[1]); if (far > 4) { x = c[0] + (x - c[0]) * 4 / far; z = c[1] + (z - c[1]) * 4 / far; }
+  const next = G.tri.feet.map((f, i) => i === footDrag.i ? [x, z] : f);
+  const st = standing(next, triLens());
+  if (!st || st.height < 2) return flashHint('<b>הרגליים רחוקות מדי</b>: הראש יורד נמוך מדי');
+  if (Math.min(...st.apart) < 0.4) return;
+  G.tri.feet = next; refreshHint();
+});
+const endFootDrag = () => { if (!footDrag) return; footDrag = null; if (!camTween && !closeup) controls.enabled = true; sfx.thud(); refreshAll(); };
+canvas.addEventListener('pointerup', endFootDrag);
+canvas.addEventListener('pointercancel', endFootDrag);
+
+function raiseTripod() {
+  const t = G.tri; if (t.up > 0 || t.raising) return;
+  startClock();
+  t.feet = startFeet(triCentre()); t.raising = true;
+  refreshAll();
+}
+function layTripod() { G.tri = freshTri(); triCache = null; G.check = null; G.result = null; }
+// six scouts, two to a leg
+const TRI_CREW = ['baseL', 'baseR', 'lift1', 'lift2', 'guyG1', 'guyG2'];
+function drawTripod(dt) {
+  const on = !!LV.tripod, t = G.tri;
+  const show = on && G.stage === 'build' && !stageDone('build');
+  triSheet.material.opacity = Math.max(0, Math.min(0.96, triSheet.material.opacity + (show ? 1 : -1) * dt / 0.4));
+  triSheet.visible = triSheet.material.opacity > 0.01;
+  if (on) triSheet.position.z = triSheet.userData.z + z0();
+  if (!on) return;
+  const st = triState(), up = t.up >= 1;
+  for (const b of BRACES) {
+    const m = poleMeshes[b.id][0], pl = t.braces[b.id];
+    poleMeshes[b.id][1].visible = false;
+    if (!up || !pl) { m.visible = false; continue; }
+    const [p, q] = braceEnds(b, pl.length);
+    // a brace too short to reach hangs from its first leg
+    if (!braceOn(b.id)) placeCylinder(m, p, [q[0], 0.12, q[2]]); else placeCylinder(m, p, q);
+  }
+  for (const j of BRACE_JOINTS) {
+    const g = lashMesh(j.id);
+    if (!up || !t.joints[j.id] || !braceOn(j.brace)) { g.visible = false; continue; }
+    const brace = BRACES.find(q => q.id === j.brace), [p, q] = braceEnds(brace, 1), n = braceSide(brace, st);
+    placeLashing(g, braceJointPos(j), st.legs[j.leg].dir, [q[0] - p[0], q[1] - p[1], q[2] - p[2]], [-n[0] * GAP / 2, 0, -n[2] * GAP / 2]);
+    g.visible = !fadedOut(); coilProgress(g, j.id);
+  }
+  TRI_STAKES.forEach((sk, i) => {
+    const m = triStakeMeshes[i], hits = t.stakes[sk.id] || 0, g = lashMesh(TRI_STAKE_JOINTS[i].id);
+    if (!up || !hits) { m.visible = false; g.visible = false; return; }
+    const [x, z] = triStakePos(i);
+    m.visible = true; m.position.set(x, -0.3 * Math.min(hits, TRI_STAKE_HITS) / TRI_STAKE_HITS, z);
+    if (!t.stakeJoints[TRI_STAKE_JOINTS[i].id]) { g.visible = false; return; }
+    const p = t.sim ? add3(t.sim.pos(t.sim.legs[i].foot), st.legs[i].dir, TRI.stakeJointHeight) : st.legs[i].stake;
+    placeParallelLashing(g, p, [x, p[1], z], [0, 1, 0]);
+    g.visible = !fadedOut(); coilProgress(g, TRI_STAKE_JOINTS[i].id);
+  });
+  // the crew: they stand the bundle up, then hold the legs until the inspection
+  if (t.raising) {
+    const z = z0();
+    TRI_CREW.forEach((k, n) => { const side = n % 2 ? 1 : -1, v = [1.6, 2.9, 4.0][n >> 1]; people[k].set([side * 0.6, 0, z + v], side * -Math.PI / 2, 0.3, 0.7 + t.up * 1.6); });
+    if (t.up > 0 || TRI_CREW.every(k => people[k].arrived())) t.up += dt / 1.4;
+    if (t.up >= 1) { t.up = 1; t.raising = false; sfx.ok(); setCameraMode('triView'); refreshAll(); }
+  } else if (up && !G.check && !G.falling) {
+    st.legs.forEach((L, i) => {
+      const n = norm2(L.foot[0] - st.apex[0], L.foot[2] - st.apex[2]);
+      for (const side of [-1, 1]) {
+        const pos = [L.foot[0] + n[0] * 0.25 - n[2] * side * 0.42, 0, L.foot[2] + n[2] * 0.25 + n[0] * side * 0.42];
+        people[TRI_CREW[i * 2 + (side > 0 ? 1 : 0)]].set(pos, Math.atan2(L.foot[0] - pos[0], L.foot[2] - pos[2]), 0.12, 1.15);
+      }
+    });
+  }
+}
+function triInspector(push) {
+  const c = G.check, ts = G.tri.sim;
+  if (!c?.running || G.falling || !ts) { inspector.clear(); buckets.forEach(b => { b.visible = false; }); return; }
+  const a = ts.apex(), ct = triCentre();
+  buckets.forEach((b, i) => { b.visible = i === 0 && !!c.loading; });
+  if (c.loading) buckets[0].position.set(a[0], a[1] - 0.1, a[2]);
+  if (push) {
+    const d = new THREE.Vector3(push[0], 0, push[2]).normalize();
+    inspector.set([a[0] - d.x * 0.9, 0, a[2] - d.z * 0.9], Math.atan2(d.x, d.z), 0.3, 2.6);
+  } else if (c.loading) inspector.set([a[0] + 0.5, 0, a[2] - 0.5], Math.atan2(-0.5, 0.5), 0.05, Math.PI * 0.9);
+  else inspector.set([ct[0] + 2.6, 0, ct[1] - 2.8], Math.atan2(-2.6, 2.8), 0, 0.2);
+}
+function watchTripod() {
+  const ts = G.tri.sim; if (!ts || G.falling) return;
+  const kind = ts.slid() > 0.35 ? 'slid' : ts.sunk() > 0.25 * ts.h0 ? 'down' : null;
+  if (!kind) return;
+  G.falling = { kind, t: 0, tri: true, explain: explainTri(kind) };
+  sfx.crash(); buzz([60, 40, 90]);
+  closePicker(); refreshAll();
+}
+function explainTri(kind) {
+  const ts = G.tri.sim, st = triState();
+  const loose = [0, 1, 2].filter(i => !ts.staked[i]).length;
+  const minApart = Math.min(...st.apart);
+  if (minApart < 1.6 && !(kind === 'slid' && ts.braced.length < 3))
+    return { rule: 'חצובה צריכה בסיס רחב', detail: `הרגליים עומדות רק ${minApart.toFixed(1)} מ׳ זו מזו, והראש בגובה ${st.height.toFixed(1)} מ׳. חצובה גבוהה וצרה מתהפכת בדחיפה. בשרטוט יש ${TRI.footApart.toFixed(1)} מ׳ בין רגל לרגל.` };
+  if (ts.braced.length < 3 && loose)
+    return { rule: 'רגלי חצובה לא נשארות במקום לבד', detail: `כשכולם עזבו, ${loose === 3 ? 'הרגליים' : 'רגל שלא כפותה לבז״נט'} החליקו החוצה על החול, והחצובה נפתחה ושקעה. חיזוק שכפות בשני הקצוות שלו בין כל שתי רגליים, ובז״נט שהרגל כפותה אליו, מחזיקים את הרגליים במקום.` };
+  if (loose) return { rule: 'כל רגל של החצובה נכפתת לבז״נט', detail: 'החיזוקים החזיקו את הרגליים יחד, אבל בלי בז״נטים החצובה כולה זזה או התהפכה כשדחפו אותה.' };
+  return { rule: 'החצובה לא עמדה במסדר', detail: 'בדקו שכל חיזוק כפות בשני הקצוות שלו ושכל רגל כפותה לבז״נט.' };
+}
+function scoreTripod() {
+  const t = G.tri, b = G.build, st = triState();
+  const all = [
+    [{ id: 'TJ', correct: 'tripod', tri: 'head', uid: 'TJ' }, b.joints.TJ],
+    ...BRACE_JOINTS.map(j => [{ ...j, tri: 'brace', uid: j.id }, braceOn(j.brace) ? t.joints[j.id] : null]),
+    ...TRI_STAKE_JOINTS.map(j => [{ ...j, tri: 'stake', uid: j.id }, (t.stakes[j.stake] || 0) >= TRI_STAKE_HITS ? t.stakeJoints[j.id] : null]),
+  ];
+  const total = all.length, tied = all.filter(([, v]) => v).length, correct = all.filter(([j, v]) => v === j.correct).length;
+  const nPoles = 6;
+  const polesOk = LEG_IDS.filter(id => Math.abs(b.poles[id].length - TRI.legLength) < 0.05).length + BRACES.filter(q => t.braces[q.id] && Math.abs(t.braces[q.id].length - q.length) < 0.05).length;
+  const fit = fitsPlan(st), fitN = (fit.height ? 1 : 0) + fit.apart.filter(Boolean).length;
+  const shape = { ok: fitN === 4, text: fitN === 4 ? 'הגובה והמרחקים בין הרגליים כמו בשרטוט' : `לא בדיוק לפי השרטוט: גובה ${st.height.toFixed(1)} מ׳, בין הרגליים ${st.apart.map(d => d.toFixed(1)).join(' / ')} מ׳` };
+  const accuracy = Math.round(40 * tied / total + 25 * correct / total + 15 * polesOk / nPoles + 20 * fitN / 4);
+  const sec = elapsed(), bonus = sec <= LV.targetTimeSec ? 10 : 0;
+  let stars = 1;
+  if (tied === total) stars = 2;
+  if (tied === total && correct === total && accuracy >= LEVEL.threeStarScore) stars = 3;
+  const groups = {};
+  for (const [j, v] of all) if (!v) { const key = sheetOf(j); groups[key] = (groups[key] || 0) + 1; }
+  const hintsAllowed = Math.max(1, Math.floor(total / 10)), hintCost = Math.round(40 / total), penalty = G.hintsUsed * hintCost;
+  return { total, tied, correct, polesOk, nPoles, accuracy, bonus, sec, sum: accuracy + bonus - penalty, stars, groups, wrong: tied - correct, hintsAllowed, hintCost, penalty, all, shape };
+}
+function triStatus(nPoles, nJ) {
+  const t = G.tri;
+  switch (G.stage) {
+    case 'build': return `רגליים ${nPoles}/3 · כפיתה סביב שלוש הרגליים ${nJ}/1`;
+    case 'spread': {
+      if (t.raising) return 'הצוות מקים את החצובה…';
+      if (t.up < 1) return 'שישה צופים מקימים את החצובה, שניים לכל רגל';
+      const st = triState();
+      return `גובה הראש <b>${st.height.toFixed(1)} מ׳</b> · בין הרגליים <b>${st.apart.map(d => d.toFixed(1)).join(' / ')}</b> מ׳ · גוררים כל רגל למקומה`;
+    }
+    case 'brace': {
+      const n = BRACES.filter(q => t.braces[q.id]).length, j = BRACE_JOINTS.filter(q => t.joints[q.id]).length;
+      const s = TRI_STAKES.filter(q => (t.stakes[q.id] || 0) >= TRI_STAKE_HITS).length, sj = TRI_STAKE_JOINTS.filter(q => t.stakeJoints[q.id]).length;
+      return `חיזוקים ${n}/3 · כפיתות חיזוק ${j}/6 · בז״נטים ${s}/3 · רגל לבז״נט ${sj}/3`;
+    }
+    case 'check': return G.check?.running ? (G.check.label || 'מסדר…') : 'מסדר: המדריך דוחף את ראש החצובה, תולה עליו משקל ובודק כל כפיתה';
+  }
+  return '';
 }
 
 // ---------------- lashing picker ----------------
@@ -675,6 +1160,7 @@ $('picker-untie').addEventListener('click', () => {
   const t = picker.target; if (!t) return;
   if (t.kind === 'lashed') delete G.build.joints[t.id];
   if (t.kind === 'clashed') { delete G.cube.build.joints[t.id]; rebuildCube(); }
+  if (t.kind === 'blashed') delete G.tri.joints[t.id];
   closePicker(); refreshAll();
 });
 const cubeJoint = id => LV.cube.joints.find(j => j.id === id);
@@ -684,6 +1170,8 @@ function jointLabel(t) {
     const j = cubeJoint(t.id), name = id => cubeSlot(id).he.replace(/ \(.*\)/, '');
     return j.b ? `${name(j.a)} × ${name(j.b)}` : `${name(j.a)} × רגל ה${LV.klafim[j.klaf].he}`;
   }
+  if (t.kind === 'bjoint' || t.kind === 'blashed') { const j = BRACE_JOINTS.find(q => q.id === t.id); return `חיזוק × ${TRI_SLOTS[j.leg].he}`; }
+  if (t.kind === 'tsj' || t.kind === 'tsjd') return `${TRI_SLOTS[TRI_STAKE_JOINTS.find(q => q.id === t.id).leg].he} אל הבז״נט`;
   if (t.kind === 'guyTie') return GUYS.find(g => g.id === t.id).he + ' אל הבז״נט';
   if (t.kind.startsWith('stake')) { const sj = STAKE_JOINTS.find(s => s.id === t.id); return `${slotById(sj.leg).he} אל הבז״נט`; }
   const j = JOINTS.find(q => q.id === t.id);
@@ -692,6 +1180,8 @@ function jointLabel(t) {
 }
 function correctFor(t) {
   if (t.kind === 'cjoint' || t.kind === 'clashed') return cubeJoint(t.id).correct;
+  if (t.kind === 'bjoint' || t.kind === 'blashed') return 'square';
+  if (t.kind === 'tsj' || t.kind === 'tsjd') return 'parallel';
   if (t.kind === 'guyTie') return 'guy';
   if (t.kind.startsWith('stake')) return STAKE_JOINTS.find(s => s.id === t.id).correct;
   return JOINTS.find(j => j.id === t.id).correct;
@@ -700,7 +1190,7 @@ function openPicker(t, x, y) {
   picker.target = t;
   const el = picker.el;
   el.hidden = false;
-  const cur = t.kind === 'lashed' ? G.build.joints[t.id] : t.kind === 'stakeLashed' ? G.build.stakeJoints[t.id] : t.kind === 'clashed' ? G.cube.build.joints[t.id] : null;
+  const cur = t.kind === 'lashed' ? G.build.joints[t.id] : t.kind === 'stakeLashed' ? G.build.stakeJoints[t.id] : t.kind === 'clashed' ? G.cube.build.joints[t.id] : t.kind === 'blashed' ? G.tri.joints[t.id] : t.kind === 'tsjd' ? G.tri.stakeJoints[t.id] : null;
   $('picker-title').textContent = (cur ? 'החלפת כפיתה · ' : 'בחרו כפיתה · ') + jointLabel(t);
   const opts = $('picker-opts'); opts.innerHTML = '';
   for (const id of t.kind === 'guyTie' ? GUY_LASHING_ORDER : LASHING_ORDER) {
@@ -713,7 +1203,7 @@ function openPicker(t, x, y) {
   const tip = LV.tutorial ? TUTORIAL_TIP[correctFor(t)] : '';
   $('picker-tip').textContent = tip ? 'הדרכה: ' + tip : '';
   $('picker-tip').hidden = !tip;
-  $('picker-untie').hidden = !((t.kind === 'lashed' && G.stage === 'build') || (t.kind === 'clashed' && G.stage === 'cube'));
+  $('picker-untie').hidden = !((t.kind === 'lashed' && G.stage === 'build') || (t.kind === 'clashed' && G.stage === 'cube') || t.kind === 'blashed');
   const w = el.offsetWidth, h = el.offsetHeight;
   const W = window.innerWidth, H = window.innerHeight;
   let left = x - w / 2, top = y + 28;
@@ -726,7 +1216,7 @@ function chooseLashing(type) {
   const t = picker.target; if (!t || closeup) return;
   const b = G.build;
   closePicker();
-  const fresh = t.kind === 'joint' || t.kind === 'cjoint' || t.kind === 'guyTie' || t.kind === 'stakeJoint';
+  const fresh = t.kind === 'joint' || t.kind === 'cjoint' || t.kind === 'guyTie' || t.kind === 'stakeJoint' || t.kind === 'bjoint' || t.kind === 'tsj';
   if (fresh && ropeLeft() <= 0) return flashHint('<b>נגמרו החבלים.</b> אפשר להתיר כפיתה מיותרת כדי לקבל חבל בחזרה');
   const tie = () => {
     if (t.kind === 'joint' || t.kind === 'lashed') {
@@ -735,6 +1225,10 @@ function chooseLashing(type) {
     } else if (t.kind === 'cjoint' || t.kind === 'clashed') {
       G.cube.build.joints[t.id] = type;
       G.cube.sim?.addJoint(cubeJoint(t.id));
+    } else if (t.kind === 'bjoint' || t.kind === 'blashed') {
+      G.tri.joints[t.id] = type;
+    } else if (t.kind === 'tsj' || t.kind === 'tsjd') {
+      G.tri.stakeJoints[t.id] = type;
     } else if (t.kind === 'guyTie') {
       b.guyTies[t.id] = type;
       G.sim?.tieGuy(t.id);
@@ -748,7 +1242,7 @@ function chooseLashing(type) {
     refreshAll();
   };
   // changing the type of a lashing already tied needs no close-up
-  if (t.kind === 'lashed' || t.kind === 'stakeLashed' || t.kind === 'clashed') return tie();
+  if (t.kind === 'lashed' || t.kind === 'stakeLashed' || t.kind === 'clashed' || t.kind === 'blashed' || t.kind === 'tsjd') return tie();
   lashCloseup(t.pos, tie);
 }
 
@@ -758,6 +1252,12 @@ let drag = null;
 trayPole.addEventListener('pointerdown', e => {
   sfx.unlock(); startClock();
   const item = e.target.closest('.pile-item'); if (!item) return;
+  if (item.dataset.len === 'free') { // the pole bar: take a pole, its length is drawn on the grid
+    closePicker(); selectPole(null);
+    if (G.stage !== 'build') return;
+    G.armed = G.armed ? null : (G.lastLength || 2); controls.enabled = !G.armed; renderPile(); refreshHint();
+    return;
+  }
   const len = +item.dataset.len;
   if (poleLeft(len) <= 0) { flashHint(`<b>אין עוד סנדות של ${len.toFixed(1)} מ׳ בערימה.</b> אפשר להחזיר סנדה מהשרטוט`); return; }
   G.lastLength = len; renderPile();
@@ -768,10 +1268,18 @@ trayPole.addEventListener('pointerdown', e => {
 trayPole.addEventListener('pointermove', e => {
   if (!drag) return;
   if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 8) return; // a tap, not a drag
+  if (LV.free && G.stage === 'build') return; // free build: the pole is laid with a drag on the grid itself
   const p = groundAt(e.clientX, e.clientY);
   if (!p) return;
   drag.moved = true;
   const len = G.lastLength;
+  if (G.stage === 'brace') {
+    const slot = nearestBrace(e.clientX, e.clientY);
+    drag.slot = slot; slotGlow.visible = false;
+    if (slot) { const [a, b] = braceEnds(slot, len); placeCylinder(ghost, a, b); }
+    else placeCylinder(ghost, [p.x - len / 2, 0.5, p.z], [p.x + len / 2, 0.5, p.z]);
+    return;
+  }
   if (G.stage === 'cube') {
     // side poles go up between the two klafim: snap to the nearest planned line on screen
     const slot = nearestCubeSlot(e.clientX, e.clientY);
@@ -799,6 +1307,12 @@ trayPole.addEventListener('pointermove', e => {
 // put a pole of the chosen length from the pile on a line of the drawing
 function placePole(slot) {
   if (poleLeft(G.lastLength) <= 0) { flashHint(`<b>אין עוד סנדות של ${G.lastLength.toFixed(1)} מ׳ בערימה.</b> אפשר להחזיר סנדה מהשרטוט`); return false; }
+  if (G.stage === 'brace') {
+    G.tri.braces[slot.id] = { length: G.lastLength };
+    if (!braceReaches(triState(), slot, G.lastLength)) flashHint(`<b>הסנדה הזו קצרה מדי</b> ולא מגיעה לשתי הרגליים. הקישו עליה כדי להחזיר אותה לערימה`);
+    sfx.thud(); G.armed = null; renderPile();
+    return true;
+  }
   if (G.stage === 'cube') { G.cube.build.poles[slot.id] = { length: G.lastLength }; rebuildCube(); }
   else G.build.poles[slot.id] = { length: G.lastLength };
   startCarry(slot.id);
@@ -813,9 +1327,11 @@ function endDrag() {
   else if (!drag.moved) {
     // a tap on the pile: hold that length, then tap a line on the drawing
     G.armed = drag.len; renderPile();
-    flashHint(`נבחרה סנדה של <b>${drag.len.toFixed(1)} מ׳</b>. הקישו על קו בשרטוט כדי להניח אותה, או גררו אותה לשם`);
+    if (LV.free && G.stage === 'build') { controls.enabled = false; flashHint(`נבחרה סנדה של <b>${drag.len.toFixed(1)} מ׳</b>. גררו על הרשת מהמקום שבו היא מתחילה אל הכיוון שלה. הקשה במקום מניחה אותה זקופה`); }
+    else if (G.stage === 'brace') flashHint(`נבחרה סנדה של <b>${drag.len.toFixed(1)} מ׳</b>. הקישו בין שתי רגליים של החצובה כדי לשים אותה שם`);
+    else flashHint(`נבחרה סנדה של <b>${drag.len.toFixed(1)} מ׳</b>. הקישו על קו בשרטוט כדי להניח אותה, או גררו אותה לשם`);
   } else if (drag.slot === null && drag.moved) {
-    flashHint(G.stage === 'cube' ? 'שחררו את הסנדה על אחד הקווים בשרטוטי הצדדים' : 'שחררו את הסנדה על אחד הקווים הכחולים בשרטוט');
+    flashHint(G.stage === 'brace' ? 'שחררו את הסנדה בין שתי רגליים של החצובה' : G.stage === 'cube' ? 'שחררו את הסנדה על אחד הקווים בשרטוטי הצדדים' : 'שחררו את הסנדה על אחד הקווים הכחולים בשרטוט');
   }
   drag = null; refreshAll();
 }
@@ -867,13 +1383,26 @@ function updateLengthPanel() {
   $('lp-value').textContent = pole.length.toFixed(1);
   $('lp-plan').textContent = slot.length.toFixed(1);
   const d = pole.length - slot.length;
-  $('lp-value').style.color = Math.abs(d) < 0.05 ? '#9be37f' : d < 0 ? '#ff9a85' : '';
-  $('lp-fit').textContent = Math.abs(d) < 0.05 ? 'בדיוק כמו בשרטוט' : d < 0 ? 'קצרה מדי: לא תגיע לכל הכפיתות' : 'ארוכה מהשרטוט: תעבוד, אבל בפחות נקודות';
+  $('lp-value').style.color = LV.free ? '' : Math.abs(d) < 0.05 ? '#9be37f' : d < 0 ? '#ff9a85' : '';
+  document.querySelector('.lp-plan').hidden = !!LV.free;
+  $('lp-remove').textContent = LV.free ? 'הסרת הסנדה' : 'החזרה לערימה';
+  $('lp-fit').textContent = LV.free ? 'החליקו למעלה או למטה כדי לשנות את האורך' : Math.abs(d) < 0.05 ? 'בדיוק כמו בשרטוט' : d < 0 ? 'קצרה מדי: לא תגיע לכל הכפיתות' : 'ארוכה מהשרטוט: תעבוד, אבל בפחות נקודות';
 }
 function changeLength(steps) {
   const sid = G.selected; if (!sid || !steps) return;
+  if (LV.free) { // free build: any length; the pole grows from its lower end
+    const sl = slotById(sid), nl = Math.round(Math.max(POLE_MIN, Math.min(POLE_MAX, sl.length + steps * 0.1)) * 10) / 10;
+    if (nl === sl.length || G.stage !== 'build') return;
+    const d = (nl - sl.length) / 2;
+    const next = { ...sl, centre: [sl.centre[0] + sl.dir[0] * d, sl.centre[1] + sl.dir[1] * d], length: nl };
+    if (!onSheet(next)) return;
+    G.build.poles[sid] = { length: nl }; G.lastLength = nl;
+    freeSync(SLOTS.map(q => q === sl ? next : q));
+    sfx.tick(); buzz(8); updateLengthPanel(); refreshAll();
+    return;
+  }
   const pole = polesOf(sid)[sid];
-  const nl = Math.round(Math.max(1.0, Math.min(4.0, pole.length + steps * 0.1)) * 10) / 10;
+  const nl = Math.round(Math.max(1.0, Math.min(5.0, pole.length + steps * 0.1)) * 10) / 10;
   if (nl === pole.length) return;
   pole.length = nl; G.lastLength = nl;
   // a lashing falls off if the pole no longer reaches the joint
@@ -907,7 +1436,9 @@ function changeLength(steps) {
       for (const j of LV.cube.joints) if (j.a === sid || j.b === sid) delete G.cube.build.joints[j.id];
       rebuildCube();
     } else for (const j of JOINTS) if (j.a === sid || j.b === sid) delete G.build.joints[j.id];
-    selectPole(null); refreshAll();
+    selectPole(null);
+    if (LV.free) { meshesOf(sid).forEach(m => { m.visible = false; }); freeSync(SLOTS.filter(q => q.id !== sid)); }
+    refreshAll();
   });
 }
 
@@ -918,8 +1449,10 @@ const r1 = x => Math.round(x * 10) / 10;
 function pileStock() {
   const m = new Map();
   const add = l => m.set(r1(l), (m.get(r1(l)) || 0) + 1);
+  if (LV.free) return []; // free build has a pole bar, not a pile: any length, as many as needed
   for (let i = 0; i < LV.klafim.length; i++) SLOTS.forEach(s => add(s.length));
   if (LV.cube) LV.cube.slots.forEach(s => add(s.length));
+  if (LV.tripod) BRACES.forEach(q => add(q.length));
   (LV.stockExtra || []).forEach(add);
   return [...m.entries()].sort((a, b) => b[0] - a[0]);
 }
@@ -928,23 +1461,35 @@ function polesInUse() {
   const add = set => { for (const id in set) if (set[id]) { const l = r1(set[id].length); m.set(l, (m.get(l) || 0) + 1); } };
   G.klafim.forEach(k => add(k.build.poles));
   if (G.cube) add(G.cube.build.poles);
+  if (G.tri) add(G.tri.braces);
   return m;
 }
-const poleLeft = len => (pileStock().find(([l]) => l === r1(len))?.[1] || 0) - (polesInUse().get(r1(len)) || 0);
+const poleLeft = len => LV.free ? Infinity : (pileStock().find(([l]) => l === r1(len))?.[1] || 0) - (polesInUse().get(r1(len)) || 0);
 // rope: one length per lashing in the plan, and a couple to spare
 const countTrue = o => Object.values(o).filter(Boolean).length;
 function ropeTotal() {
+  if (LV.tripod) return TRI_JOINTS.length + BRACE_JOINTS.length + TRI_STAKE_JOINTS.length + (LV.ropeSpare ?? 2);
   return (JOINTS.length + STAKE_JOINTS.length + GUYS.length) * LV.klafim.length + (LV.cube ? LV.cube.joints.length : 0) + (LV.ropeSpare ?? 2);
 }
 function ropeUsed() {
   let n = 0;
   for (const k of G.klafim) n += countTrue(k.build.joints) + countTrue(k.build.stakeJoints) + countTrue(k.build.guyTies);
   if (G.cube) n += countTrue(G.cube.build.joints);
+  if (G.tri) n += countTrue(G.tri.joints) + countTrue(G.tri.stakeJoints);
   return n;
 }
 const ropeLeft = () => ropeTotal() - ropeUsed();
 let pileKey = '';
 function renderPile() {
+  if (LV.free) {
+    const key = 'free' + !!G.armed;
+    if (key !== pileKey) {
+      pileKey = key;
+      $('tray-pole').innerHTML = `<button type="button" class="pile-item pole-bar${G.armed ? ' on' : ''}" data-len="free"><span class="pile-stick" style="width:70px"></span><b>סנדה</b><small>${G.armed ? 'ציירו אותה על הרשת' : 'הקישו כדי לקחת'}</small></button>`;
+    }
+    $('rope-count').innerHTML = ''; $('tray-count').textContent = '';
+    return;
+  }
   const rows = pileStock().map(([l, n]) => [l, n - (polesInUse().get(l) || 0)]);
   const key = JSON.stringify(rows);
   if (key !== pileKey) {
@@ -967,7 +1512,7 @@ const CREW_NAMES = ['נועה', 'איתי', 'מאיה', 'יונתן', 'תמר', 
 const LIFTERS = [{ id: 'L1', leg: 'legL', lifter: true }, { id: 'L2', leg: 'legR', lifter: true }];
 const crewRoles = () => [...GUYS, ...LIFTERS];
 function crewRole(g) {
-  const side = slotById(g.leg).he.replace('רגל ', '');
+  const side = (slotById(g.leg)?.he || (g.leg === 'legR' ? 'רגל שמאל' : 'רגל ימין')).replace('רגל ', '');
   if (g.lifter) return `בקלף · מרים ומייצב, ${side}`;
   return `${g.side < 0 ? 'מושכים' : 'מחזיקים'} · ${g.side < 0 ? 'קדמי' : 'אחורי'} ${side}`;
 }
@@ -1177,6 +1722,18 @@ function refreshActions() {
   if (G.falling || G.check?.running) return;
   const nx = nextStage();
   const go = label => add(label, () => goStage(nx.key));
+  if (LV.tripod) {
+    if (G.stage === 'build' && stageDone('build')) go('המשך להקמה');
+    if (G.stage === 'spread' && G.tri.up <= 0 && !G.tri.raising) add('מקימים את החצובה', raiseTripod);
+    if (G.stage === 'spread' && G.tri.up >= 1) go('המשך לחיזוקים');
+    if (G.stage === 'brace') go('למסדר המדריך');
+    if (G.stage === 'check' && !G.check) add('קוראים למדריך למסדר', runCheck);
+    return;
+  }
+  if (LV.free && G.stage === 'build') {
+    if (G.ki > 0 && !G.sim) { add('◀ לקרב', () => moveFreeKlaf(-0.2), false); add('להרחיק ▶', () => moveFreeKlaf(0.2), false); }
+    if (stageDone('build') && nx.id !== 'build' && LV.klafim.length < MAX_KLAFIM) add('+ קלף נוסף', addFreeKlaf, false);
+  }
   if (G.stage === 'build' && stageDone('build')) go(nx.id === 'build' ? `המשך לבניית ה${LV.klafim[nx.k].he}` : LV.klafim.length > 1 ? `המשך לבז״נטים, ${LV.klafim[nx.k].he}` : 'המשך לבז״נטים');
   if (G.stage === 'stakes' && stageDone('stakes')) go('המשך להרמה');
   // a raised klaf must be anchored (guy lines fixed, legs lashed to their stakes) before moving on
@@ -1190,7 +1747,7 @@ function flashHint(html) { $('hint-text').innerHTML = html; flashUntil = perform
 function hintText() {
   const b = G.build, sim = G.sim;
   if (G.replay) return '<b>הילוך חוזר איטי</b> · מה שגרם לקריסה מסומן באדום · הקישו כדי לדלג';
-  if (G.falling) return G.falling.cube ? '<b>המבנה קורס…</b>' : '<b>הקלף קורס…</b>';
+  if (G.falling) return G.falling.tri ? '<b>החצובה קורסת…</b>' : G.falling.cube ? '<b>המבנה קורס…</b>' : '<b>הקלף קורס…</b>';
   const nPoles = SLOTS.filter(s => b.poles[s.id]).length;
   const nJ = JOINTS.filter(j => b.joints[j.id]).length;
   // after the first structure's tutorial: no step guidance, only where things stand
@@ -1240,8 +1797,11 @@ function hintText() {
 function statusText(nPoles, nJ) {
   const b = G.build, sim = G.sim;
   const kn = LV.klafim.length > 1 && !cubeStage(G.stage) ? `<b>${K().cfg.he}</b> · ` : '';
+  if (LV.tripod) return triStatus(nPoles, nJ);
   switch (G.stage) {
-    case 'build': return `${kn}סנדות ${nPoles}/6 · כפיתות ${nJ}/9`;
+    case 'build':
+      if (LV.free) return kn + freeHint(nPoles, nJ);
+      return `${kn}סנדות ${nPoles}/6 · כפיתות ${nJ}/9`;
     case 'stakes': return `${kn}בז״נטים ${LEG_STAKES.filter(s => (b.stakes[s.id] || 0) >= LEG_STAKE_HITS).length}/2`;
     case 'raise': {
       if (!sim) return kn;
@@ -1264,7 +1824,7 @@ function statusText(nPoles, nJ) {
       let n = 0, all = 0; eachKlaf(() => { n += GUYS.filter(g => isInnerGuy(g) && G.build.guyOff[g.id]).length; all += GUYS.filter(isInnerGuy).length; });
       return `יתרים פנימיים שירדו ${n}/${all}`;
     }
-    case 'check': return G.check?.running ? (G.check.label || 'מסדר…') : 'מסדר: המדריך דוחף, תולה משקל ובודק כל כפיתה';
+    case 'check': return G.check?.running ? kn + (G.check.label || 'מסדר…') : 'מסדר: המדריך דוחף, תולה משקל ובודק כל כפיתה';
   }
   return '';
 }
@@ -1278,6 +1838,13 @@ function fmt(sec) { const m = Math.floor(sec / 60), s = Math.floor(sec % 60); re
 
 // ---------------- the push test ----------------
 function runCheck() {
+  if (LV.tripod) {
+    const t = G.tri;
+    rec.length = 0;
+    t.sim = new TripodSim({ feet: t.feet, lens: triLens(), braces: t.braces, joints: t.joints, stakes: t.stakes, stakeJoints: t.stakeJoints });
+    G.check = { t: 0, running: true, label: 'כולם עוזבים…', pushes: TRI_PUSHES, load: [9, 11.5], end: 12.2 };
+    return refreshAll();
+  }
   if (LV.cube) {
     if (!G.cube.sim) return;
     G.cube.sim.letGo();
@@ -1285,11 +1852,19 @@ function runCheck() {
     G.check = { t: 0, running: true, label: 'כולם עוזבים…', pushes: CUBE_PUSHES, release: 8, load: [18, 20.5], end: 21 };
     return refreshAll();
   }
+  if (LV.free && G.klafim.length > 1) {
+    // every klaf is inspected, one after another, from the first
+    if (!G.klafim.every(k => k.raisedOnce && k.sim)) return infoCard('יש קלף שעוד לא הורם', 'המסדר בודק את כל הקלפים. קודם מרימים ומעגנים כל אחד מהם.');
+    useKlaf(0); camMode = null; setCameraMode('orbit');
+  }
   if (!G.raisedOnce || !G.sim) return infoCard('אין עדיין מה לבדוק', 'קודם בונים את הקלף, דופקים בז״נטים ומרימים אותו.');
   G.sim.letGo();
   G.check = { t: 0, running: true, label: 'כולם עוזבים…', load: [10, 12.5], end: 13 };
   refreshAll();
 }
+// the tripod is pushed at its head from three sides, each time towards the gap between two feet
+const TRI_PUSHES = [[1.2, 3, 0, 'המדריך דוחף את ראש החצובה <b>שמאלה</b>'], [3.5, 5.3, 120, 'המדריך דוחף מ<b>הצד השני</b>'], [5.8, 7.6, 240, 'המדריך דוחף מ<b>הצד השלישי</b>']]
+  .map(([from, to, deg, label]) => ({ from, to, label, f: [Math.cos(deg * Math.PI / 180), 0, Math.sin(deg * Math.PI / 180)].map(v => v * TRI_TUNING.push / TUNING.pushForce) }));
 const CUBE_PUSHES = [
   { from: 1.5, to: 3.0, f: [1, 0, 0], label: 'המדריך דוחף את הקובייה <b>שמאלה</b>' },
   { from: 3.5, to: 5.0, f: [0, 0, 1], label: 'המדריך דוחף <b>אחורה</b>' },
@@ -1327,7 +1902,7 @@ function checkPush(dt) {
   }
   if (c.load && c.t >= c.load[0] && c.t <= c.load[1]) {
     c.loading = true;
-    c.label = LV.cube ? 'המדריך תולה <b>דלי מים</b> על הרוחב העליון של כל קלף' : 'המדריך תולה <b>דלי מים</b> על הרוחב העליון';
+    c.label = LV.tripod ? 'המדריך תולה <b>משקל כבד</b> על ראש החצובה' : LV.cube ? 'המדריך תולה <b>דלי מים</b> על הרוחב העליון של כל קלף' : 'המדריך תולה <b>דלי מים</b> על הרוחב העליון';
   }
   if (c.t > (c.end || 10.2)) { c.running = false; finish(); }
   return push;
@@ -1338,7 +1913,8 @@ function checkPush(dt) {
 // (measured against its height in the drawing: a pole hanging from one lashing is caught here too)
 function loadDropped(ks) {
   if (!G.check?.loading) return false;
-  return ks.some(k => SIZES.klaf.topHeight + R - k.loadY() > 0.25);
+  const planY = SLOTS.find(q => q.load)?.centre[1] ?? (LV.free ? LEVEL.height : SIZES.klaf.topHeight);
+  return ks.some(k => planY + R - k.loadY() > 0.25);
 }
 // the top horizontal hangs on its two square lashings
 function loadRule(missing) {
@@ -1356,7 +1932,7 @@ function watchSim(dt) {
   if (sim.baseSlid() > 0.35) kind = 'slid';
   else if (sim.rack() > 0.42) kind = 'rack';
   else if (ang > 122) kind = 'over';
-  else if (G.raisedOnce && (top[1] < 1.4 || ang < 55)) kind = 'down';
+  else if (G.raisedOnce && (top[1] < 0.7 * LEVEL.height || ang < 55)) kind = 'down';
   else if (loadDropped([sim])) kind = 'load';
   if (kind) {
     G.falling = { kind, t: 0, explain: explain(kind) };
@@ -1413,6 +1989,7 @@ function explain(kind) {
   return e;
 }
 function explainRule(kind) {
+  if (LV.free) return explainFree(kind);
   const sim = G.sim, b = G.build;
   if (kind === 'load') return { ...loadRule(topMissing(b)), focus: { joints: ['J3', 'J4'].filter(id => !b.joints[id]) } };
   const x = xComplete();
@@ -1474,6 +2051,7 @@ function explainRule(kind) {
 
 // ---------------- results ----------------
 function score() {
+  if (LV.tripod) return scoreTripod();
   // every lashing in the structure: each klaf's own, its legs to their stakes, its guy lines, and the cube's
   const all = [];
   let polesOk = 0, nPoles = 0;
@@ -1511,6 +2089,13 @@ function score() {
     hintsAllowed, hintCost, penalty, all };
 }
 function finish() {
+  if (LV.free && G.ki < G.klafim.length - 1) { // on to the next klaf
+    useKlaf(G.ki + 1); camMode = null; setCameraMode('orbit');
+    G.sim.letGo();
+    G.check = { t: 0, running: true, label: 'כולם עוזבים…', load: [10, 12.5], end: 13 };
+    return refreshAll();
+  }
+  if (LV.free) return finishFree();
   G.endedAt = performance.now();
   pushArrow.visible = false;
   const s = G.result = score();
@@ -1524,9 +2109,10 @@ function finish() {
     <h2>${s.stars === 3 ? 'בנייה מושלמת!' : 'עברתם את השלב'}</h2>
     <div class="stars">${stars}</div>
     <ul class="inspect">
-      <li class="ok">${LV.cube ? 'הקובייה עמדה' : 'הקלף עמד'} בדחיפות מכל הכיוונים${LV.cube ? ', גם בלי יתרים' : ''}</li>
+      <li class="ok">${LV.tripod ? 'החצובה עמדה' : LV.cube ? 'הקובייה עמדה' : 'הקלף עמד'} בדחיפות מכל הכיוונים${LV.cube ? ', גם בלי יתרים' : ''}</li>
       ${LV.cube ? `<li class="ok">איקס מרחבי מלא בכל צד ובחלק העליון${LV.cube.bays > 1 ? ', וגם בחיבור בין הקוביות' : ''}</li>` : ''}
-      <li class="ok">החזיק את דלי המים על הרוחב העליון</li>
+      <li class="ok">${LV.tripod ? 'נשאה את המשקל על הראש' : 'החזיק את דלי המים על הרוחב העליון'}</li>
+      ${s.shape ? `<li class="${s.shape.ok ? 'ok' : 'no'}">${s.shape.text}</li>` : ''}
       <li class="${s.tied === s.total ? 'ok' : 'no'}">${s.tied === s.total ? 'כל הכפיתות במקום' : 'המדריך מצא כפיתות חסרות'}</li>
       <li class="${s.correct === s.total ? 'ok' : 'no'}">${s.correct === s.total ? 'כל כפיתה מהסוג הנכון' : 'יש כפיתות מסוג לא נכון'}</li>
     </ul>
@@ -1554,10 +2140,12 @@ function finish() {
 }
 function reopenForFixes() {
   closeModal(); G.check = null; G.result = null; G.endedAt = null;
-  if (LV.cube) { G.cube.sim = null; goStage('cube'); } else goStage('anchor');
+  if (LV.tripod) { G.tri.sim = null; goStage('brace'); }
+  else if (LV.cube) { G.cube.sim = null; goStage('cube'); } else goStage('anchor');
 }
 // where a lashing is, as the structure file names it: the drawing sheet and the height band
 function sheetOf(j) {
+  if (LV.tripod) return j.tri === 'head' ? 'שרטוט החצובה, בראש' : j.tri === 'stake' ? 'שרטוט החצובה, ליד הקרקע (רגל לבז״נט)' : 'שרטוט החצובה, בחיזוקים';
   const band = y => y < 1.0 ? 'גובה 0–1 מ׳' : 'גובה 1–2 מ׳';
   const of = LV.klafim.length > 1 && j.klaf != null ? `, ${LV.klafim[j.klaf].he}` : '';
   if (j.cube && j.side === 0) return 'שרטוט מבט על' + (LV.cube.bays > 1 ? (j.bay % 1 ? ', בחיבור בין הקוביות' : j.bay ? ', קובייה אחורית' : ', קובייה קדמית') : '');
@@ -1576,12 +2164,14 @@ function useHint(s) {
   G.hinted.push(j.uid);
   const text = t ? `יש כפיתה מסוג לא נכון ב<b>${sheetOf(j)}</b>` : `חסרה כפיתה ב<b>${sheetOf(j)}</b>`;
   showModal(`<div class="eyebrow">רמז</div><h2>${t ? 'כפיתה מסוג לא נכון' : 'כפיתה חסרה'}</h2><p>${text}.</p>
-    ${!j.stake && !j.guy && !j.cube ? '<p>כפיתות בקלף אפשר לתקן רק כשהקלף שוכב על הקרקע.</p>' : ''}`,
+    ${!j.stake && !j.guy && !j.cube && !j.tri ? '<p>כפיתות בקלף אפשר לתקן רק כשהקלף שוכב על הקרקע.</p>' : ''}`,
     [['הבנתי', () => { closeModal(); finish(); }, true]]);
 }
 function restart() {
   closeModal();
   clearJobs();
+  if (LV.free) { LV.klafim.length = 1; Object.assign(LV.klafim[0], { z0: 0, he: 'קלף' }); delete LV.klafim[0].short; setPlan([], []); freeCfg(LV.klafim[0], []); G && (G.armed = null); controls.enabled = true; STAGES = stageList(); makeChips(); }
+  if (LV.tripod) setPlan(TRI_SLOTS, TRI_JOINTS);
   G = freshState();
   useKlaf(0);
   for (const set of [...KM.map(m => m.poles), CM.poles]) for (const k in set) set[k].forEach(m => m.material[0].emissive.setHex(0));
@@ -1595,6 +2185,7 @@ function restart() {
     m.blueprint.material.opacity = 0; m.blueprint.visible = false;
     if (used) m.blueprint.position.z = BP.v0 + LV.klafim[i].z0;
   });
+  triStakeMeshes.forEach(m => { m.visible = false; });
   if (LV.cube) { for (const side of [-1, 1]) drawSideSheet(CM.sheets[side], LV.cube, side, LV.klafim.map(k => k.he)); drawTopSheet(CM.sheets[0], LV.cube, LV.klafim.map(k => k.he)); }
   $('timer').textContent = '0:00';
   drawPlaza();
@@ -1602,6 +2193,7 @@ function restart() {
   refreshAll();
 }
 function switchLevel(n) {
+  resetPlan();
   LV = LEVELS[n - 1];
   STAGES = stageList();
   makeChips();
@@ -1615,6 +2207,13 @@ const plazaShown = {};
 function makeDisplay(L) {
   const g = new THREE.Group();
   const pole = (a, b) => { const m = makePoleMesh(0); placeCylinder(m, a, b); g.add(m); };
+  if (L.tripod) {
+    const st = standing(planFeet([0, 0]), [TRI.legLength, TRI.legLength, TRI.legLength]);
+    st.legs.forEach((q, i) => { const o = headOffset(i, st); pole(add3(q.foot, o, 1), add3(q.top, o, 1)); const m = makeStake(TRI.stakeLength); m.position.set(q.foot[0] - o[2] * 2.2, -0.3, q.foot[2] + o[0] * 2.2); g.add(m); });
+    for (const b of BRACES) { const [a, c] = braceEnds(b, b.length, st); pole(a, c); }
+    const k = makeLashing(); placeParallelLashing(k, add3(st.apex, [1, 0, 0], -0.07), add3(st.apex, [1, 0, 0], 0.07), [0, 1, 0]); k.children.forEach(c => c.scale.set(2.3, 2.3, 1)); g.add(k);
+    return g;
+  }
   const knot = (p, dA, dB, sep) => { const k = makeLashing(); placeLashing(k, p, dA, dB, sep); g.add(k); };
   const N = [0, 0, -1]; // a standing klaf faces the pullers
   for (const cfg of L.klafim) {
@@ -1681,8 +2280,8 @@ const unlocked = n => ALL_LEVELS_OPEN || n === 1 || starsOf(n - 1) >= 1;
 const COMING = [];
 const ICONS = {
   1: '<svg viewBox="0 0 64 46"><g stroke="#6b4423" stroke-width="4" stroke-linecap="round"><path d="M14 44V4M50 44V4M8 36h48M8 8h48M14 36L50 8M14 8l36 28"/></g></svg>',
-  2: '<svg viewBox="0 0 64 46"><g stroke="#6b4423" stroke-width="3.5" stroke-linecap="round" fill="none"><path d="M8 44V12M38 44V12M8 38h30M8 14h30M8 38L38 14M8 14l30 24"/><path d="M38 12l18-8M38 44l18-8M56 36V4M8 12l18-8h30" opacity=".6"/></g></svg>',
-  3: '<svg viewBox="0 0 64 46"><g stroke="#6b4423" stroke-width="3" stroke-linecap="round" fill="none"><path d="M4 44V12M22 44V12M40 44V12M4 38h36M4 14h36M4 38L22 14M4 14l18 24M22 38L40 14M22 14l18 24"/><path d="M40 12l16-8M40 44l16-8M56 36V4M4 12l16-8h36" opacity=".6"/></g></svg>',
+  2: '<svg viewBox="0 0 64 46"><g stroke="#6b4423" stroke-width="3" stroke-linecap="round" fill="none"><path d="M4 44V12M22 44V12M40 44V12M4 38h36M4 14h36M4 38L22 14M4 14l18 24M22 38L40 14M22 14l18 24"/><path d="M40 12l16-8M40 44l16-8M56 36V4M4 12l16-8h36" opacity=".6"/></g></svg>',
+  3: '<svg viewBox="0 0 64 46"><g stroke="#6b4423" stroke-width="3.5" stroke-linecap="round" fill="none"><path d="M34 2L10 44M30 2l24 42M32 2v36"/><path d="M15 36l17-6 18 6" opacity=".7"/></g><circle cx="32" cy="7" r="5" fill="none" stroke="#e0a93b" stroke-width="2.5"/></svg>',
   soon: '<svg viewBox="0 0 64 46"><g stroke="#3a3a30" stroke-width="3.5" stroke-linecap="round" fill="none" opacity=".7"><path d="M4 44V14M30 44V14M56 44V14M4 16h52M4 38h52"/></g></svg>',
 };
 const starRow = n => [1, 2, 3].map(i => `<span class="${i <= n ? 'on' : ''}">★</span>`).join('');
@@ -1719,6 +2318,14 @@ function playLevel(n) {
   switchLevel(n);
 }
 $('home-plaza').addEventListener('click', showLevels);
+function playFree() {
+  $('home').hidden = true; $('levels').hidden = true;
+  LV = FREE_LEVEL;
+  STAGES = stageList();
+  makeChips();
+  restart();
+}
+$('home-free').addEventListener('click', playFree);
 $('levels-back').addEventListener('click', showHome);
 $('btn-home').addEventListener('click', () => { closeModal(); showLevels(); });
 $('btn-level').addEventListener('click', () => { closeModal(); showLevels(); });
@@ -1746,6 +2353,11 @@ function collapseCard() {
     return showModal(`<div class="eyebrow">מבחן מציאות</div><h2>${G.falling.kind === 'sway' ? 'הקובייה נטתה ונפלה' : 'הקובייה קרסה'}</h2>
       <div class="rule">${e.rule}</div><p>${e.detail}</p>`, [['חזרה לקובייה', () => {
       closeModal(); G.falling = null; G.check = null; G.cube.sim = null; setPolesOpacity(1); goStage('cube');
+    }, true]]);
+  }
+  if (G.falling.tri) {
+    return showModal(`<div class="eyebrow">מבחן מציאות</div><h2>החצובה קרסה</h2><div class="rule">${e.rule}</div><p>${e.detail}</p>`, [['חזרה לחצובה', () => {
+      closeModal(); G.falling = null; G.check = null; G.tri.sim = null; setPolesOpacity(1); goStage('brace');
     }, true]]);
   }
   showModal(`
@@ -1849,12 +2461,19 @@ function setPolesOpacity(o) {
 // through. The work order and the lashing guide are part of the first
 // structure's tutorial only.
 function folderTabs() {
+  if (LV.tripod) return [['drawing', 'שרטוט החצובה'], ['poles', 'רשימת סנדות']];
   if (LV.cube) return [['drawing', 'שרטוט קלף'], ['sideR', 'שרטוט הצד הימני'], ['sideL', 'שרטוט הצד השמאלי'], ['top', 'שרטוט מבט על'], ['poles', 'רשימת סנדות']];
   return [['drawing', 'שרטוט הקלף'], ['poles', 'רשימת סנדות'], ...(LV.tutorial ? [['order', 'סדר עבודה (הדרכה)'], ['lashings', 'איזו כפיתה איפה (הדרכה)']] : [])];
 }
 function poleTable() {
   const k = SIZES.klaf, n = LV.klafim.length;
   const m = v => `${v.toFixed(1)} מ׳`;
+  if (LV.tripod) {
+    const rows = [['רגליים', 3, m(TRI.legLength)], [`חיזוקים בין הרגליים (בגובה ${Math.round(TRI.braceHeight * 100)} ס״מ)`, 3, m(TRI.braceLength)], ['בז״נטים לרגליים', 3, m(TRI.stakeLength)]];
+    return `<table><thead><tr><th>סנדה</th><th>כמות</th><th>אורך</th></tr></thead><tbody>
+      ${rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('')}</tbody></table>
+      <p class="note">בערימה יש גם סנדות שלא מתאימות. המידות זמניות, עד שיגיעו שרטוטים אמיתיים.</p>`;
+  }
   const rows = [
     ['רגליים', 2 * n, m(k.legLength)],
     [`רוחב (תחתון ${Math.round(k.bottomHeight * 100)} ס״מ מעל הקרקע, עליון בגובה ${k.topHeight} מ׳)`, 2 * n, m(k.horizontalLength)],
@@ -1882,6 +2501,7 @@ function openFolder(tab = 'drawing') {
   const body = $('folder-body'); body.innerHTML = '';
   if (tab === 'drawing') {
     const c = document.createElement('canvas'); c.width = c.height = BP.size;
+    if (LV.tripod) drawTripodFolder(c, TRI); else
     drawBlueprint(c.getContext('2d'), { joints: JOINTS });
     body.appendChild(c);
   } else if (tab === 'sideR' || tab === 'sideL') {
@@ -1983,6 +2603,8 @@ function drawCube(dt) {
 
 // ---------------- per-frame drawing ----------------
 function drawPoles() {
+  if (LV.free) for (const id in poleMeshes) if (!G.build.poles[id]) poleMeshes[id].forEach(m => { m.visible = false; });
+  if (LV.free) for (const id in lashMeshes) if (!G.build.joints[id] && !STAKE_JOINTS.some(q => q.id === id)) lashMeshes[id].visible = false;
   for (const s of SLOTS) {
     const [m0, m1] = poleMeshes[s.id];
     const segs = G.carrying[s.id] ? carriedSegs(G.carrying[s.id]) : poleSegs(s.id);
@@ -1994,12 +2616,17 @@ function drawPoles() {
 function drawLashings() {
   const b = G.build;
   for (const j of JOINTS) {
-    const g = lashMeshes[j.id];
+    const g = lashMesh(j.id);
     const on = b.joints[j.id] && jointReachable(j, b.poles) && (!G.sim || G.sim.jointCons[j.id]);
     if (!on) { g.visible = false; continue; }
     const p = jointPos(j); if (!p) { g.visible = false; continue; }
     g.visible = !fadedOut();
     const n = G.sim ? visNormal() : [0, 1, 0], h = (layerOff(slotById(j.a)) - layerOff(slotById(j.b))) / 2;
+    if (j.all) { // one lashing round several poles lying side by side
+      const up = LV.tripod && G.tri.up > 0, d = up ? [0, 1, 0] : poleDir(j.a);
+      placeParallelLashing(g, add3(p, [1, 0, 0], -0.07), add3(p, [1, 0, 0], 0.07), d);
+      g.children.forEach(c => c.scale.set(up ? 2.3 : 3.6, up ? 2.3 : 1.2, 1));
+    } else
     placeLashing(g, p, poleDir(j.a), poleDir(j.b), n.map(v => v * h));
     coilProgress(g, j.id);
   }
@@ -2022,7 +2649,7 @@ function coilProgress(g, id) {
 // fixed (קיבוע) just below its top
 const STAKE_LEAN = 0.35, UPV3 = new THREE.Vector3(0, 1, 0);
 function anchorStakeAxis(g) {
-  const u = slotById(g.leg).centre[0], s = Math.SQRT1_2;
+  const u = slotById(g.leg)?.centre[0] ?? (g.leg === 'legR' ? 1 : -1), s = Math.SQRT1_2;
   return new THREE.Vector3(Math.sign(u) * s * Math.sin(STAKE_LEAN), Math.cos(STAKE_LEAN), g.side * s * Math.sin(STAKE_LEAN));
 }
 function poseAnchorStake(m, g, a, hits) {
@@ -2133,6 +2760,7 @@ function drawGauge() {
   $('gauge-label').textContent = ang < 6 ? 'שוכב' : ang < 82 ? 'עולה' : ang <= 97 ? 'ניצב' : 'עבר את האנך!';
 }
 function drawInspector(push) {
+  if (LV.tripod) return triInspector(push);
   const c = G.check;
   if (!c?.running || G.falling || G.replay) { inspector.clear(); buckets.forEach(b => { b.visible = false; }); return; }
   const cs = G.cube?.sim && cubeStage(G.stage) ? G.cube.sim : null;
@@ -2157,8 +2785,8 @@ function drawInspector(push) {
   }
 }
 function drawPushArrow(push) {
-  if (!push || !G.sim) { pushArrow.visible = false; return; }
-  const t = G.sim.topCentre();
+  if (!push || !(G.sim || G.tri?.sim)) { pushArrow.visible = false; return; }
+  const t = G.tri?.sim ? G.tri.sim.apex() : G.sim.topCentre();
   const d = new THREE.Vector3(...push).normalize();
   pushArrow.visible = true;
   pushArrow.position.set(t[0] - d.x * 1.0, t[1] + 0.1, t[2] - d.z * 1.0);
@@ -2171,7 +2799,8 @@ const CHECK_SPEED = 1.6; // how much faster than real time the push test plays
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   const cs = G.cube?.sim && cubeStage(G.stage) ? G.cube.sim : null;
-  const sim = cs || G.sim;
+  const ts = LV.tripod ? G.tri.sim : null;
+  const sim = cs || ts || G.sim;
   let push = null;
   if (sim) {
     // the stability check plays faster than real time; physics still steps in small pieces,
@@ -2183,12 +2812,13 @@ function frame(now) {
       for (let w = 0; w < warp; w += 1) {
         const h = Math.min(1 / 30, dt * Math.min(1, warp - w));
         push = checkPush(h);
-        const load = G.check?.loading ? TUNING.loadForce : 0;
+        const load = G.check?.loading ? (ts ? TRI_TUNING.load : TUNING.loadForce) : 0;
         // the joined structure stands still while it is built: it is tested only in the check (Omer)
-        if (cs) { if (G.check?.running || G.falling) cs.step(h, { push, load }); } else sim.step(h, { wobble, push, load });
-        record(h);
+        if (ts) { if (G.check?.running || G.falling) ts.step(h, { push, load }); }
+        else if (cs) { if (G.check?.running || G.falling) cs.step(h, { push, load }); } else sim.step(h, { wobble, push, load });
+        if (!ts) record(h);
         // beyond a single klaf, the structure is tested only in the check at the end (Omer)
-        if (cs) { if (G.check?.running) watchCube(h); } else watchSim(h);
+        if (ts) { if (G.check?.running) watchTripod(); } else if (cs) { if (G.check?.running) watchCube(h); } else watchSim(h);
         if (G.falling) break;
       }
     }
@@ -2201,20 +2831,26 @@ function frame(now) {
   const cur = G.ki;
   eachKlaf((k, i) => {
     // the drawing lies on the ground while its klaf is being built, then fades
-    const showPlan = i === cur && G.stage === 'build' && !stageDone('build');
+    const showPlan = !LV.free && !LV.tripod && i === cur && G.stage === 'build' && !stageDone('build');
     const op = blueprint.material.opacity + (showPlan ? 1 : -1) * dt / 0.5;
     blueprint.material.opacity = Math.max(0, Math.min(1, op));
     blueprint.visible = blueprint.material.opacity > 0.01;
     drawPoles(); drawLashings(); drawStakes();
   });
+  { // free build: the grid lies on the ground while the klaf is designed
+    const show = LV.free && G.stage === 'build';
+    freeGrid.material.opacity = Math.max(0, Math.min(0.96, freeGrid.material.opacity + (show ? 1 : -1) * dt / 0.4));
+    freeGrid.visible = freeGrid.material.opacity > 0.01;
+    if (show) freeGrid.position.z = freeGrid.userData.z + z0();
+  }
   drawCube(dt);
-  drawCrew(); drawTier(); drawGauge(); drawPushArrow(push); drawInspector(push);
+  drawCrew(); drawTripod(dt); drawTier(); drawGauge(); drawPushArrow(push); drawInspector(push);
   updateJobs(dt);
   for (const a of allActors) a.update(dt);
   collectTargets();
   updateCamera(dt);
   hintTimer += dt;
-  if (hintTimer > 0.25) { hintTimer = 0; refreshHint(); $('timer').textContent = fmt(elapsed()); $('tray-count').textContent = G.stage === 'cube' ? `${LV.cube.slots.filter(s => G.cube.build.poles[s.id]).length}/${LV.cube.slots.length} בקובייה` : `${SLOTS.filter(s => G.build.poles[s.id]).length}/6 על השרטוט`; }
+  if (hintTimer > 0.25) { hintTimer = 0; refreshHint(); $('timer').textContent = fmt(elapsed()); $('tray-count').textContent = G.stage === 'cube' ? `${LV.cube.slots.filter(s => G.cube.build.poles[s.id]).length}/${LV.cube.slots.length} בקובייה` : `${SLOTS.filter(s => G.build.poles[s.id]).length}/${SLOTS.length || 6} על השרטוט`; }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
@@ -2222,4 +2858,4 @@ restart();
 requestAnimationFrame(frame);
 
 // debug hook for automated tests
-window.__game = { get state() { return G; }, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
+window.__game = { get state() { return G; }, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };

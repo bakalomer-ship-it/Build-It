@@ -38,4 +38,19 @@ export const SIZES = {
     linkDiagLength: 2.4,    // the flat X where two cubes meet, across the shared klaf (about 2.3 m)
     innerGuyDistance: 0.75, // inner guy lines are staked inside the cube and come down once it is braced
   },
+
+  // ---- tripod (חצובה) 4 m high (station 3) ----
+  // Three legs lashed together near their tops with a כפיתת חצובה while they lie
+  // side by side, stood up, and their feet spread into a triangle. Three braces
+  // low between the legs keep the feet from sliding apart.
+  tripod: {
+    legLength: 4.5,
+    lashFromTop: 0.25,      // the tripod lashing sits this far below the tops
+    height: 4.0,            // the lashing's height once the tripod stands
+    footApart: 2.5,         // distance between every two feet (4.25 m of leg then stands 4.0 m high)
+    braceHeight: 0.5,       // the braces between the legs, above the ground
+    braceLength: 2.6,
+    stakeLength: 1.0,
+    stakeJointHeight: 0.3,  // each leg is lashed to its stake here
+  },
 };

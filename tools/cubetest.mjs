@@ -1,7 +1,7 @@
 // Headless check of the cube (level 2) and the 2×4 base (level 3): node tools/cubetest.mjs
 import { CubeSim } from '../src/cubeSim.js';
 import { SLOTS, JOINTS, GUYS, STAKE_JOINTS } from '../src/level1.js';
-import { LEVELS } from '../src/levels.js';
+import { LEVELS, CUBE_LEVEL } from '../src/levels.js';
 
 function klafBuild() {
   const poles = {}; for (const s of SLOTS) poles[s.id] = { length: s.length };
@@ -10,7 +10,7 @@ function klafBuild() {
   return { poles, joints, stakes: { BL: 4, BR: 4 }, guyTop: all(true), anchors: all(3), guyTies: all('guy'),
     stakeJoints: Object.fromEntries(STAKE_JOINTS.map(s => [s.id, 'parallel'])), guyOff: {} };
 }
-function run(name, { skipSlots = [], skipJoints = [], innerOff = true, outerOff = false, unbrace = false } = {}, LV = LEVELS[1]) {
+function run(name, { skipSlots = [], skipJoints = [], innerOff = true, outerOff = false, unbrace = false } = {}, LV = CUBE_LEVEL) {
   const cube = LV.cube;
   const poles = {}; for (const s of cube.slots) if (!skipSlots.some(k => k.endsWith('$') ? s.id === k.slice(0, -1) : s.id.includes(k))) poles[s.id] = { length: s.length };
   const joints = {}; for (const j of cube.joints) if (!skipJoints.some(k => j.id.includes(k))) joints[j.id] = j.correct;
@@ -46,7 +46,7 @@ run('one X lashing missing on a leg', { skipJoints: ['j6L'] });
 run('no top side poles', { skipSlots: ['top'] });
 
 // level 3: two cubes in a row on three klafim (the middle one shared)
-const L3 = LEVELS[2];
+const L3 = LEVELS[1];
 run('full', {}, L3);
 run('full, inner guys still on', { innerOff: false }, L3);
 run('no X in the back cube', { skipSlots: ['dAR2', 'dBR2', 'dAL2', 'dBL2'] }, L3);

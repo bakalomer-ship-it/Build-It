@@ -355,3 +355,13 @@ button { font-family: inherit; }
 .crew-row { background: rgba(40, 22, 8, .45); border-color: rgba(255,220,160,.35); }
 .crew-role, .crew-free { color: #f3d9ae; }
 .crew-row.off { opacity: .6; }
+
+/* free build is open on the home screen */
+button.soon.open { cursor: pointer; font-family: inherit; text-align: right; background: linear-gradient(to bottom, #7a4a24, #5e361a); border: 2px solid var(--wood-edge); color: #fff3dc; }
+button.soon.open b { opacity: 1; font-weight: 700; }
+button.soon.open span { background: var(--gold); color: #3a2405; }
+
+/* free build: one pole bar instead of a pile of lengths */
+.pile-item.pole-bar { grid-template-columns: 1fr; justify-items: center; text-align: center; padding: 12px 8px; gap: 6px; }
+.pile-item.pole-bar b { font-size: 17px; }
+.pile-item.pole-bar.on { border-color: var(--gold); background: rgba(242,182,50,.28); }
