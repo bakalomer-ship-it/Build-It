@@ -41,6 +41,8 @@ export function layPole(a, b, lastLength) {
   // every pole runs "upwards" (or left to right), so its first end is the lower one
   let p0 = [u, v], p1 = [eu, ev];
   if (p1[1] < p0[1] - 1e-6 || (Math.abs(p1[1] - p0[1]) < 1e-6 && p1[0] < p0[0])) [p0, p1] = [p1, p0];
+  // an upright pole that ends near the ground stands on the foot line: it is a leg
+  if (Math.abs(du) < 1e-6 && p0[1] > 0 && p0[1] < 0.35) { p1 = [p1[0], p1[1] - p0[1]]; p0 = [p0[0], 0]; }
   const d = [p1[0] - p0[0], p1[1] - p0[1]], dl = Math.hypot(d[0], d[1]) || 1;
   const dir = [d[0] / dl, d[1] / dl];
   const centre = [round3(p0[0] + dir[0] * length / 2), round3(p0[1] + dir[1] * length / 2)];

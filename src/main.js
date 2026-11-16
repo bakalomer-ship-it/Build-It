@@ -383,7 +383,7 @@ function goStage(key) {
   } else {
     selectPole(null); if (!G.sim) startSim();
   }
-  G.stage = id; G.stageKey = st.key; G.armed = null;
+  G.stage = id; G.stageKey = st.key; G.armed = null; hideRaiseIcon();
   closePicker();
   $('tray').hidden = id !== 'build' && id !== 'cube' && id !== 'brace';
   $('rope-panel').hidden = id !== 'raise';
@@ -687,7 +687,9 @@ function onTap(x, y) {
     else { const p = groundAt(x, y); if (p) slot = nearestSlot(p.x, p.z - z0()); }
     if (slot) { G.lastLength = G.armed; placePole(slot); refreshAll(); return; }
   }
-  const t = pickTarget(x, y);
+  let t = pickTarget(x, y);
+  // sandbox: a tap on the klaf itself, not right on a lashing, is for the klaf (move, raise)
+  if (t && LV.free && G.stage === 'build' && t.kind === 'lashed' && !onRing(x, y) && pickPole(x, y)) t = null;
   if (t) return onTarget(t, x, y);
   if (G.stage === 'brace') { // a brace that was put in goes back to the pile with a tap
     const sid = pickBrace(x, y);
@@ -695,8 +697,17 @@ function onTap(x, y) {
   }
   if (G.stage === 'build' || G.stage === 'cube') {
     const sid = pickPole(x, y);
+    if (sid && LV.free) {
+      closePicker(); selectPole(sid);
+      // a finished klaf opens its raise icon; an unfinished one says what it still needs
+      if (freeReady()) showRaiseIcon();
+      else if (poleLashed(sid)) { const m = freeMissing(); if (m) flashHint(m); }
+      return;
+    }
     if (sid) { closePicker(); return selectPole(sid); }
+    if (LV.free && G.stage === 'build') { const k = pickOtherKlaf(x, y); if (k != null) { hideRaiseIcon(); return goStage(`build:${k}`); } }
   }
+  hideRaiseIcon();
   closePicker(); selectPole(null);
 }
 function onTarget(t, x, y) {
@@ -758,6 +769,79 @@ canvas.addEventListener('pointermove', e => {
 canvas.addEventListener('pointerup', () => { if (!lay) return; const pole = lay.pole; lay = null; ghost.visible = false; freePlace(pole); });
 canvas.addEventListener('pointercancel', () => { lay = null; ghost.visible = false; });
 function disarm() { G.armed = null; controls.enabled = true; renderPile(); }
+// ---- moving a pole that is already on the grid (Omer, 2026-11-16) ----
+// A placed pole is dragged to a new spot. Once a lashing is tied on it, it stays where it is.
+const poleLashed = id => JOINTS.some(j => (j.a === id || j.b === id) && G.build.joints[j.id]);
+const LASHED_MSG = '<b>הסנדה הזו כבר כפותה</b> ולא זזה. כדי להזיז אותה מתירים קודם את הכפיתות שלה';
+let moveDrag = null;
+function onRing(x, y, r = 15) { return targets.some(t => { const sp = toScreen(t.pos); return sp && Math.hypot(sp[0] - x, sp[1] - y) < r; }); }
+canvas.addEventListener('pointerdown', e => {
+  if (!LV.free || G.stage !== 'build' || G.armed || G.falling || closeup || G.sim) return;
+  if (onRing(e.clientX, e.clientY)) return; // right on a ring: that press ties a lashing
+  const sid = pickPole(e.clientX, e.clientY); if (!sid || G.carrying[sid]) return;
+  const a = toKlaf(e.clientX, e.clientY); if (!a) return;
+  moveDrag = { sid, a, from: [...slotById(sid).centre], moved: false, locked: poleLashed(sid) };
+  controls.enabled = false;
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* fine without it */ }
+});
+canvas.addEventListener('pointermove', e => {
+  const m = moveDrag; if (!m) return;
+  const b = toKlaf(e.clientX, e.clientY); if (!b) return;
+  const sn = v => Math.round(v * 10) / 10;
+  let du = sn(b[0] - m.a[0]), dv = sn(b[1] - m.a[1]);
+  if (!m.moved && Math.hypot(b[0] - m.a[0], b[1] - m.a[1]) < 0.12) return;
+  if (m.locked) { if (!m.told) { m.told = true; flashHint(LASHED_MSG); } return; }
+  const sl = slotById(m.sid); if (!sl) return;
+  if (m.sid.startsWith('leg')) dv = 0; // a leg slides along the foot line
+  const centre = [Math.round((m.from[0] + du) * 1000) / 1000, Math.round((m.from[1] + dv) * 1000) / 1000];
+  if (m.sid.startsWith('leg') && (Math.sign(centre[0]) !== Math.sign(m.from[0]) || Math.abs(centre[0]) < 0.1)) return;
+  if (centre[0] === sl.centre[0] && centre[1] === sl.centre[1]) return;
+  const next = { ...sl, centre };
+  if (!onSheet(next)) return;
+  m.moved = true;
+  if (G.selected !== m.sid) selectPole(m.sid);
+  freeSync(SLOTS.map(q => q.id === m.sid ? next : q));
+  hideRaiseIcon();
+});
+const endMove = () => { const m = moveDrag; if (!m) return; moveDrag = null; if (!camTween && !closeup) controls.enabled = true; if (m.moved) { sfx.thud(); refreshAll(); } };
+canvas.addEventListener('pointerup', endMove);
+canvas.addEventListener('pointercancel', endMove);
+
+// ---- the raise icon (Omer, 2026-11-16) ----
+// A klaf that has its two legs and every crossing lashed is ready. Tapping it opens
+// an icon over it, and the icon starts its raise (stakes first).
+const freeReady = () => !!(G.build.poles.legL && G.build.poles.legR) && JOINTS.length > 0 && JOINTS.every(j => G.build.joints[j.id]);
+const raiseIcon = Object.assign(document.createElement('button'), { type: 'button', id: 'raise-icon', hidden: true, innerHTML: '<span class="arrow">⬆</span><span>הרמת הקלף</span>' });
+document.body.appendChild(raiseIcon);
+function showRaiseIcon() { G.raiseIconFor = G.ki; raiseIcon.hidden = false; placeRaiseIcon(); }
+function hideRaiseIcon() { if (G) G.raiseIconFor = null; raiseIcon.hidden = true; }
+function placeRaiseIcon() {
+  if (raiseIcon.hidden) return;
+  if (!LV.free || G.stage !== 'build' || G.raiseIconFor !== G.ki || !freeReady()) return hideRaiseIcon();
+  const p = toScreen([0, 0.4, z0() + LEVEL.height * 0.5]); if (!p) return;
+  raiseIcon.style.left = Math.max(70, Math.min(window.innerWidth - 190, p[0])) + 'px';
+  raiseIcon.style.top = Math.max(70, Math.min(window.innerHeight - 120, p[1])) + 'px';
+}
+raiseIcon.addEventListener('click', () => {
+  const st = STAGES.find(q => q.id === 'stakes' && (q.k == null || q.k === G.ki));
+  hideRaiseIcon(); sfx.tick();
+  if (st) goStage(st.key);
+});
+// what a klaf still needs before it can be raised
+function freeMissing() {
+  const b = G.build;
+  if (!b.poles.legL || !b.poles.legR) return '<b>כדי להרים, לקלף צריכות להיות שתי רגליים</b> שעומדות על קו הרגליים, אחת מכל צד';
+  const n = JOINTS.filter(j => !b.joints[j.id]).length;
+  if (!JOINTS.length) return 'הרגליים עוד לא מחוברות: הוסיפו רוחבים ואלכסונים וכפתו אותם';
+  return n ? `<b>נשארו ${n} מפגשים לא כפותים.</b> כשהכול כפות, הקשה על הקלף פותחת את ההרמה` : '';
+}
+// a tap on another klaf of the sandbox moves the work to it
+function pickOtherKlaf(x, y) {
+  const keep = G.ki; let found = null;
+  for (let i = 0; i < G.klafim.length && found == null; i++) { if (i === keep) continue; useKlaf(i); if (!G.sim && pickPole(x, y)) found = i; }
+  useKlaf(keep);
+  return found;
+}
 function freePlace(pole) {
   startClock();
   if (!onSheet(pole)) { flashHint('הסנדה יוצאת מהרשת או נכנסת לאדמה. נסו מקום או כיוון אחר'); return; }
@@ -813,7 +897,7 @@ function freeHint(nPoles, nJ) {
   if (!b.poles.legL || !b.poles.legR) return 'הקישו על <b>סנדה</b> וציירו רגל: גררו מ<b>קו הרגליים</b> ישר למעלה. לקלף שתי רגליים, אחת מכל צד של קו האמצע';
   if (nPoles === 2) return 'יש רגליים. הוסיפו <b>רוחבים ואלכסונים</b>: לוקחים סנדה ומציירים אותה על הרשת';
   if (nJ < JOINTS.length) return `סנדות ${nPoles} · כפיתות ${nJ}/${JOINTS.length} · הקישו על <b>טבעת</b> במפגש סנדות כדי לכפות`;
-  return `סנדות ${nPoles} · כפיתות ${nJ}/${JOINTS.length} · אפשר להוסיף עוד, או להמשיך ל<b>בז״נטים</b> ולהרמה`;
+  return `סנדות ${nPoles} · כפיתות ${nJ}/${JOINTS.length} · הכול כפות: <b>הקישו על הקלף</b> כדי להתחיל להרים אותו`;
 }
 // why a free klaf fell: no drawing to compare with, so the reasons are the rules themselves
 function explainFree(kind) {
@@ -1395,6 +1479,7 @@ function changeLength(steps) {
   if (LV.free) { // free build: any length; the pole grows from its lower end
     const sl = slotById(sid), nl = Math.round(Math.max(POLE_MIN, Math.min(POLE_MAX, sl.length + steps * 0.1)) * 10) / 10;
     if (nl === sl.length || G.stage !== 'build') return;
+    if (poleLashed(sid)) return flashHint(LASHED_MSG);
     const d = (nl - sl.length) / 2;
     const next = { ...sl, centre: [sl.centre[0] + sl.dir[0] * d, sl.centre[1] + sl.dir[1] * d], length: nl };
     if (!onSheet(next)) return;
@@ -1433,6 +1518,7 @@ function changeLength(steps) {
   $('lp-minus').addEventListener('click', () => changeLength(-1));
   $('lp-remove').addEventListener('click', () => {
     const sid = G.selected; if (!sid) return;
+    if (LV.free && poleLashed(sid)) return flashHint(LASHED_MSG);
     delete polesOf(sid)[sid];
     if (isCubePole(sid)) {
       for (const j of LV.cube.joints) if (j.a === sid || j.b === sid) delete G.cube.build.joints[j.id];
@@ -2853,7 +2939,7 @@ function frame(now) {
   updateCamera(dt);
   hintTimer += dt;
   if (hintTimer > 0.25) { hintTimer = 0; refreshHint(); $('timer').textContent = fmt(elapsed()); $('tray-count').textContent = G.stage === 'cube' ? `${LV.cube.slots.filter(s => G.cube.build.poles[s.id]).length}/${LV.cube.slots.length} בקובייה` : `${SLOTS.filter(s => G.build.poles[s.id]).length}/${SLOTS.length || 6} על השרטוט`; }
-  decorTick(now / 1000);
+  decorTick(now / 1000); placeRaiseIcon();
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
