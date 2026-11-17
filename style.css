@@ -374,3 +374,35 @@ button.soon.open span { background: var(--gold); color: #3a2405; }
 #raise-icon[hidden] { display: none; }
 #raise-icon .arrow { font-size: 24px; line-height: 1; }
 @keyframes raise-pop { from { transform: translate(-50%, -50%) scale(1); } to { transform: translate(-50%, -54%) scale(1.06); } }
+
+/* decorating the plaza */
+#app.decorating > :not(canvas):not(#decor-ui):not(.modal):not(#rotate) { display: none !important; }
+#decor-ui[hidden] { display: none; }
+#decor-ui .dc-top { position: absolute; top: calc(8px + var(--safe-t)); inset-inline-start: max(10px, var(--safe-r)); display: flex; align-items: center; gap: 10px; z-index: 5; }
+#decor-ui .dc-title { display: flex; flex-direction: column; padding: 6px 14px; border-radius: 12px; background: var(--planks), var(--wood); border: 2px solid var(--wood-edge); color: #fff3dc; }
+#decor-ui .dc-title b { font-size: 16px; } #decor-ui .dc-title span { font-size: 12px; color: var(--gold-2); font-weight: 700; }
+#decor-ui .dc-list { position: absolute; top: calc(56px + var(--safe-t)); bottom: 64px; inset-inline-end: max(10px, var(--safe-l)); width: 178px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; padding: 8px; z-index: 5; touch-action: pan-y; }
+#decor-ui .dc-item { appearance: none; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 7px 9px; border-radius: 10px; cursor: pointer; font: 700 13px var(--font); text-align: right;
+  background: #f3e2bf; color: #3b2410; border: 2px solid #b98850; box-shadow: 0 2px 0 #8a5a2b; }
+#decor-ui .dc-item.locked { background: #8f8670; color: #3a3426; border-color: #6d6855; box-shadow: none; }
+#decor-ui .dc-item.placed { background: #d9e8c4; }
+#decor-ui .dc-lock { font-size: 12px; color: #fff3dc; background: #5e5643; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+#decor-ui .dc-add { font-size: 18px; line-height: 1; color: #3a2405; background: var(--gold); width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; }
+#decor-ui .dc-on { font-size: 11px; color: #2f5a1a; }
+#decor-ui .dc-sel { position: absolute; bottom: calc(10px + var(--safe-b)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 14px; z-index: 5;
+  background: var(--planks), var(--wood); border: 2px solid var(--wood-edge); color: #fff3dc; font-weight: 800; white-space: nowrap; }
+#decor-ui .dc-sel[hidden] { display: none; }
+#decor-ui .dc-hint { position: absolute; bottom: calc(66px + var(--safe-b)); left: 50%; transform: translateX(-50%); max-width: 60vw; text-align: center; font-size: 13px; padding: 5px 12px; border-radius: 999px; background: rgba(29,35,24,.82); color: var(--canvas); pointer-events: none; z-index: 5; }
+.tribe-card { max-width: 640px; }
+.tribe-grid { display: flex; gap: 14px; align-items: center; }
+.tribe-form { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.tribe-name { display: flex; flex-direction: column; gap: 4px; font-weight: 700; font-size: 13px; }
+.tribe-name input { font: 700 17px var(--font); padding: 7px 10px; border-radius: 10px; border: 2px solid #b98850; background: #fffaf0; color: #3b2410; user-select: text; -webkit-user-select: text; touch-action: manipulation; }
+.tribe-lbl { font-size: 12px; font-weight: 700; opacity: .8; }
+.tribe-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.tribe-row button { appearance: none; cursor: pointer; border-radius: 10px; border: 2px solid #b98850; background: #f3e2bf; padding: 2px; }
+.tribe-row button canvas { width: 34px; height: 34px; display: block; }
+.tribe-row button.on { border-color: var(--gold-dark); box-shadow: 0 0 0 3px var(--gold); }
+.tribe-row.sw button { width: 30px; height: 30px; border-radius: 50%; border-color: rgba(0,0,0,.3); }
+#tb-prev { width: 200px; height: 145px; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,.35); }
+@media (max-height: 420px) { #tb-prev { width: 150px; height: 109px; } .tribe-row button canvas { width: 28px; height: 28px; } .tribe-row.sw button { width: 26px; height: 26px; } }

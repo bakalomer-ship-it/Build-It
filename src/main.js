@@ -95,9 +95,10 @@ const canvas = $('scene');
 const renderer = makeRenderer(canvas);
 const scene = new THREE.Scene();
 makeWorld(scene);
-const decorTick = makeDecor(scene); // the scout camp around the building ground
 const camera = new THREE.PerspectiveCamera(22, 1, 0.2, 400) // narrow lens: almost isometric, like the reference;
 const controls = new OrbitControls(camera, canvas);
+// the plaza's decoration, earned with stars (see decor.js); made once the home screen code is ready
+let decor = null;
 controls.enableDamping = true;
 controls.dampingFactor = 0.12;
 controls.maxPolarAngle = Math.PI * 0.495;
@@ -677,7 +678,7 @@ canvas.addEventListener('pointerup', e => {
   down = null;
 });
 function onTap(x, y) {
-  if (G.falling || closeup) return;
+  if (G.falling || closeup || decor?.active) return;
   // a length picked from the pile goes on the line that was tapped
   if (G.armed && (G.stage === 'build' || G.stage === 'cube' || G.stage === 'brace')) {
     let slot = null;
@@ -746,7 +747,7 @@ function onTarget(t, x, y) {
 // where the finger went down and points where it is dragged. A tap stands it upright.
 let lay = null;
 const toKlaf = (x, y) => { const p = groundAt(x, y); return p ? [p.x, p.z - z0()] : null; };
-const canLay = () => LV.free && G.stage === 'build' && G.armed && !G.falling && !closeup;
+const canLay = () => !decor?.active && LV.free && G.stage === 'build' && G.armed && !G.falling && !closeup;
 function layGhost(pole) {
   const h = pole.length / 2, e = k => [pole.centre[0] + pole.dir[0] * k, 0.12, pole.centre[1] + pole.dir[1] * k + z0()];
   placeCylinder(ghost, e(-h), e(h));
@@ -776,7 +777,7 @@ const LASHED_MSG = '<b>הסנדה הזו כבר כפותה</b> ולא זזה. כ
 let moveDrag = null;
 function onRing(x, y, r = 15) { return targets.some(t => { const sp = toScreen(t.pos); return sp && Math.hypot(sp[0] - x, sp[1] - y) < r; }); }
 canvas.addEventListener('pointerdown', e => {
-  if (!LV.free || G.stage !== 'build' || G.armed || G.falling || closeup || G.sim) return;
+  if (decor?.active || !LV.free || G.stage !== 'build' || G.armed || G.falling || closeup || G.sim) return;
   if (onRing(e.clientX, e.clientY)) return; // right on a ring: that press ties a lashing
   const sid = pickPole(e.clientX, e.clientY); if (!sid || G.carrying[sid]) return;
   const a = toKlaf(e.clientX, e.clientY); if (!a) return;
@@ -1069,7 +1070,7 @@ const footFixed = i => (G.tri.stakes[TRI_STAKES[i].id] || 0) > 0 || BRACES.some(
 // spreading the legs: drag a foot over the ground, and the head follows
 let footDrag = null;
 canvas.addEventListener('pointerdown', e => {
-  if (!LV.tripod || G.stage !== 'spread' || G.tri.up < 1 || G.falling) return;
+  if (decor?.active || !LV.tripod || G.stage !== 'spread' || G.tri.up < 1 || G.falling) return;
   const st = triState(); let best = null, bd = 42;
   st.legs.forEach((L, i) => { const sp = toScreen([L.foot[0], 0.1, L.foot[2]]); if (!sp) return; const d = Math.hypot(sp[0] - e.clientX, sp[1] - e.clientY); if (d < bd) { bd = d; best = i; } });
   if (best == null) return;
@@ -2414,6 +2415,16 @@ function playFree() {
   restart();
 }
 $('home-free').addEventListener('click', playFree);
+decor = makeDecor({
+  scene, camera, controls, canvas, allOpen: ALL_LEVELS_OPEN,
+  stars: () => LEVELS.reduce((a, l) => a + starsOf(l.number), 0),
+  onExit: () => { camMode = null; showHome(); },
+});
+$('home-decor').addEventListener('click', () => {
+  $('home').hidden = true; $('levels').hidden = true;
+  closeModal(); closePicker(); camTween = null; closeup = null; camMode = null;
+  decor.enter();
+});
 $('levels-back').addEventListener('click', showHome);
 $('btn-home').addEventListener('click', () => { closeModal(); showLevels(); });
 $('btn-level').addEventListener('click', () => { closeModal(); showLevels(); });
@@ -2939,7 +2950,7 @@ function frame(now) {
   updateCamera(dt);
   hintTimer += dt;
   if (hintTimer > 0.25) { hintTimer = 0; refreshHint(); $('timer').textContent = fmt(elapsed()); $('tray-count').textContent = G.stage === 'cube' ? `${LV.cube.slots.filter(s => G.cube.build.poles[s.id]).length}/${LV.cube.slots.length} בקובייה` : `${SLOTS.filter(s => G.build.poles[s.id]).length}/${SLOTS.length || 6} על השרטוט`; }
-  decorTick(now / 1000); placeRaiseIcon();
+  decor?.tick(now / 1000); placeRaiseIcon();
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
