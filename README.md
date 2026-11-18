@@ -33,6 +33,18 @@ The game is a static web page with no build step. Open `index.html` through any 
 
 Real blueprints have not arrived yet, so every size is an assumption from the design document. They all live in one place, [`src/blueprints.js`](src/blueprints.js), so the real numbers can be swapped in later: legs 2.0 m standing 1.8 m apart, horizontals 2.0 m at 30 cm and 1.9 m above the ground, diagonals 2.6 m forming one X; the cube is 1.8 m deep with 2.0 m side poles and 2.4 m side diagonals. Releasing every guy line at the end of the cube check is an assumption (the rule only says the inner guy lines come down); it is the `release` time in the cube check in `src/main.js`. The physics strengths (how much a diagonal carries before it bows, how hard the guy holders can hold) are tuned by feel in `TUNING` in [`src/klafSim.js`](src/klafSim.js).
 
+## Station 4: the carousel (קרוסלה מחנאית), 2026-11-18
+
+Omer's plan: a 5×5×5 cube. Every face except the gate has a horizontal at 2.5 m with an X above and an X below it. The gate is the front klaf: an X above the 2.5 m horizontal, and below it a door post from the middle of that horizontal down to the ground; the right half (seen from the front) is the door with no bottom pole, the left half has an X. The roof is one X from corner to corner. Everything is in `src/carousel.js`; the sizes are in `SIZES.carousel` in `src/blueprints.js`.
+
+1. Build the gate klaf and the back klaf on their drawings, then drive stakes, raise and anchor each one (6 crew, guy lines at 45°, five metres out).
+2. Join them: on each side a bottom, middle and top pole and two spatial Xs, and the roof X. Take the inner guy lines down.
+3. **בניית המושב.** On the drawing in the middle of the cube: an octagon of eight 1.4 m poles with a # of four 3.2 m poles inside it (a pair each way), all lashed.
+4. **תליית הקרוסלה.** Six scouts lift the seat to 0.5 m. Put the 5.4 m mast through the #'s middle square, hang it from the roof X's centre on a rope ring (so it turns), lash it to the two lengthwise poles of the #, and tie eight hanging ropes from the mast to the octagon's corners.
+5. **מסדר.** The frame is pushed from every side and all guy lines come down (as for the cube). Then eight scouts get on in pairs, the crew spins the carousel, and the מדריך pushes the seat sideways. A corner lashing missing lets a pole drop under the riders, a hanging rope missing lets a corner sink, and a seat not lashed to the mast swings into it.
+
+The seat and mast are their own small physics world (`CarouselSim`), hung from a point that follows the frame's roof X; a share of their weight (`CAR_TUNING.frameShare`) is put back on the roof X. The back guy holders of a 5 m klaf hold more than for a 2×2 (`backGripCap`). `npm test` runs `tools/carouseltest.mjs` as well.
+
 ## Files
 
 | File | What it does |
@@ -46,7 +58,8 @@ Real blueprints have not arrived yet, so every size is an assumption from the de
 | `src/cubeSim.js` | Joins two klafim into the cube and tests its bracing |
 | `src/scene.js`, `src/sound.js` | 3D models, the drawing on the ground, sound effects |
 | `lib/` | three.js 0.160 (MIT licence), vendored so the page works offline |
-| `tools/simtest.mjs`, `tools/cubetest.mjs` | Check the physics without a browser: `npm test` |
+| `src/carousel.js` | The carousel: its two klafim, the sides and roof, the seat, and the seat's physics |
+| `tools/simtest.mjs`, `tools/cubetest.mjs`, `tools/tripodtest.mjs`, `tools/carouseltest.mjs` | Check the physics without a browser: `npm test` |
 | `tools/build-single.mjs` | Packs everything into one HTML file: `npm install`, then `npm run build:single` |
 
 ## Spatial Xs and the look (2026-11-15)

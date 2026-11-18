@@ -373,7 +373,7 @@ const item = id => ITEMS.find(q => q.id === id);
 // structures, and the camp corner (tent and crates) that is always there
 export const KEEP_CLEAR = {
   build: { x0: -5.2, x1: 5.2, z0: -4.8, z1: 8.2 },
-  spots: [[-9, 6.5, 3.2], [8.5, 7, 3.6], [-9.5, -5.5, 3.2], [11.8, -3.2, 2.6]],
+  spots: [[-9, 6.5, 3.2], [8.5, 7, 3.6], [-9.5, -5.5, 3.2], [11.8, -3.2, 2.6], [0.5, 10.6, 3.9]],
 };
 function freeSpot(x, z, r, others) {
   const PW = PLAZA.w / 2 - 0.8, PD = PLAZA.d / 2 - 0.8, cz = PLAZA.cz;

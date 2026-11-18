@@ -53,4 +53,46 @@ export const SIZES = {
     stakeLength: 1.0,
     stakeJointHeight: 0.3,  // each leg is lashed to its stake here
   },
+
+  // ---- carousel (קרוסלה מחנאית) on a 5×5 cube (station 4, Omer 2026-11-18) ----
+  // A cube 5 m wide, deep and high. Every face but the gate has a horizontal at
+  // 2.5 m with an X above it and an X below it. The gate (the front klaf) has the
+  // X above; below, a post from the middle of the 2.5 m horizontal splits the
+  // lower half: the right half is the door (no bottom pole), the left half has an X.
+  // The roof has one X corner to corner; the carousel's mast hangs from its centre
+  // on a rope ring, and the seat (an octagon with a # of four poles inside) hangs
+  // from the mast on eight ropes, 0.5 m above the ground.
+  carousel: {
+    width: 5.0,             // leg to leg, and klaf to klaf
+    legLength: 5.0,
+    bottomHeight: 0.3,
+    midHeight: 2.5,         // Omer: the horizontal at 2.5 m
+    topHeight: 4.85,
+    horizontalLength: 5.4,
+    lowX: [0.5, 2.3],       // where the lower X meets the legs
+    highX: [2.75, 4.55],    // ... the upper X
+    diagLength: 5.6,
+    gateBottomLength: 2.9,  // the gate's bottom pole, under the left half only
+    postLength: 2.6,        // the door post, from the ground to just above the 2.5 m horizontal
+    gateDiagLength: 3.4,    // the X in the gate's lower left half
+    // the side faces, lashed onto the klaf legs just off the klaf's own heights
+    sideBottom: 0.38, sideMid: 2.58, sideTop: 4.77,
+    sideLowX: [0.65, 2.15], sideHighX: [2.85, 4.35],
+    sideDiagLength: 5.5,
+    topDiagLength: 7.2,     // the roof X, corner to corner (often two poles joined in real life)
+    guyDistance: 5.0,       // guy stakes one klaf-height out (45°)
+    innerGuyDistance: 1.5,
+    backGripCap: 1100,      // N the back guy holders hold a 5 m klaf with (it is three times as heavy as a 2×2)
+    stakeJointHeights: [0.15, 0.55],
+    seat: {
+      height: 0.5,          // the seat hangs this high above the ground
+      radius: 1.5,          // centre to each corner of the octagon (about 3 m across)
+      sideLength: 1.4,      // eight poles, each a little longer than a side (1.15 m)
+      plusLength: 3.2,      // the four poles of the # inside
+      plusGap: 0.12,        // each pair of the # stands this far either side of the mast
+      mastLength: 5.4,
+      mastFoot: 0.2,        // the mast's foot, above the ground
+      ropeHeight: 4.0,      // the hanging ropes leave the mast here
+    },
+  },
 };

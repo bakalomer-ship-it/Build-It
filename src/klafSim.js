@@ -9,7 +9,7 @@ import { SLOTS, JOINTS, LEVEL, GUYS, GUY_DIST, LEG_STAKES, STAKE_JOINTS } from '
 // leg, so the line also rises at about 45° to the top of the leg.
 export function guyAnchor(cfg, g) {
   // (a free-build klaf may not have its legs yet: then where a 2×2 klaf's leg would be)
-  const u = slotById(g.leg)?.centre[0] ?? (g.leg === 'legR' ? 0.9 : -0.9), d = g.side > 0 ? cfg.backDist : cfg.frontDist, s = Math.SQRT1_2;
+  const u = (cfg.plan ? cfg.plan.slots.find(q => q.id === g.leg) : slotById(g.leg))?.centre[0] ?? (g.leg === 'legR' ? 0.9 : -0.9), d = g.side > 0 ? cfg.backDist : cfg.frontDist, s = Math.SQRT1_2;
   return [u + Math.sign(u) * d * s, 0, cfg.z0 + g.side * d * s];
 }
 export const SOLO_CFG = { z0: 0, frontDist: GUY_DIST, backDist: GUY_DIST, pullDist: GUY_DIST + 1.4, anchorX: { front: 1.05, back: 1.05 }, inner: 0 };
@@ -46,10 +46,10 @@ export function slotParam(slot, pt) {
 }
 
 // Can this joint be tied with the poles as placed?
-export function jointReachable(joint, poles) {
+export function jointReachable(joint, poles, slots = SLOTS) {
   for (const sid of [joint.a, joint.b]) {
     const p = poles[sid]; if (!p) return false;
-    const s = slotParam(slotById(sid), joint.at);
+    const s = slotParam(slots.find(q => q.id === sid), joint.at);
     if (Math.abs(s) > p.length / 2 - 0.04) return false;
   }
   return true;
@@ -68,6 +68,9 @@ export class KlafSim {
   constructor(build, cfg = SOLO_CFG, world = null) {
     this.build = build;
     this.cfg = cfg;
+    // a klaf with a plan of its own (the carousel's gate klaf differs from its back klaf)
+    this.slots = cfg.plan?.slots ?? SLOTS;
+    this.joints = cfg.plan?.joints ?? JOINTS;
     this.z0 = cfg.z0;
     const W = this.world = world || new World();
     this.poleParticles = {};   // slotId -> [{id, s}]
@@ -76,12 +79,12 @@ export class KlafSim {
     this.phase = 'ground';
     const pts = {};
 
-    for (const slot of SLOTS) {
+    for (const slot of this.slots) {
       const pole = build.poles[slot.id];
       if (!pole) continue;
       const half = pole.length / 2;
       const ss = new Set([-half, half]);
-      for (const j of JOINTS) {
+      for (const j of this.joints) {
         if (j.a !== slot.id && j.b !== slot.id) continue;
         const s = slotParam(slot, j.at);
         if (Math.abs(s) <= half - 0.04) ss.add(round(s));
@@ -98,7 +101,7 @@ export class KlafSim {
       const parts = list.map(s => {
         const [u, v] = slotPoint(slot, s);
         const pos = this.kw(u, v);
-        if (slot.id.startsWith('diag') && Math.abs(s) < 1e-6) pos[1] += slot.id === 'diagA' ? 0.002 : -0.002;
+        if (slot.id.startsWith('diag') && Math.abs(s) < 1e-6) pos[1] += (slot.id === 'diagA' || slot.id === 'diagC') ? 0.002 : -0.002;
         const id = W.addParticle(pos, mass, r);
         W.p[id].tag = slot.id;
         return { id, s };
@@ -115,7 +118,7 @@ export class KlafSim {
     }
 
     // lashings in the klaf
-    for (const j of JOINTS) if (build.joints[j.id]) this.addJoint(j, true);
+    for (const j of this.joints) if (build.joints[j.id]) this.addJoint(j, true);
 
     // feet of the legs: hinge on the stakes, or held only by people's feet
     this.feet = {};
@@ -172,7 +175,7 @@ export class KlafSim {
   // plane, which is exactly what the X stops.
   collectFrame() {
     const count = {};
-    for (const j of JOINTS) if (this.jointCons[j.id]) { count[j.a] = (count[j.a] || 0) + 1; count[j.b] = (count[j.b] || 0) + 1; }
+    for (const j of this.joints) if (this.jointCons[j.id]) { count[j.a] = (count[j.a] || 0) + 1; count[j.b] = (count[j.b] || 0) + 1; }
     this.frameIds = [];
     for (const sid in this.poleParticles) {
       if ((count[sid] || 0) >= 2) for (const q of this.poleParticles[sid]) this.frameIds.push(q.id);
@@ -203,10 +206,10 @@ export class KlafSim {
   }
 
   addJoint(j, quiet = false) {
-    if (this.jointCons[j.id] || !jointReachable(j, this.build.poles)) return false;
+    if (this.jointCons[j.id] || !jointReachable(j, this.build.poles, this.slots)) return false;
     const W = this.world;
-    const pa = this.findParticle(j.a, slotParam(slotById(j.a), j.at));
-    const pb = this.findParticle(j.b, slotParam(slotById(j.b), j.at));
+    const pa = this.findParticle(j.a, slotParam(this.slotById(j.a), j.at));
+    const pb = this.findParticle(j.b, slotParam(this.slotById(j.b), j.at));
     if (pa == null || pb == null) return false;
     this.jointCons[j.id] = W.add('weld', pa, pb, { tag: j.id });
     if (j.correct === 'square') {
@@ -229,7 +232,7 @@ export class KlafSim {
     const W = this.world;
     const parts = this.poleParticles[g.leg]; if (!parts) return false;
     const top = parts[parts.length - 1].id;
-    const u = slotById(g.leg).centre[0];
+    const u = this.slotById(g.leg).centre[0];
     let con;
     if (g.side > 0) {
       // back guy line: holders pay it out and stop the klaf at upright
@@ -238,7 +241,7 @@ export class KlafSim {
       const d = Math.max(this.guyDist(g.side), GUY_DIST);
       const holder = W.addParticle([u, 0.05, this.z0 + g.side * d], 0);
       const vertical = Math.hypot(this.legH(g.leg) + r - 0.05, d);
-      con = W.add('grip', top, holder, { rest: vertical + 0.03, compliance: TUNING.guyCompliance, cap: TUNING.backGripCap, tag: g.id });
+      con = W.add('grip', top, holder, { rest: vertical + 0.03, compliance: TUNING.guyCompliance, cap: this.cfg.backGripCap ?? TUNING.backGripCap, tag: g.id });
     } else {
       // front guy line: the pullers' line, they stand behind its stake
       const holder = W.addParticle(this.pullHand(u), 0);
@@ -268,15 +271,16 @@ export class KlafSim {
     return Math.abs(cand[0].s - s0) > 0.6 ? null : cand[0].id;
   }
   // how high the top of a leg stands (legs can differ in a free-build klaf)
-  legH(leg) { const s = slotById(leg), p = this.build.poles[leg]; return s && p ? s.centre[1] + p.length / 2 : LEVEL.height; }
+  legH(leg) { const s = this.slotById(leg), p = this.build.poles[leg]; return s && p ? s.centre[1] + p.length / 2 : LEVEL.height; }
   // the pole the inspection hangs its load from: the top horizontal (in free build, the pole marked `load`)
   topParticle() {
-    const t = this.poleParticles[SLOTS.find(s => s.load)?.id || 'topH'];
+    const t = this.poleParticles[this.slots.find(s => s.load)?.id || 'topH'];
     if (t) return (t.find(q => Math.abs(q.s) < 1e-6) || t[Math.floor(t.length / 2)]).id;
     for (const leg of ['legL', 'legR']) { const p = this.poleParticles[leg]; if (p) return p[p.length - 1].id; }
     return null;
   }
   pos(id) { return this.world.p[id].x; }
+  slotById(id) { return this.slots.find(s => s.id === id); }
 
   // where the top of the klaf is
   topCentre() {
@@ -341,7 +345,7 @@ export class KlafSim {
     const leg = this.poleParticles[sj.leg]; if (!leg) return;
     const stake = LEG_STAKES.find(s => s.leg === sj.leg);
     if ((this.build.stakes[stake.id] || 0) < 1) return;
-    const pid = this.findParticle(sj.leg, sj.v - slotById(sj.leg).centre[1]); if (pid == null) return;
+    const pid = this.findParticle(sj.leg, sj.v - this.slotById(sj.leg).centre[1]); if (pid == null) return;
     const sp = this.world.addParticle([stake.u, sj.v + r, this.z0], 0);
     this.stakeCons[sj.id] = this.world.add('rigid', pid, sp, { rest: 0.09, compliance: 2e-4, tag: sj.id });
   }

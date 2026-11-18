@@ -193,6 +193,9 @@ export function makeWorld(scene) {
 
 // ---------- the blueprint drawing (שרטוט קלף) ----------
 export const BP = { size: 1024, span: 2.9, u0: 0, v0: 1.2 };
+// the sheet's size for a 2×2 klaf; a bigger klaf (the carousel's 5 m klafim) gets a bigger sheet at the same 1:1 scale
+export const BP_BASE = { span: 2.9, v0: 1.2 };
+export function setBlueprintSize(span, v0) { BP.span = span; BP.v0 = v0; }
 // Seen from above (and from the pullers), +u is on the left, so the
 // drawing is mirrored relative to the klaf's own u axis.
 function bx(u) { return BP.size / 2 - (u - BP.u0) * BP.size / BP.span; }
@@ -203,7 +206,8 @@ export function drawBlueprint(g, opts = {}) {
   g.save();
   g.fillStyle = '#f5f2e6'; g.fillRect(0, 0, S, S);
   // grid every 10 cm, heavier every 50 cm
-  for (let i = -20; i <= 20; i++) {
+  const nGrid = Math.ceil(BP.span / 0.2) + 1;
+  for (let i = -nGrid; i <= nGrid; i++) {
     const m = i * 0.1;
     g.strokeStyle = i % 5 === 0 ? 'rgba(47,99,176,.22)' : 'rgba(47,99,176,.08)';
     g.lineWidth = i % 5 === 0 ? 2 : 1;
@@ -231,11 +235,12 @@ export function drawBlueprint(g, opts = {}) {
     // length label
     const mid = slotPoint(slot, slot.id.startsWith('diag') ? (slot.id === 'diagA' ? 0.62 : -0.62) : (slot.id.startsWith('leg') ? 0.15 : -0.35));
     let mx = bx(mid[0]), my = by(mid[1]);
-    let off = slot.id.startsWith('leg') ? (slot.centre[0] > 0 ? -44 : 44) : (slot.id === 'topH' ? -30 : slot.id === 'botH' ? 34 : 0);
-    if (slot.id.startsWith('leg')) mx += off; else my += off;
+    const upright = slot.id.startsWith('leg') || slot.id === 'post';
+    let off = upright ? (slot.centre[0] > 0 ? -44 : 44) : (slot.id === 'topH' || slot.id === 'midH' ? -30 : slot.id === 'botH' ? 34 : 0);
+    if (upright) mx += off; else my += off;
     g.save(); g.translate(mx, my);
     let rot = ang; if (rot > Math.PI / 2) rot -= Math.PI; if (rot < -Math.PI / 2) rot += Math.PI;
-    if (slot.id.startsWith('diag')) g.rotate(rot); else if (slot.id.startsWith('leg')) g.rotate(-Math.PI / 2);
+    if (slot.id.startsWith('diag')) g.rotate(rot); else if (upright) g.rotate(-Math.PI / 2);
     g.font = '700 30px Rubik, Arial'; g.textAlign = 'center'; g.direction = 'ltr';
     const label = slot.length.toFixed(1) + ' מ׳';
     g.fillStyle = 'rgba(245,242,230,.9)'; const tw = g.measureText(label).width;
@@ -260,22 +265,33 @@ export function drawBlueprint(g, opts = {}) {
 
   // dimensions
   g.strokeStyle = '#555'; g.fillStyle = '#444'; g.lineWidth = 2; g.font = '500 24px Rubik, Arial'; g.direction = 'rtl';
-  const dimY = by(2.32);
-  arrowLine(g, bx(-1.0), dimY, bx(1.0), dimY);
-  g.textAlign = 'center'; g.fillText('רוחב 2.0 מ׳', S / 2, dimY - 12);
-  const dimX = bx(-1.22);
-  arrowLine(g, dimX, by(0), dimX, by(2.0));
-  g.save(); g.translate(dimX + 30, by(1.0)); g.rotate(Math.PI / 2); g.fillText('גובה 2.0 מ׳', 0, 0); g.restore();
-  const dimX2 = bx(1.2);
-  arrowLine(g, dimX2, by(0), dimX2, by(0.3));
-  g.textAlign = 'left'; g.fillText('30 ס״מ', dimX2 + 10, by(0.15) + 8);
+  // measured from the plan itself: leg to leg, the legs' height, the bottom pole's height
+  const legs = SLOTS.filter(q => q.id.startsWith('leg'));
+  const half = legs.length ? Math.max(...legs.map(q => Math.abs(q.centre[0]))) : 1.0;
+  const high = legs.length ? Math.max(...legs.map(q => q.centre[1] + q.length / 2)) : 2.0;
+  const botV = SLOTS.find(q => q.id === 'botH')?.centre[1] ?? 0.3, midV = SLOTS.find(q => q.id === 'midH')?.centre[1];
+  const fmt = v => `${(Math.round(v * 10) / 10).toFixed(1)} מ׳`;
+  const dimY = by(high + 0.32);
+  arrowLine(g, bx(-half), dimY, bx(half), dimY);
+  g.textAlign = 'center'; g.fillText(`רוחב ${fmt(2 * half)}`, (bx(-half) + bx(half)) / 2, dimY - 12);
+  const dimX = bx(-half - 0.22);
+  arrowLine(g, dimX, by(0), dimX, by(high));
+  g.save(); g.translate(dimX + 30, by(high / 2)); g.rotate(Math.PI / 2); g.fillText(`גובה ${fmt(high)}`, 0, 0); g.restore();
+  const dimX2 = bx(half + 0.2);
+  arrowLine(g, dimX2, by(0), dimX2, by(botV));
+  g.textAlign = 'left'; g.fillText(`${Math.round(botV * 100)} ס״מ`, dimX2 + 10, by(botV / 2) + 8);
+  if (midV != null) {
+    const dimX3 = bx(half + 0.45);
+    arrowLine(g, dimX3, by(0), dimX3, by(midV));
+    g.save(); g.translate(dimX3 - 12, by(midV / 2)); g.rotate(Math.PI / 2); g.textAlign = 'center'; g.fillText(fmt(midV), 0, 0); g.restore();
+  }
 
   // title block
   const tbW = 330, tbH = 104, tx = 24, ty = S - tbH - 24;
   g.fillStyle = 'rgba(245,242,230,.95)'; g.fillRect(tx, ty, tbW, tbH);
   g.strokeStyle = '#2f63b0'; g.lineWidth = 3; g.strokeRect(tx, ty, tbW, tbH);
   g.fillStyle = '#1d2318'; g.textAlign = 'right'; g.direction = 'rtl';
-  g.font = '800 30px Rubik, Arial'; g.fillText('קלף 2×2 · שרטוט קלף', tx + tbW - 14, ty + 40);
+  g.font = '800 30px Rubik, Arial'; g.fillText(opts.title || 'קלף 2×2 · שרטוט קלף', tx + tbW - 14, ty + 40);
   g.font = '500 21px Rubik, Arial'; g.fillStyle = '#4a4a3a';
   g.fillText('מבנה צופי · קנה מידה 1:1', tx + tbW - 14, ty + 70);
   g.fillText('מידות זמניות עד לקבלת שרטוט אמיתי', tx + tbW - 14, ty + 94);
@@ -300,9 +316,19 @@ export function makeBlueprintMesh(joints) {
   m.rotation.set(-Math.PI / 2, 0, Math.PI);
   m.position.set(BP.u0, 0.004, BP.v0);
   m.receiveShadow = true;
+  m.userData = { canvas: c, tex, joints };
   // redraw once the web font has arrived
-  if (document.fonts?.ready) document.fonts.ready.then(() => { drawBlueprint(c.getContext('2d'), { joints }); tex.needsUpdate = true; });
+  if (document.fonts?.ready) document.fonts.ready.then(() => { drawBlueprint(c.getContext('2d'), { joints: m.userData.joints, title: m.userData.title }); tex.needsUpdate = true; });
   return m;
+}
+// draw the current plan on a klaf's sheet again, at the sheet size in BP
+export function redrawBlueprint(m, joints, title) {
+  Object.assign(m.userData, { joints, title });
+  drawBlueprint(m.userData.canvas.getContext('2d'), { joints, title });
+  m.userData.tex.needsUpdate = true;
+  const k = BP.span / BP_BASE.span;
+  m.scale.set(k, k, 1);
+  m.position.x = BP.u0;
 }
 
 // ---------- poles ----------
@@ -519,16 +545,19 @@ export function makeSideSheet() {
 export function drawSideSheet(mesh, cube, side, klafNames, canvas = null) {
   const c = canvas || mesh.userData.canvas;
   // a longer structure (several cubes in a row) gets a longer sheet at the same scale
-  const D = cube.depth, span = cube.span ?? D, spanZ = SIDE.spanZ + (span - D);
-  const H = SIDE.hMax - SIDE.hMin, W = Math.round(SIDE.px * spanZ / SIDE.spanZ), Hp = Math.round(SIDE.px * H / SIDE.spanZ);
+  const D = cube.depth, span = cube.span ?? D, LH = cube.height ?? 2.0;
+  // a bigger cube (the carousel's 5×5) gets a bigger sheet at the same scale
+  const big = D - 1.8;
+  const spanZ = SIDE.spanZ + (span - D) + big, hMax = SIDE.hMax + (LH - 2.0), hMin = SIDE.hMin;
+  const H = hMax - hMin, W = Math.round(SIDE.px * spanZ / SIDE.spanZ), Hp = Math.round(SIDE.px * H / SIDE.spanZ);
   c.width = W; c.height = Hp;
   const g = c.getContext('2d');
   const zMin = span / 2 - spanZ / 2, k = W / spanZ;
   // seen from outside the side: on the left side +z runs right, on the right side it runs left
   const cx = z => side > 0 ? (z - zMin) * k : (zMin + spanZ - z) * k;
-  const cy = h => (SIDE.hMax - h) * k;
+  const cy = h => (hMax - h) * k;
   g.fillStyle = '#f5f2e6'; g.fillRect(0, 0, W, Hp);
-  for (let i = -30; i <= 30; i++) {
+  for (let i = -Math.ceil(spanZ * 5) - 1; i <= Math.max(30, Math.ceil(hMax * 10)); i++) {
     const m = i * 0.1;
     g.strokeStyle = i % 5 === 0 ? 'rgba(47,99,176,.22)' : 'rgba(47,99,176,.08)'; g.lineWidth = i % 5 === 0 ? 2 : 1;
     g.beginPath(); g.moveTo(cx(span / 2 + m), 0); g.lineTo(cx(span / 2 + m), Hp); g.stroke();
@@ -541,8 +570,8 @@ export function drawSideSheet(mesh, cube, side, klafNames, canvas = null) {
   g.font = '700 24px Rubik, Arial'; g.textAlign = 'center'; g.direction = 'rtl';
   klafNames.map((_, i) => i * D).forEach((z, i) => {
     g.fillStyle = 'rgba(120,110,95,.35)'; g.strokeStyle = 'rgba(90,80,70,.7)'; g.lineWidth = 3;
-    g.fillRect(cx(z) - r * k, cy(2.0), 2 * r * k, 2.0 * k); g.strokeRect(cx(z) - r * k, cy(2.0), 2 * r * k, 2.0 * k);
-    g.fillStyle = '#6b5f50'; g.fillText(`רגל ה${klafNames[i]}`, cx(z), cy(2.0) - 14);
+    g.fillRect(cx(z) - r * k, cy(LH), 2 * r * k, LH * k); g.strokeRect(cx(z) - r * k, cy(LH), 2 * r * k, LH * k);
+    g.fillStyle = '#6b5f50'; g.fillText(`רגל ה${klafNames[i]}`, cx(z), cy(LH) - 14);
   });
   // the side poles to add (blue), with their lengths
   const label = (x, y, text, rot = 0) => {
@@ -560,7 +589,7 @@ export function drawSideSheet(mesh, cube, side, klafNames, canvas = null) {
     g.beginPath(); g.rect(0, -w / 2, len, w); g.fill(); g.stroke(); g.restore();
     let rot = ang; if (rot > Math.PI / 2) rot -= Math.PI; if (rot < -Math.PI / 2) rot += Math.PI;
     const t = s.kind === 'd' ? (s.id.includes('dA') ? 0.3 : 0.7) : 0.5;
-    const off = s.kind === 'h' ? (s.centre[1] > 1 ? -26 : 32) : 0;
+    const off = s.kind === 'h' ? (s.centre[1] > 1 ? -26 : 32) : 0; // (labels sit above the upper poles, below the bottom one)
     label(ax + (bx2 - ax) * t, ay + (by2 - ay) * t + off, `${s.length.toFixed(1)} מ׳`, s.kind === 'd' ? rot : 0);
   }
   for (const j of cube.joints.filter(q => q.side === side)) {
@@ -576,9 +605,9 @@ export function drawSideSheet(mesh, cube, side, klafNames, canvas = null) {
   g.fillText(`שרטוט ${side > 0 ? 'הצד השמאלי' : 'הצד הימני'} · מבט מבחוץ`, W / 2, Hp - 24);
   if (mesh) {
     mesh.userData.tex.needsUpdate = true;
-    const hc = (SIDE.hMax + SIDE.hMin) / 2;
-    mesh.position.set(side * (SIDE.x0 + (hc - SIDE.hMin)), 0.006, span / 2);
-    mesh.scale.set(spanZ / SIDE.spanZ, 1, 1);
+    const hc = (hMax + hMin) / 2, x0 = SIDE.x0 + ((cube.legX ?? 0.9) - 0.9);
+    mesh.position.set(side * (x0 + (hc - hMin)), 0.006, span / 2);
+    mesh.scale.set(spanZ / SIDE.spanZ, 1, H / (SIDE.hMax - SIDE.hMin));
     mesh.rotation.set(0, side > 0 ? -Math.PI / 2 : Math.PI / 2, 0);
   }
 }
@@ -599,13 +628,13 @@ export function makeTopSheet() {
 }
 export function drawTopSheet(mesh, cube, klafNames, canvas = null) {
   const c = canvas || mesh.userData.canvas;
-  const D = cube.depth, span = cube.span ?? D, depth = span + 1.0, W = TOP.px, k = W / TOP.w, Hp = Math.round(depth * k);
+  const D = cube.depth, span = cube.span ?? D, depth = span + 1.0, LX = cube.legX ?? 0.9, TW = TOP.w + 2 * (LX - 0.9), W = TOP.px, k = W / TW, Hp = Math.round(depth * k);
   c.width = W; c.height = Hp;
   const g = c.getContext('2d');
   // seen from above with the front klaf at the bottom: +x (the left side) on the left
-  const cx = x => (TOP.w / 2 - x) * k, cy = z => (span + 0.5 - z) * k;
+  const cx = x => (TW / 2 - x) * k, cy = z => (span + 0.5 - z) * k;
   g.fillStyle = '#f5f2e6'; g.fillRect(0, 0, W, Hp);
-  for (let i = -20; i <= 40; i++) {
+  for (let i = -Math.ceil(TW * 5) - 1; i <= Math.ceil(depth * 10) + 1; i++) {
     g.strokeStyle = i % 5 === 0 ? 'rgba(47,99,176,.22)' : 'rgba(47,99,176,.08)'; g.lineWidth = i % 5 === 0 ? 2 : 1;
     g.beginPath(); g.moveTo(cx(i * 0.1), 0); g.lineTo(cx(i * 0.1), Hp); g.stroke();
     g.beginPath(); g.moveTo(0, cy(i * 0.1)); g.lineTo(W, cy(i * 0.1)); g.stroke();
@@ -620,10 +649,11 @@ export function drawTopSheet(mesh, cube, klafNames, canvas = null) {
   g.font = '700 24px Rubik, Arial'; g.textAlign = 'center'; g.direction = 'rtl';
   // the klafim (their top horizontals) and the top side poles, already there (grey)
   klafNames.forEach((name, i) => {
-    bar([1.1, 0, i * D], [-1.1, 0, i * D], 'rgba(120,110,95,.35)', 'rgba(90,80,70,.7)');
+    bar([LX + 0.2, 0, i * D], [-LX - 0.2, 0, i * D], 'rgba(120,110,95,.35)', 'rgba(90,80,70,.7)');
     g.fillStyle = '#6b5f50'; g.fillText(name, cx(0), cy(i * D) + (i === 0 ? 40 : -18));
   });
-  for (const s of cube.slots.filter(q => q.kind === 'h' && q.centre[1] > 1)) {
+  const topY = Math.max(...cube.slots.filter(q => q.kind === 'h' && q.side).map(q => q.centre[1]));
+  for (const s of cube.slots.filter(q => q.kind === 'h' && q.side && q.centre[1] >= topY - 0.01)) {
     const h = s.length / 2;
     bar([s.centre[0], 0, s.centre[2] - h], [s.centre[0], 0, s.centre[2] + h], 'rgba(120,110,95,.25)', 'rgba(90,80,70,.55)');
   }
@@ -643,16 +673,70 @@ export function drawTopSheet(mesh, cube, klafNames, canvas = null) {
     g.beginPath(); g.arc(cx(j.at[0]), cy(j.at[2]), 11, 0, Math.PI * 2); g.fill(); g.stroke();
   }
   g.font = '700 30px Rubik, Arial'; g.fillStyle = '#2f63b0'; g.direction = 'rtl';
-  g.fillText('שרטוט מבט על · בגובה 2 מ׳', W / 2, Hp - 16);
+  g.fillText(cube.sheetTitle || 'שרטוט מבט על · בגובה 2 מ׳', W / 2, Hp - 16);
   g.font = '500 22px Rubik, Arial'; g.fillStyle = '#444';
-  g.fillText('צד שמאל', cx(1.2), 30); g.fillText('צד ימין', cx(-1.2), 30);
+  g.fillText('צד שמאל', cx(LX + 0.3), 30); g.fillText('צד ימין', cx(-LX - 0.3), 30);
   if (mesh) {
     mesh.userData.tex.needsUpdate = true;
     // in front of the front klaf, past the front guy stakes' row
-    mesh.scale.set(TOP.w, 1, depth);
+    mesh.scale.set(TW, 1, depth);
     mesh.rotation.set(0, Math.PI, 0); // its +x drawn on the left, as the pullers see it
-    mesh.position.set(0, 0.006, -(depth / 2 + 2.9));
+    mesh.position.set(0, 0.006, -(depth / 2 + (cube.topSheetGap ?? 2.9)));
   }
+}
+
+// ---------- the carousel's seat drawing ----------
+// The seat (an octagon with a # inside) is built lying on its drawing, on the
+// ground in the middle of the cube, at 1:1, as a klaf is.
+export function makeSeatSheet(seat, centre, size = 3.9) {
+  const px = 1024, k = px / size;
+  const c = document.createElement('canvas'); c.width = c.height = px;
+  const draw = () => {
+    const g = c.getContext('2d');
+    // seen from above, from the front: +x on the left (as the pullers see it), +z up the sheet
+    const cx = x => px / 2 - (x - centre[0]) * k, cy = z => px / 2 - (z - centre[1]) * k;
+    g.fillStyle = '#f5f2e6'; g.fillRect(0, 0, px, px);
+    for (let i = -20; i <= 20; i++) {
+      g.strokeStyle = i % 5 === 0 ? 'rgba(47,99,176,.22)' : 'rgba(47,99,176,.08)'; g.lineWidth = i % 5 === 0 ? 2 : 1;
+      g.beginPath(); g.moveTo(cx(centre[0] + i * 0.1), 0); g.lineTo(cx(centre[0] + i * 0.1), px); g.stroke();
+      g.beginPath(); g.moveTo(0, cy(centre[1] + i * 0.1)); g.lineTo(px, cy(centre[1] + i * 0.1)); g.stroke();
+    }
+    const w = 2 * R * k;
+    for (const sl of seat.slots) {
+      const h = sl.length / 2, a = [sl.centre[0] - sl.dir[0] * h, sl.centre[2] - sl.dir[2] * h], b = [sl.centre[0] + sl.dir[0] * h, sl.centre[2] + sl.dir[2] * h];
+      const ax = cx(a[0]), ay = cy(a[1]), bx2 = cx(b[0]), by2 = cy(b[1]), ang = Math.atan2(by2 - ay, bx2 - ax), len = Math.hypot(bx2 - ax, by2 - ay);
+      g.save(); g.translate(ax, ay); g.rotate(ang);
+      g.fillStyle = sl.plus ? 'rgba(47,99,176,.10)' : 'rgba(47,99,176,.16)'; g.strokeStyle = '#2f63b0'; g.lineWidth = 3;
+      g.beginPath(); g.rect(0, -w / 2, len, w); g.fill(); g.stroke(); g.restore();
+    }
+    // lengths: one label for the octagon's sides, one for the # (they are all alike)
+    const label = (x, y, text) => { g.font = '700 28px Rubik, Arial'; g.direction = 'ltr'; g.textAlign = 'center'; const tw = g.measureText(text).width;
+      g.fillStyle = 'rgba(245,242,230,.92)'; g.fillRect(x - tw / 2 - 6, y - 22, tw + 12, 30); g.fillStyle = '#2f63b0'; g.fillText(text, x, y + 2); };
+    const o = seat.slots.find(q => q.oct === 7), p = seat.slots.find(q => q.plus === 'x');
+    if (o) label(cx(o.centre[0]) + 50, cy(o.centre[2]), `${o.length.toFixed(1)} מ׳`);
+    if (p) label(cx(p.centre[0] - 1.0), cy(p.centre[2]) + 30, `${p.length.toFixed(1)} מ׳`);
+    for (const j of seat.joints) {
+      g.fillStyle = '#f5f2e6'; g.strokeStyle = '#2f63b0'; g.lineWidth = 4;
+      g.beginPath(); g.arc(cx(j.at[0]), cy(j.at[2]), 10, 0, Math.PI * 2); g.fill(); g.stroke();
+    }
+    // the mast's place in the middle square
+    g.strokeStyle = '#c0392b'; g.lineWidth = 3; g.setLineDash([8, 6]);
+    g.beginPath(); g.arc(cx(centre[0]), cy(centre[1]), R * k, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
+    g.fillStyle = '#1d2318'; g.font = '800 30px Rubik, Arial'; g.textAlign = 'center'; g.direction = 'rtl';
+    g.fillText('מושב הקרוסלה · מבט על', px / 2, px - 70);
+    g.font = '500 22px Rubik, Arial'; g.fillStyle = '#4a4a3a';
+    g.fillText('מתומן של 8 סנדות, ובתוכו # של 4 סנדות. התורן עובר בריבוע האמצעי', px / 2, px - 38);
+  };
+  draw();
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+  const geo = new THREE.PlaneGeometry(size, size); geo.rotateX(-Math.PI / 2);
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, transparent: true, opacity: 0, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 }));
+  m.rotation.y = Math.PI; // its +x drawn on the left
+  m.position.set(centre[0], 0.006, centre[1]);
+  m.receiveShadow = true; m.visible = false;
+  if (document.fonts?.ready) document.fonts.ready.then(() => { draw(); tex.needsUpdate = true; });
+  m.userData = { canvas: c, draw };
+  return m;
 }
 
 // ---------- free build: the ground grid a klaf is designed on ----------

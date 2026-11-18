@@ -3,6 +3,7 @@
 // Sizes come from blueprints.js.
 import { SIZES } from './blueprints.js';
 import { LEVEL as KLAF } from './level1.js';
+import { GATE_PLAN, BACK_PLAN, JOIN, CAR, CAR_LEG_V } from './carousel.js';
 
 const K = SIZES.klaf, C = SIZES.cube;
 const r = KLAF.poleRadius;
@@ -137,6 +138,18 @@ export const LEVELS = [
     // where it is built: the legs lie from z0 towards +z, and it stands over `centre`
     klafim: [{ ...SOLO, he: 'חצובה' }], centre: [0, 0.7],
     cube: null,
+  },
+  {
+    // קרוסלה מחנאית on a 5×5×5 cube (Omer, 2026-11-18; see carousel.js)
+    number: 4, name: 'קרוסלה 5×5', tutorial: false, targetTimeSec: 45 * 60, carousel: true, camScale: 2.1,
+    stockExtra: [6.0, 4.0, 3.0, 2.0, 1.2], ropeSpare: 4, crew: 6,
+    klafim: [
+      { ...SOLO, he: 'קלף השער', short: 'א׳', plan: GATE_PLAN, frontDist: CAR.guyDistance, backDist: CAR.innerGuyDistance, pullDist: CAR.guyDistance + 1.4,
+        anchorX: { front: 1.05, back: 0.65 }, inner: 1, extraLegV: CAR_LEG_V, backGripCap: CAR.backGripCap },
+      { ...SOLO, he: 'קלף אחורי', short: 'ב׳', plan: BACK_PLAN, z0: CAR.width, frontDist: CAR.innerGuyDistance, backDist: CAR.guyDistance, pullDist: 2.2,
+        anchorX: { front: 0.65, back: 1.05 }, inner: -1, extraLegV: CAR_LEG_V, backGripCap: CAR.backGripCap },
+    ],
+    cube: JOIN,
   },
 ];
 // The 2×2 cube is no longer a station of its own (Omer, 2026-11-16: station 2 is the

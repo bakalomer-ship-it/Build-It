@@ -27,7 +27,8 @@ export class Actor {
   idleSpot() { return CREW.waitAtSide ? this.home : new THREE.Vector3(OFF_X, 0, this.home.z); }
   // pos: [x, y, z] (y below 0 means kneeling); yaw faces +z at 0
   set(pos, yaw = 0, lean = 0, reach = 0.3, opts = {}) {
-    this.want = { pos: new THREE.Vector3(pos[0], pos[1] || 0, pos[2]), yaw, lean, reach, carry: opts.carry ?? null, snap: !!opts.snap };
+    // lock: follow the spot exactly, wherever it moves (riding the carousel); sit: legs forward
+    this.want = { pos: new THREE.Vector3(pos[0], pos[1] || 0, pos[2]), yaw, lean, reach, carry: opts.carry ?? null, snap: !!opts.snap, lock: !!opts.lock, sit: !!opts.sit };
   }
   clear() { this.want = null; }
   arrived() {
@@ -46,6 +47,7 @@ export class Actor {
       this.pos.copy(w.snap ? w.pos : this.idleSpot()); this.pos.y = 0;
       this.away = false;
     }
+    if (w && w.lock) { this.pos.x = w.pos.x; this.pos.z = w.pos.z; }
     const target = w ? w.pos : this.idleSpot();
     const dx = target.x - this.pos.x, dz = target.z - this.pos.z;
     const dist = Math.hypot(dx, dz);
@@ -65,6 +67,7 @@ export class Actor {
       m.position.set(this.pos.x, w.pos.y, this.pos.z);
       m.rotation.y = w.yaw;
       posePerson(m, w.lean, w.reach);
+      if (w.sit) { m.userData.lL.rotation.x = m.userData.lR.rotation.x = -1.25; }
       return;
     }
     // idle

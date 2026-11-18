@@ -83,7 +83,7 @@ export class CubeSim {
   legParticle(j) {
     const k = this.klafim[j.klaf];
     const leg = k.poleParticles[j.leg]; if (!leg) return null;
-    return k.findParticle(j.leg, j.v - slotById(j.leg).centre[1]);
+    return k.findParticle(j.leg, j.v - k.slotById(j.leg).centre[1]);
   }
   addJoint(j) {
     if (this.jointCons[j.id] || !cubeJointReachable(j, this.cube, this.build.poles)) return false;
@@ -94,7 +94,8 @@ export class CubeSim {
     const diag = this.slot(j.a).kind === 'd';
     // a diagonal's lashings only hold it in place; what braces the cube is the
     // diagonal running from leg to leg, added below once both its ends are lashed
-    this.jointCons[j.id] = W.add('weld', pa, pb, { tag: j.id, compliance: diag ? 2e-3 : 0 });
+    // (the carousel's roof X carries the mast: its lashings hold firm)
+    this.jointCons[j.id] = W.add('weld', pa, pb, { tag: j.id, compliance: diag && !j.carry ? 2e-3 : 0 });
     if (diag && !j.b) this.addBrace(j.a);
     this.releaseHeld();
     if (j.correct === 'square' && !j.b) {
