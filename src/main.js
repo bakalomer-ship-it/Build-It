@@ -2558,7 +2558,8 @@ function score() {
   const accuracy = Math.round(50 * tied / total + 30 * correct / total + 20 * polesOk / nPoles);
   const sec = elapsed();
   const bonus = sec <= LV.targetTimeSec ? 10 : 0;
-  let stars = 1;
+  // Omer (11-19): no stars on any level while a lashing in the drawing is missing
+  let stars = 0;
   if (tied === total) stars = 2;
   if (tied === total && correct === total && accuracy >= LEVEL.threeStarScore) stars = 3;
   // where the missing joints are: drawing sheet and height band, never the joint itself
@@ -3430,4 +3431,4 @@ restart();
 requestAnimationFrame(frame);
 
 // debug hook for automated tests
-window.__game = { get state() { return G; }, triGuide, SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
+window.__game = { get state() { return G; }, triGuide, score: () => score(), SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
