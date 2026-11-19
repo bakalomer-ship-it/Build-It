@@ -152,6 +152,14 @@ export const LEVELS = [
     cube: JOIN,
   },
 ];
+// Free build, tripod (Omer 2026-11-19): the tripod station with no drawing to
+// match. Any leg and brace length from an open pile, the feet go wherever the
+// player puts them, and the מדריך's inspection only says whether it stands.
+export const FREE_TRIPOD = {
+  ...LEVELS.find(l => l.tripod), number: 0, sandbox: true, name: 'חצובה חופשית', targetTimeSec: 0,
+  stockExtra: [2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0].flatMap(l => [l, l, l, l]), ropeSpare: 12,
+};
+
 // The 2×2 cube is no longer a station of its own (Omer, 2026-11-16: station 2 is the
 // 2×4 base). It stays here for the physics tests.
 export const CUBE_LEVEL = {

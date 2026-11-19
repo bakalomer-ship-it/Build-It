@@ -12,7 +12,7 @@ import { FREE_LEVEL, GRID, POLE_MIN, POLE_MAX, layPole, onSheet, idFor, slotFor,
 import { SIZES } from './blueprints.js';
 import { KlafSim, TUNING, jointReachable, guyAnchor, slotById, slotParam, slotPoint, klafToWorld } from './klafSim.js';
 import { CubeSim, cubeSlotPoint, cubeSlotParam, cubeJointReachable } from './cubeSim.js';
-import { LEVELS } from './levels.js';
+import { LEVELS, FREE_TRIPOD } from './levels.js';
 import { CAR, SEAT, SEAT_C, MAST, MAST_JOINTS, HANG_ROPES, PIVOT, CarouselSim, CAR_TUNING, mastReaches, mastTopY, seatY, cornerAt, KLAF_XS } from './carousel.js';
 import { TRI, TRI_SLOTS, TRI_JOINTS, LEG_IDS, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, TRI_TUNING, TripodSim, startFeet, planFeet, standing, braceReaches, fitsPlan } from './tripod.js';
 import {
@@ -25,6 +25,17 @@ import { makeDecor } from './decor.js';
 import { Actor, makeCrew, freeActors, CREW } from './crew.js';
 
 const $ = id => document.getElementById(id);
+// An error on a player's phone shows on screen, so a screenshot tells us what broke
+function reportError(e) {
+  try {
+    let el = document.getElementById('err-box');
+    if (!el) { el = document.createElement('div'); el.id = 'err-box'; el.style.cssText = 'position:fixed;left:8px;bottom:56px;z-index:99;max-width:60vw;padding:6px 10px;border-radius:8px;background:rgba(120,20,10,.9);color:#fff;font:12px/1.3 monospace;direction:ltr;text-align:left;pointer-events:none;white-space:pre-wrap'; document.body.appendChild(el); }
+    const msg = (e && (e.stack || e.message)) || String(e);
+    el.textContent = ('error: ' + msg).slice(0, 400);
+  } catch { /* nothing more to do */ }
+}
+window.addEventListener('error', ev => reportError(ev.error || ev.message));
+window.addEventListener('unhandledrejection', ev => reportError(ev.reason));
 // poles that cross are drawn side by side, just touching (at their drawn thickness)
 const GAP = 2 * R * POLE_LOOK;
 // the level being played (?level=2 in the address opens level 2 directly)
@@ -179,7 +190,7 @@ const triGuide = (() => {
   });
   // the length on each side of the triangle
   const cv = document.createElement('canvas'); cv.width = 256; cv.height = 96;
-  const cx = cv.getContext('2d'); cx.fillStyle = 'rgba(246,234,208,.92)'; cx.beginPath(); cx.roundRect(8, 8, 240, 80, 22); cx.fill();
+  const cx = cv.getContext('2d'); cx.fillStyle = 'rgba(246,234,208,.92)'; cx.fillRect(8, 8, 240, 80);
   cx.fillStyle = '#2f63b0'; cx.font = 'bold 54px Rubik, Arial, sans-serif'; cx.textAlign = 'center'; cx.textBaseline = 'middle';
   cx.fillText(`${TRI.footApart.toFixed(1)} מ׳`, 128, 50);
   const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
@@ -189,7 +200,7 @@ const triGuide = (() => {
   return g;
 })();
 function drawTriGuide() {
-  const on = !!LV.tripod && G.stage === 'spread' && G.tri?.up >= 1 && !G.check && !G.falling;
+  const on = !!LV.tripod && !LV.sandbox && G.stage === 'spread' && G.tri?.up >= 1 && !G.check && !G.falling;
   triGuide.visible = on; if (!on) return;
   const spots = planFeet(triCentre()), feet = G.tri.feet, ok = feetOnPlan();
   const { edges, rings, labels } = triGuide.userData, y = 0.03;
@@ -1030,6 +1041,36 @@ function explainFree(kind) {
   return { rule: 'הקלף לא עמד', detail: 'נסו להוסיף רוחב או אלכסון, או לקצר את הקלף: קלף גבוה וצר קשה יותר להחזיק.', focus };
 }
 // the inspection of a free klaf: it stands or it falls, no stars
+function finishFreeTri() {
+  G.endedAt = performance.now();
+  pushArrow.visible = false;
+  G.result = { stars: 0, free: true };
+  sfx.ok();
+  const st = triState(), t = G.tri;
+  const lens = LEG_IDS.map(id => G.build.poles[id]?.length || 0);
+  const nB = BRACES.filter(q => t.braces[q.id]).length;
+  const nStakes = TRI_STAKE_JOINTS.filter(j => t.stakeJoints[j.id]).length;
+  showModal(`
+    <div class="eyebrow">תוצאות המסדר · חצובה חופשית</div>
+    <h2>החצובה שלכם עומדת!</h2>
+    <ul class="inspect">
+      <li class="ok">עמדה בדחיפות מכל הכיוונים</li>
+      <li class="ok">נשאה את המשקל על הראש</li>
+    </ul>
+    <div class="score-grid">
+      <span>גובה הראש</span><b>${st.height.toFixed(1)} מ׳</b>
+      <span>בין הרגליים</span><b>${st.apart.map(d => d.toFixed(1)).join(' / ')} מ׳</b>
+      <span>רגליים</span><b>${lens.map(l => l.toFixed(1)).join(' / ')} מ׳</b>
+      <span>חיזוקים</span><b>${nB}/3</b>
+      <span>רגליים לבז״נט</span><b>${nStakes}/3</b>
+      <span>זמן</span><b>${fmt(elapsed())}</b>
+    </div>
+  `, [
+    ['לבנות חצובה אחרת', restart, true],
+    ['למסך הבית', () => { closeModal(); showHome(); }],
+  ]);
+  refreshAll();
+}
 function finishFree() {
   G.endedAt = performance.now();
   pushArrow.visible = false;
@@ -1164,7 +1205,7 @@ function collectTriTargets(T) {
   });
 }
 // the three distances between the feet are as in the drawing
-function feetOnPlan() { const st = triState(); return !!st && fitsPlan(st).apart.every(Boolean); }
+function feetOnPlan() { if (LV.sandbox) return true; const st = triState(); return !!st && fitsPlan(st).apart.every(Boolean); }
 // a foot that already has a stake or a brace stays where it is
 const footFixed = i => (G.tri.stakes[TRI_STAKES[i].id] || 0) > 0 || BRACES.some(b => b.legs.includes(i) && G.tri.braces[b.id]);
 // spreading the legs: drag a foot over the ground, and the head follows
@@ -1187,7 +1228,7 @@ canvas.addEventListener('pointermove', e => {
   const far = Math.hypot(x - c[0], z - c[1]); if (far > 4) { x = c[0] + (x - c[0]) * 4 / far; z = c[1] + (z - c[1]) * 4 / far; }
   // close to its spot in the drawing, the foot drops into it
   const spot = planFeet(c)[footDrag.i];
-  if (Math.hypot(x - spot[0], z - spot[1]) < 0.25) { x = spot[0]; z = spot[1]; }
+  if (!LV.sandbox && Math.hypot(x - spot[0], z - spot[1]) < 0.25) { x = spot[0]; z = spot[1]; }
   const next = G.tri.feet.map((f, i) => i === footDrag.i ? [x, z] : f);
   const st = standing(next, triLens());
   if (!st || st.height < 2) return flashHint('<b>הרגליים רחוקות מדי</b>: הראש יורד נמוך מדי');
@@ -1320,6 +1361,7 @@ function triStatus(nPoles, nJ) {
       if (t.raising) return 'הצוות מקים את החצובה…';
       if (t.up < 1) return 'שישה צופים מקימים את החצובה, שניים לכל רגל';
       const st = triState();
+      if (LV.sandbox) return `גובה הראש <b>${st.height.toFixed(1)} מ׳</b> · בין הרגליים <b>${st.apart.map(d => d.toFixed(1)).join(' / ')}</b> מ׳ · גוררים כל רגל לאן שרוצים`;
       if (feetOnPlan()) return `הרגליים במקומן: <b>${TRI.footApart.toFixed(1)} מ׳</b> בין כל שתיים, הראש בגובה <b>${st.height.toFixed(1)} מ׳</b>`;
       return `בין הרגליים <b>${st.apart.map(d => d.toFixed(1)).join(' / ')}</b> מ׳, צריך <b>${TRI.footApart.toFixed(1)}</b> · גוררים כל רגל אל העיגול שלה`;
     }
@@ -2580,6 +2622,7 @@ function finish() {
     return refreshAll();
   }
   if (LV.free) return finishFree();
+  if (LV.sandbox) return finishFreeTri();
   G.endedAt = performance.now();
   pushArrow.visible = false;
   const s = G.result = score();
@@ -2708,9 +2751,10 @@ function makeDisplay(L) {
   }
   const knot = (p, dA, dB, sep) => { const k = makeLashing(); placeLashing(k, p, dA, dB, sep); g.add(k); };
   const N = [0, 0, -1]; // a standing klaf faces the pullers
-  const keepPlan = L.klafim.some(c => c.plan) ? [[...SLOTS], [...JOINTS]] : null;
+  // the plan being played (a tripod, free build, another level) is put back afterwards
+  const keep = { slots: [...SLOTS], joints: [...JOINTS], u: LEG_STAKES.map(q => q.u), h: LEVEL.height };
   for (const cfg of L.klafim) {
-    if (cfg.plan) setPlan(cfg.plan.slots, cfg.plan.joints);
+    if (cfg.plan) setPlan(cfg.plan.slots, cfg.plan.joints); else resetPlan();
     const at = (u, v, slot) => { const p = klafToWorld(u, v, 90); p[2] += cfg.z0; return add3(p, N, slot ? layerOff(slot) : 0); };
     for (const sl of SLOTS) {
       const h = sl.length / 2;
@@ -2745,7 +2789,8 @@ function makeDisplay(L) {
     const rm = new THREE.MeshStandardMaterial({ color: 0xd8b878, roughness: 1 });
     for (let k = 0; k < 8; k++) { const c = cornerAt(k), rr = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 1, 5), rm); placeCylinder(rr, [SEAT_C[0], CAR.seat.ropeHeight, SEAT_C[1]], [c[0], LEVEL.poleRadius + y, c[1]]); g.add(rr); }
   }
-  if (keepPlan) setPlan(keepPlan[0], keepPlan[1]); // back to the plan being played
+  SLOTS.length = 0; SLOTS.push(...keep.slots); JOINTS.length = 0; JOINTS.push(...keep.joints);
+  LEG_STAKES.forEach((q, i) => { q.u = keep.u[i]; }); LEVEL.height = keep.h;
   // centre it on its spot
   const box = new THREE.Box3().setFromObject(g), c = box.getCenter(new THREE.Vector3());
   const outer = new THREE.Group(); g.position.set(-c.x, 0, -c.z); outer.add(g);
@@ -2790,13 +2835,15 @@ const ICONS = {
 };
 const starRow = n => [1, 2, 3].map(i => `<span class="${i <= n ? 'on' : ''}">★</span>`).join('');
 function showHome() {
-  drawPlaza();
+  $('levels').hidden = true; $('home').hidden = false;
+  try { drawPlaza(); } catch (e) { reportError(e); }
   const total = LEVELS.reduce((a, l) => a + starsOf(l.number), 0);
   $('home-stars').textContent = total ? `★ ${total} / ${LEVELS.length * 3}` : 'מתחילים מהקלף הראשון';
   $('levels').hidden = true; $('home').hidden = false;
 }
 function showLevels() {
-  drawPlaza();
+  $('home').hidden = true; $('levels').hidden = false;
+  try { drawPlaza(); } catch (e) { reportError(e); }
   const total = LEVELS.reduce((a, l) => a + starsOf(l.number), 0);
   $('levels-total').textContent = `★ ${total} / ${LEVELS.length * 3}`;
   const path = $('levels-path'); path.innerHTML = '';
@@ -2829,20 +2876,31 @@ function playFree() {
   makeChips();
   restart();
 }
-$('home-free').addEventListener('click', playFree);
-decor = makeDecor({
+function playFreeTripod() {
+  closeModal();
+  $('home').hidden = true; $('levels').hidden = true;
+  LV = FREE_TRIPOD;
+  STAGES = stageList();
+  makeChips();
+  restart();
+}
+$('home-free').addEventListener('click', () => showModal(`<div class="eyebrow">בנייה חופשית</div><h2>מה בונים?</h2>
+  <p><b>קלפים</b>: מתכננים קלף על הרשת, מרימים ומחברים.</p><p><b>חצובה</b>: בוחרים אורך לרגליים ולחיזוקים, ומעמידים את הרגליים איפה שרוצים.</p>`,
+  [['קלפים', () => { closeModal(); playFree(); }, true], ['חצובה', playFreeTripod, true], ['ביטול', closeModal]]));
+// the top buttons are wired before anything else here can fail
+$('levels-back').addEventListener('click', showHome);
+$('btn-home').addEventListener('click', () => { closeModal(); showHome(); });
+$('btn-level').addEventListener('click', () => { closeModal(); showLevels(); });
+try { decor = makeDecor({
   scene, camera, controls, canvas, allOpen: ALL_LEVELS_OPEN,
   stars: () => LEVELS.reduce((a, l) => a + starsOf(l.number), 0),
   onExit: () => { camMode = null; showHome(); },
-});
+}); } catch (e) { reportError(e); }
 $('home-decor').addEventListener('click', () => {
   $('home').hidden = true; $('levels').hidden = true;
   closeModal(); closePicker(); camTween = null; closeup = null; camMode = null;
   decor.enter();
 });
-$('levels-back').addEventListener('click', showHome);
-$('btn-home').addEventListener('click', () => { closeModal(); showHome(); });
-$('btn-level').addEventListener('click', () => { closeModal(); showLevels(); });
 // a direct link to a level (?level=2) skips the home screen
 if (new URLSearchParams(location.search).get('level')) $('home').hidden = true; else showHome();
 
@@ -3431,4 +3489,4 @@ restart();
 requestAnimationFrame(frame);
 
 // debug hook for automated tests
-window.__game = { get state() { return G; }, triGuide, score: () => score(), SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
+window.__game = { get state() { return G; }, triGuide, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, score: () => score(), SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
