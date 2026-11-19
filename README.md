@@ -68,3 +68,12 @@ The seat and mast are their own small physics world (`CarouselSim`), hung from a
 - Beyond a single klaf, the structure is tested only in the final check. If any required X is missing or not fully lashed, the Xs that were built work loose when the guy lines come down (`CubeSim.unbrace`), and the structure falls with the rule explained.
 - A klaf can be raised only with all 6 crew assigned and at their posts.
 - Look follows Omer's reference images: a larger sand plaza in a forest clearing, a narrow-lens three-quarter camera, stocky scouts in green caps, wooden UI panels.
+
+## Building from your own drawing
+
+The home screen's "בנייה לפי שרטוט" uploads a PDF (up to 8 pages) or a picture.
+Its pages open as the structure folder of a free-build plaza; the game does not
+read the drawing, and the inspection only says whether the structure stands
+(src/sketch.js). PDFs are drawn with pdfjs-dist 3.11.174, bundled into the
+single-file build, with `isEvalSupported: false`. The drawing lasts for the
+visit only.

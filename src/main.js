@@ -13,6 +13,7 @@ import { SIZES } from './blueprints.js';
 import { KlafSim, TUNING, jointReachable, guyAnchor, slotById, slotParam, slotPoint, klafToWorld } from './klafSim.js';
 import { CubeSim, cubeSlotPoint, cubeSlotParam, cubeJointReachable } from './cubeSim.js';
 import { LEVELS, FREE_TRIPOD } from './levels.js';
+import { loadSketch } from './sketch.js';
 import { CAR, SEAT, SEAT_C, MAST, MAST_JOINTS, HANG_ROPES, PIVOT, CarouselSim, CAR_TUNING, mastReaches, mastTopY, seatY, cornerAt, KLAF_XS } from './carousel.js';
 import { TRI, TRI_SLOTS, TRI_JOINTS, LEG_IDS, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, TRI_TUNING, TripodSim, startFeet, planFeet, standing, braceReaches, fitsPlan } from './tripod.js';
 import {
@@ -408,8 +409,8 @@ function makeChips() {
     stagesEl.appendChild(b);
   });
   $('level-name').textContent = LV.name;
-  $('level-no').textContent = LV.free ? 'ארגז חול' : `שלב ${LV.number}`;
-  $('btn-folder').hidden = !!LV.free;
+  $('level-no').textContent = LV.sketch ? 'לפי שרטוט' : LV.free ? 'ארגז חול' : `שלב ${LV.number}`;
+  $('btn-folder').hidden = !!LV.free && !LV.sketch;
 }
 makeChips();
 // stageDone('anchor') asks about the current klaf; a key like 'anchor:1' names the klaf
@@ -2869,13 +2870,27 @@ function playLevel(n) {
   switchLevel(n);
 }
 $('home-plaza').addEventListener('click', showLevels);
-function playFree() {
+function playFree(lv = FREE_LEVEL) {
   $('home').hidden = true; $('levels').hidden = true;
-  LV = FREE_LEVEL;
+  LV = lv;
   STAGES = stageList();
   makeChips();
   restart();
 }
+$('home-sketch').addEventListener('click', () => { $('sketch-file').value = ''; $('sketch-file').click(); });
+$('sketch-file').addEventListener('change', async () => {
+  const file = $('sketch-file').files?.[0]; if (!file) return;
+  showModal('<h2>טוענים את השרטוט…</h2><p>רגע, מכינים את העמודים לתיק המבנה.</p>', []);
+  try {
+    const sk = await loadSketch(file);
+    closeModal();
+    playFree({ ...FREE_LEVEL, sketch: sk, name: sk.name.slice(0, 28) || 'השרטוט שלי' });
+    openFolder();
+  } catch (e) {
+    infoCard('לא הצלחנו לפתוח את הקובץ', e?.message === 'not-a-drawing' ? 'אפשר להעלות קובץ PDF או תמונה (JPG, PNG).' : 'הקובץ לא נפתח. נסו קובץ PDF אחר, או צילום של השרטוט כתמונה.');
+    reportError(e);
+  }
+});
 function playFreeTripod() {
   closeModal();
   $('home').hidden = true; $('levels').hidden = true;
@@ -3044,6 +3059,7 @@ function setPolesOpacity(o) {
 // through. The work order and the lashing guide are part of the first
 // structure's tutorial only.
 function folderTabs() {
+  if (LV.sketch) return LV.sketch.pages.map((_, i) => [`sk${i}`, LV.sketch.pages.length > 1 ? `עמוד ${i + 1}` : 'השרטוט']);
   if (LV.tripod) return [['drawing', 'שרטוט החצובה'], ['poles', 'רשימת סנדות']];
   if (LV.carousel) return [['klaf0', 'קלף השער'], ['klaf1', 'הקלף האחורי'], ['sideR', 'הצד הימני'], ['sideL', 'הצד השמאלי'], ['top', 'מבט על (הגג)'], ['seat', 'המושב והתורן'], ['poles', 'רשימת סנדות']];
   if (LV.cube) return [['drawing', 'שרטוט קלף'], ['sideR', 'שרטוט הצד הימני'], ['sideL', 'שרטוט הצד השמאלי'], ['top', 'שרטוט מבט על'], ['poles', 'רשימת סנדות']];
@@ -3097,14 +3113,20 @@ function poleTable() {
     ${rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('')}</tbody></table>
     <p class="note">המידות זמניות, עד שיגיעו שרטוטים אמיתיים.</p>`;
 }
-function openFolder(tab = LV.carousel ? 'klaf0' : 'drawing') {
+function openFolder(tab = LV.sketch ? 'sk0' : LV.carousel ? 'klaf0' : 'drawing') {
+  document.querySelector('#folder .folder-head h2').textContent = LV.name;
   const tabs = $('folder-tabs'); tabs.innerHTML = '';
   for (const [id, he] of folderTabs()) {
     const b = document.createElement('button'); b.type = 'button'; b.textContent = he; b.className = id === tab ? 'on' : '';
     b.addEventListener('click', () => openFolder(id)); tabs.appendChild(b);
   }
   const body = $('folder-body'); body.innerHTML = '';
-  if (tab === 'drawing') {
+  if (tab.startsWith('sk') && LV.sketch) {
+    const pg = LV.sketch.pages[+tab.slice(2)], img = document.createElement('img');
+    img.src = pg.url; img.alt = LV.sketch.name; img.style.cssText = 'width:100%;display:block;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.15)';
+    body.appendChild(img);
+    body.insertAdjacentHTML('beforeend', `<p class="note">בונים לפי השרטוט על הרשת של הבנייה החופשית. המשחק לא קורא את השרטוט: המדריך בודק רק שהמבנה עומד.${LV.sketch.more ? ' מוצגים 8 העמודים הראשונים.' : ''}</p>`);
+  } else if (tab === 'drawing') {
     const c = document.createElement('canvas'); c.width = c.height = BP.size;
     if (LV.tripod) drawTripodFolder(c, TRI); else
     drawBlueprint(c.getContext('2d'), { joints: JOINTS });
