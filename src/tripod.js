@@ -85,7 +85,7 @@ export function braceReaches(st, brace, length) {
 export function fitsPlan(st) {
   return {
     height: Math.abs(st.height - TRI.height) <= 0.1,
-    apart: st.apart.map(d => Math.abs(d - TRI.footApart) <= 0.15),
+    apart: st.apart.map(d => Math.abs(d - TRI.footApart) <= 0.1),
   };
 }
 

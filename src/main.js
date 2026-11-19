@@ -168,6 +168,42 @@ for (const id of [...LEG_IDS, ...BRACES.map(b => b.id)]) {
 const triStakeMeshes = TRI_STAKES.map(() => { const m = makeStake(TRI.stakeLength); m.visible = false; scene.add(m); return m; });
 const triSheet = makeTripodSheet({ slots: TRI_SLOTS, lashV: TRI_JOINTS[0].at[1], legLength: TRI.legLength });
 scene.add(triSheet);
+// guide lines for spreading the tripod: where each foot goes, and the distance between every two feet
+const triGuide = (() => {
+  const g = new THREE.Group(); g.visible = false;
+  const lineMat = new THREE.MeshBasicMaterial({ color: 0x2f63b0, transparent: true, opacity: 0.85, depthWrite: false });
+  g.userData.edges = [0, 1, 2].map(() => { const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.07), lineMat); m.rotation.x = -Math.PI / 2; g.add(m); return m; });
+  g.userData.rings = [0, 1, 2].map(() => {
+    const m = new THREE.Mesh(new THREE.RingGeometry(0.26, 0.34, 40), new THREE.MeshBasicMaterial({ color: 0x2f63b0, transparent: true, opacity: 0.9, depthWrite: false }));
+    m.rotation.x = -Math.PI / 2; g.add(m); return m;
+  });
+  // the length on each side of the triangle
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 96;
+  const cx = cv.getContext('2d'); cx.fillStyle = 'rgba(246,234,208,.92)'; cx.beginPath(); cx.roundRect(8, 8, 240, 80, 22); cx.fill();
+  cx.fillStyle = '#2f63b0'; cx.font = 'bold 54px Rubik, Arial, sans-serif'; cx.textAlign = 'center'; cx.textBaseline = 'middle';
+  cx.fillText(`${TRI.footApart.toFixed(1)} מ׳`, 128, 50);
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  g.userData.labels = [0, 1, 2].map(() => { const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false })); m.scale.set(1.0, 0.38, 1); m.renderOrder = 5; g.add(m); return m; });
+  g.renderOrder = 2;
+  scene.add(g);
+  return g;
+})();
+function drawTriGuide() {
+  const on = !!LV.tripod && G.stage === 'spread' && G.tri?.up >= 1 && !G.check && !G.falling;
+  triGuide.visible = on; if (!on) return;
+  const spots = planFeet(triCentre()), feet = G.tri.feet, ok = feetOnPlan();
+  const { edges, rings, labels } = triGuide.userData, y = 0.03;
+  spots.forEach((p, i) => {
+    const q = spots[(i + 1) % 3], dx = q[0] - p[0], dz = q[1] - p[1], L = Math.hypot(dx, dz);
+    const e = edges[i]; e.position.set((p[0] + q[0]) / 2, y, (p[1] + q[1]) / 2); e.scale.x = L - 0.68; e.rotation.z = -Math.atan2(dz, dx);
+    const c = triCentre(), mx = (p[0] + q[0]) / 2, mz = (p[1] + q[1]) / 2, o = norm2(mx - c[0], mz - c[1]);
+    labels[i].position.set(mx + o[0] * 0.35, 0.2, mz + o[2] * 0.35);
+    const on = Math.hypot(feet[i][0] - p[0], feet[i][1] - p[1]) < 0.05;
+    rings[i].position.set(p[0], y, p[1]);
+    rings[i].material.color.setHex(on ? 0x3f8a2e : 0xe0a93b);
+  });
+  edges[0].material.color.setHex(ok ? 0x3f8a2e : 0x2f63b0);
+}
 // a lashing's coils (made the first time a joint needs them: free build has joints of its own)
 function lashMesh(id) {
   if (!lashMeshes[id]) { const g = makeLashing(); g.visible = false; scene.add(g); lashMeshes[id] = g; }
@@ -374,7 +410,7 @@ function stageDone(key) {
   if (id === 'seat') return !!G.seat && seatPolesIn() && SEAT.joints.every(j => G.seat.build.joints[j.id]);
   if (id === 'hang') return !!G.seat && hangReady();
   if (id === 'unguy') return !!G.cube && G.klafim.every((k, i) => GUYS.every(g => !innerSide(k.cfg, g) || k.build.guyOff[g.id]));
-  if (id === 'spread') return !!G.tri && G.tri.up >= 1;
+  if (id === 'spread') return !!G.tri && G.tri.up >= 1 && feetOnPlan();
   if (id === 'brace') return !!G.tri && G.tri.up >= 1 && BRACES.every(q => G.tri.braces[q.id]) && BRACE_JOINTS.every(q => G.tri.joints[q.id])
     && TRI_STAKES.every(q => (G.tri.stakes[q.id] || 0) >= TRI_STAKE_HITS) && TRI_STAKE_JOINTS.every(q => G.tri.stakeJoints[q.id]);
   const b = G.build;
@@ -422,6 +458,7 @@ function goStage(key) {
   } else if (LV.tripod) {
     if (!stageDone('build')) { infoCard('קודם כופתים את החצובה על הקרקע', 'מניחים שלוש רגליים זו לצד זו וכופתים אותן יחד ליד הראש. רק אז אפשר להקים.'); return; }
     if (id !== 'spread' && G.tri.up < 1) { infoCard('קודם מקימים את החצובה', 'חיזוקים ובז״נטים מוסיפים לחצובה שכבר עומדת, כשהרגליים שלה במקומן.'); return; }
+    if (id !== 'spread' && !feetOnPlan()) { infoCard('קודם מעמידים את הרגליים במקומן', `בשרטוט יש ${TRI.footApart.toFixed(1)} מ׳ בדיוק בין כל שתי רגליים. גוררים כל רגל אל העיגול שלה על הקרקע.`); return; }
     selectPole(null); G.tri.sim = null;
   } else {
     selectPole(null); if (!G.sim) startSim();
@@ -1126,6 +1163,8 @@ function collectTriTargets(T) {
     T.push({ kind: t.stakeJoints[sj.id] ? 'tsjd' : 'tsj', id: sj.id, pos: [(p[0] + x) / 2, p[1], (p[2] + z) / 2], show: !t.stakeJoints[sj.id] });
   });
 }
+// the three distances between the feet are as in the drawing
+function feetOnPlan() { const st = triState(); return !!st && fitsPlan(st).apart.every(Boolean); }
 // a foot that already has a stake or a brace stays where it is
 const footFixed = i => (G.tri.stakes[TRI_STAKES[i].id] || 0) > 0 || BRACES.some(b => b.legs.includes(i) && G.tri.braces[b.id]);
 // spreading the legs: drag a foot over the ground, and the head follows
@@ -1146,6 +1185,9 @@ canvas.addEventListener('pointermove', e => {
   const c = triCentre(), snap = v => Math.round(v * 10) / 10;
   let x = snap(p.x), z = snap(p.z);
   const far = Math.hypot(x - c[0], z - c[1]); if (far > 4) { x = c[0] + (x - c[0]) * 4 / far; z = c[1] + (z - c[1]) * 4 / far; }
+  // close to its spot in the drawing, the foot drops into it
+  const spot = planFeet(c)[footDrag.i];
+  if (Math.hypot(x - spot[0], z - spot[1]) < 0.25) { x = spot[0]; z = spot[1]; }
   const next = G.tri.feet.map((f, i) => i === footDrag.i ? [x, z] : f);
   const st = standing(next, triLens());
   if (!st || st.height < 2) return flashHint('<b>הרגליים רחוקות מדי</b>: הראש יורד נמוך מדי');
@@ -1166,6 +1208,7 @@ function layTripod() { G.tri = freshTri(); triCache = null; G.check = null; G.re
 // six scouts, two to a leg
 const TRI_CREW = ['baseL', 'baseR', 'lift1', 'lift2', 'guyG1', 'guyG2'];
 function drawTripod(dt) {
+  drawTriGuide();
   const on = !!LV.tripod, t = G.tri;
   const show = on && G.stage === 'build' && !stageDone('build');
   triSheet.material.opacity = Math.max(0, Math.min(0.96, triSheet.material.opacity + (show ? 1 : -1) * dt / 0.4));
@@ -1259,9 +1302,11 @@ function scoreTripod() {
   const shape = { ok: fitN === 4, text: fitN === 4 ? 'הגובה והמרחקים בין הרגליים כמו בשרטוט' : `לא בדיוק לפי השרטוט: גובה ${st.height.toFixed(1)} מ׳, בין הרגליים ${st.apart.map(d => d.toFixed(1)).join(' / ')} מ׳` };
   const accuracy = Math.round(40 * tied / total + 25 * correct / total + 15 * polesOk / nPoles + 20 * fitN / 4);
   const sec = elapsed(), bonus = sec <= LV.targetTimeSec ? 10 : 0;
-  let stars = 1;
+  // Omer (11-19): no stars while any lashing in the drawing is missing
+  let stars = 0;
   if (tied === total) stars = 2;
   if (tied === total && correct === total && accuracy >= LEVEL.threeStarScore) stars = 3;
+  if (stars && !shape.ok) stars = 1;
   const groups = {};
   for (const [j, v] of all) if (!v) { const key = sheetOf(j); groups[key] = (groups[key] || 0) + 1; }
   const hintsAllowed = Math.max(1, Math.floor(total / 10)), hintCost = Math.round(40 / total), penalty = G.hintsUsed * hintCost;
@@ -1275,7 +1320,8 @@ function triStatus(nPoles, nJ) {
       if (t.raising) return 'הצוות מקים את החצובה…';
       if (t.up < 1) return 'שישה צופים מקימים את החצובה, שניים לכל רגל';
       const st = triState();
-      return `גובה הראש <b>${st.height.toFixed(1)} מ׳</b> · בין הרגליים <b>${st.apart.map(d => d.toFixed(1)).join(' / ')}</b> מ׳ · גוררים כל רגל למקומה`;
+      if (feetOnPlan()) return `הרגליים במקומן: <b>${TRI.footApart.toFixed(1)} מ׳</b> בין כל שתיים, הראש בגובה <b>${st.height.toFixed(1)} מ׳</b>`;
+      return `בין הרגליים <b>${st.apart.map(d => d.toFixed(1)).join(' / ')}</b> מ׳, צריך <b>${TRI.footApart.toFixed(1)}</b> · גוררים כל רגל אל העיגול שלה`;
     }
     case 'brace': {
       const n = BRACES.filter(q => t.braces[q.id]).length, j = BRACE_JOINTS.filter(q => t.joints[q.id]).length;
@@ -2136,7 +2182,7 @@ function refreshActions() {
   if (LV.tripod) {
     if (G.stage === 'build' && stageDone('build')) go('המשך להקמה');
     if (G.stage === 'spread' && G.tri.up <= 0 && !G.tri.raising) add('מקימים את החצובה', raiseTripod);
-    if (G.stage === 'spread' && G.tri.up >= 1) go('המשך לחיזוקים');
+    if (G.stage === 'spread' && G.tri.up >= 1 && feetOnPlan()) go('המשך לחיזוקים');
     if (G.stage === 'brace') go('למסדר המדריך');
     if (G.stage === 'check' && !G.check) add('קוראים למדריך למסדר', runCheck);
     return;
@@ -2543,7 +2589,7 @@ function finish() {
   const missing = nMissing ? (nMissing === 1 ? 'כפיתה אחת חסרה במבנה.' : `${nMissing} כפיתות חסרות במבנה.`) : '';
   showModal(`
     <div class="eyebrow">תוצאות המסדר</div>
-    <h2>${s.stars === 3 ? 'בנייה מושלמת!' : 'עברתם את השלב'}</h2>
+    <h2>${s.stars === 3 ? 'בנייה מושלמת!' : s.stars ? 'עברתם את השלב' : 'עוד לא עברתם את השלב'}</h2>
     <div class="stars">${stars}</div>
     <ul class="inspect">
       <li class="ok">${LV.tripod ? 'החצובה עמדה' : LV.carousel ? 'מסגרת הקרוסלה עמדה' : LV.cube ? 'הקובייה עמדה' : 'הקלף עמד'} בדחיפות מכל הכיוונים${LV.cube ? ', גם בלי יתרים' : ''}</li>
@@ -2565,11 +2611,11 @@ function finish() {
     </div>
     ${missing ? `<p>${missing} אפשר לחפש לבד בתיק המבנה, או לקחת רמז.</p>` : ''}
     ${s.wrong ? `<p>${s.wrong === 1 ? 'כפיתה אחת כפותה' : `${s.wrong} כפיתות כפותות`} בסוג לא נכון. זה מוריד ניקוד, אבל לא מפיל את המבנה.</p>` : ''}
-    ${s.stars < 3 ? '<p>אפשר לחזור, להשלים ולתקן, ולשפר את הכוכבים.</p>' : ''}
+    ${!s.stars ? '<p>המבנה עמד, אבל חסרות בו כפיתות שבשרטוט, ולכן אין כוכבים. משלימים את כל החיבורים ומזמינים שוב את המדריך.</p>' : s.stars < 3 ? '<p>אפשר לחזור, להשלים ולתקן, ולשפר את הכוכבים.</p>' : ''}
   `, [
     s.stars < 3 ? ['להשלים ולתקן', reopenForFixes, true] : null,
     s.stars < 3 && G.hintsUsed < s.hintsAllowed && G.result ? [`רמז (${s.hintsAllowed - G.hintsUsed} נותרו, −${s.hintCost} נק׳)`, () => useHint(s)] : null,
-    LEVELS[LV.number] ? [`לשלב ${LV.number + 1}: ${LEVELS[LV.number].name}`, () => switchLevel(LV.number + 1), s.stars === 3] : null,
+    LEVELS[LV.number] && s.stars ? [`לשלב ${LV.number + 1}: ${LEVELS[LV.number].name}`, () => switchLevel(LV.number + 1), s.stars === 3] : null,
     ['למגרש שלי', () => { closeModal(); showLevels(); }, s.stars === 3 && !LEVELS[LV.number]],
     ['לבנות מחדש', restart],
   ].filter(Boolean));
@@ -2794,7 +2840,7 @@ $('home-decor').addEventListener('click', () => {
   decor.enter();
 });
 $('levels-back').addEventListener('click', showHome);
-$('btn-home').addEventListener('click', () => { closeModal(); showLevels(); });
+$('btn-home').addEventListener('click', () => { closeModal(); showHome(); });
 $('btn-level').addEventListener('click', () => { closeModal(); showLevels(); });
 // a direct link to a level (?level=2) skips the home screen
 if (new URLSearchParams(location.search).get('level')) $('home').hidden = true; else showHome();
@@ -3384,4 +3430,4 @@ restart();
 requestAnimationFrame(frame);
 
 // debug hook for automated tests
-window.__game = { get state() { return G; }, SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
+window.__game = { get state() { return G; }, triGuide, SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
