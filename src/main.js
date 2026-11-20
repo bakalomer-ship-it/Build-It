@@ -12,7 +12,7 @@ import { FREE_LEVEL, GRID, POLE_MIN, POLE_MAX, layPole, onSheet, idFor, slotFor,
 import { SIZES } from './blueprints.js';
 import { KlafSim, TUNING, jointReachable, guyAnchor, slotById, slotParam, slotPoint, klafToWorld } from './klafSim.js';
 import { CubeSim, cubeSlotPoint, cubeSlotParam, cubeJointReachable } from './cubeSim.js';
-import { LEVELS, FREE_TRIPOD } from './levels.js';
+import { LEVELS } from './levels.js';
 import { loadSketch } from './sketch.js';
 import { CAR, SEAT, SEAT_C, MAST, MAST_JOINTS, HANG_ROPES, PIVOT, CarouselSim, CAR_TUNING, mastReaches, mastTopY, seatY, cornerAt, KLAF_XS } from './carousel.js';
 import { TRI, TRI_SLOTS, TRI_JOINTS, LEG_IDS, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, TRI_TUNING, TripodSim, startFeet, planFeet, standing, braceReaches, fitsPlan, setLashFor } from './tripod.js';
@@ -47,6 +47,9 @@ const GAP = 2 * R * POLE_LOOK;
 let LV = LEVELS[0];
 try { const n = +new URLSearchParams(location.search).get('level'); if (n >= 1 && n <= LEVELS.length) LV = LEVELS[n - 1]; } catch { /* no address here */ }
 const KLAF_STAGES = [['build', 'בניית הקלף'], ['stakes', 'בז״נטים'], ['raise', 'הרמה'], ['anchor', 'עיגון']];
+// a tripod in free build, beside the klafim (Omer, 2026-11-20): built on the ground with them, stood up in its turn
+const TRI_STAGES = [['build', 'הרגליים וכפיתת החצובה'], ['spread', 'הקמה ופישוק'], ['brace', 'חיזוקים ובז״נטים']];
+const stagesOf = k => k.kind === 'tripod' ? TRI_STAGES : KLAF_STAGES;
 function stageList() {
   const L = [];
   if (LV.tripod) return [
@@ -58,8 +61,8 @@ function stageList() {
   // Omer (2026-11-15): first every klaf is built on the ground, then they are raised
   // one by one (stakes, raise, anchor), and only then joined
   const st = ([id, he], k, i) => L.push({ key: LV.klafim.length > 1 ? `${id}:${i}` : id, id, k: i, he: LV.klafim.length > 1 ? `${he}, ${k.he}` : he });
-  LV.klafim.forEach((k, i) => st(KLAF_STAGES[0], k, i));
-  LV.klafim.forEach((k, i) => KLAF_STAGES.slice(1).forEach(s => st(s, k, i)));
+  LV.klafim.forEach((k, i) => st(stagesOf(k)[0], k, i));
+  LV.klafim.forEach((k, i) => stagesOf(k).slice(1).forEach(s => st(s, k, i)));
   if (LV.cube) {
     L.push({ key: 'cube', id: 'cube', k: null, he: 'חיבור הקלפים לקובייה' });
     L.push({ key: 'unguy', id: 'unguy', k: null, he: 'הורדת היתרים הפנימיים' });
@@ -84,7 +87,11 @@ function freshKlaf(cfg) {
     cfg,
     build: { poles: {}, joints: {}, stakes: {}, guyTop: {}, anchors: {}, stakeJoints: {}, guyTies: {}, guyOff: {}, crew: {} },
     sim: null, raisedOnce: false, uprightFor: 0, carrying: {},
-    plan: { slots: [], joints: [] }, // free build: this klaf's own design
+    // the tripod once it leaves the ground: how far up it is (0 lying … 1 standing), where its
+    // feet stand, and what has been added to it
+    tri: LV.tripod || cfg.kind === 'tripod' ? freshTri() : null,
+    // free build: this klaf's own design (a tripod's is the tripod's plan)
+    plan: cfg.kind === 'tripod' ? { slots: TRI_SLOTS, joints: TRI_JOINTS } : { slots: [], joints: [] },
   };
 }
 function freshState() {
@@ -92,9 +99,6 @@ function freshState() {
     stage: 'build', stageKey: STAGES[0].key,
     ki: 0, klafim: LV.klafim.map(freshKlaf),
     cube: LV.cube ? { build: { poles: {}, joints: {} }, sim: null, carrying: {} } : null,
-    // the tripod once it leaves the ground: how far up it is (0 lying … 1 standing), where its
-    // feet stand, and what has been added to it
-    tri: LV.tripod ? { up: 0, raising: false, feet: null, braces: {}, joints: {}, stakes: {}, stakeJoints: {}, sim: null } : null,
     // the carousel's seat: built on the ground (build), lifted (lift 0 … 1), and hung from the mast
     seat: LV.carousel ? freshSeat() : null,
     tying: null,
@@ -107,7 +111,7 @@ function freshState() {
     hintsUsed: 0, hinted: [],
   };
   // the current klaf's state, read and written through G as before
-  for (const key of ['build', 'sim', 'raisedOnce', 'uprightFor', 'carrying'])
+  for (const key of ['build', 'sim', 'raisedOnce', 'uprightFor', 'carrying', 'tri'])
     Object.defineProperty(s, key, { get() { return this.klafim[this.ki][key]; }, set(v) { this.klafim[this.ki][key] = v; } });
   return s;
 }
@@ -117,6 +121,13 @@ function freshSeat() {
 G = freshState();
 const K = () => G.klafim[G.ki];
 const z0 = () => K().cfg.z0;
+// the current structure is a tripod: the tripod station, or a tripod of free build
+const freeTri = () => !!LV.free && K()?.cfg.kind === 'tripod';
+const triOn = () => !!LV.tripod || freeTri();
+// a klaf of free build (designed on the grid)
+const freeKlaf = () => !!LV.free && !freeTri();
+// no drawing to follow: the feet go anywhere
+const triLoose = () => !!(LV.sandbox || LV.free);
 
 // ---------------- three.js setup ----------------
 const canvas = $('scene');
@@ -139,7 +150,7 @@ controls.enabled = false;
 
 // each klaf has its own set of meshes; useKlaf(i) points these names at klaf i's set
 let blueprint, poleMeshes, lashMeshes, stakeMeshes, guyRopes;
-const MAX_KLAFIM = Math.max(3, ...LEVELS.map(l => l.klafim.length));
+const MAX_KLAFIM = Math.max(4, ...LEVELS.map(l => l.klafim.length));
 const KM = [];
 for (let k = 0; k < MAX_KLAFIM; k++) {
   const m = { poles: {}, lash: {}, stakes: {}, ropes: {} };
@@ -178,12 +189,14 @@ const freeGrid = makeFreeGrid(GRID);
 freeGrid.userData.z = freeGrid.position.z;
 scene.add(freeGrid);
 // the tripod's legs and braces, its stakes, and the sheet its legs are laid on
-for (const id of [...LEG_IDS, ...BRACES.map(b => b.id)]) {
-  const a = makePoleMesh(0.5), b = makePoleMesh(0);
-  b.material = a.material; scene.add(a, b); a.visible = b.visible = false;
-  KM[0].poles[id] = [a, b];
+for (const m of KM) {
+  for (const id of [...LEG_IDS, ...BRACES.map(b => b.id)]) {
+    const a = makePoleMesh(0.5), b = makePoleMesh(0);
+    b.material = a.material; scene.add(a, b); a.visible = b.visible = false;
+    m.poles[id] = [a, b];
+  }
+  m.triStakes = TRI_STAKES.map(() => { const s = makeStake(TRI.stakeLength); s.visible = false; scene.add(s); return s; });
 }
-const triStakeMeshes = TRI_STAKES.map(() => { const m = makeStake(TRI.stakeLength); m.visible = false; scene.add(m); return m; });
 const triSheet = makeTripodSheet({ slots: TRI_SLOTS, lashV: TRI_JOINTS[0].at[1], legLength: TRI.legLength });
 scene.add(triSheet);
 // guide lines for spreading the tripod: where each foot goes, and the distance between every two feet
@@ -348,7 +361,7 @@ function visNormal() {
   return n ? [-n[0], -n[1], -n[2]] : [0, 1, 0];
 }
 function poleSegs(sid) {
-  if (LV.tripod && G.tri.up > 0) return triLegSegs(sid);
+  if (triOn() && G.tri.up > 0) return triLegSegs(sid);
   const slot = slotById(sid);
   const off = layerOff(slot);
   if (G.sim) {
@@ -368,7 +381,7 @@ function poleDir(sid) {
   return [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
 }
 function jointPos(j) {
-  if (LV.tripod && G.tri.up > 0) return triApex();
+  if (triOn() && G.tri.up > 0) return triApex();
   const off = (layerOff(slotById(j.a)) + layerOff(slotById(j.b))) / 2;
   if (G.sim) {
     const id = G.sim.findParticle(j.a, slotParam(slotById(j.a), j.at));
@@ -433,7 +446,7 @@ function stageDone(key) {
     && TRI_STAKES.every(q => (G.tri.stakes[q.id] || 0) >= TRI_STAKE_HITS) && TRI_STAKE_JOINTS.every(q => G.tri.stakeJoints[q.id]);
   const b = G.build;
   // a free klaf is ready for the raise once it has its two legs; the rest is the player's call
-  if (id === 'build' && LV.free) return !!(b.poles.legL && b.poles.legR);
+  if (id === 'build' && freeKlaf()) return !!(b.poles.legL && b.poles.legR);
   if (id === 'build') return SLOTS.every(s => b.poles[s.id]) && JOINTS.every(j => b.joints[j.id]);
   if (id === 'stakes') return LEG_STAKES.every(s => (b.stakes[s.id] || 0) >= LEG_STAKE_HITS);
   if (id === 'raise') return G.raisedOnce;
@@ -457,12 +470,20 @@ function goStage(key) {
   const id = st.id;
   if (G.challenge?.kind === 'fix' && id !== 'build') return flashHint('בתיקון המחנה עובדים על הקלפים שעל הקרקע. כשמסיימים מזמינים את המדריך');
   if (st.k != null) {
-    if (st.k !== G.ki) { clearJobs(); selectPole(null); }
+    if (st.k !== G.ki) { clearJobs(); selectPole(null); camMode = null; }
     leaveCube();
     useKlaf(st.k);
-    if (LV.tripod && (G.tri.up > 0 || G.tri.raising)) {
-      return confirmCard('להשכיב את החצובה?', 'כדי לשנות את הרגליים או את כפיתת החצובה צריך להשכיב אותה חזרה על הקרקע. החיזוקים והבז״נטים יורדים.', 'להשכיב', () => { layTripod(); goStage(st.key); });
+  }
+  if (triOn() && (LV.tripod || id !== 'check')) {
+    if (id === 'build') {
+      if (G.tri.up > 0 || G.tri.raising) return confirmCard('להשכיב את החצובה?', 'כדי לשנות את הרגליים או את כפיתת החצובה צריך להשכיב אותה חזרה על הקרקע. החיזוקים והבז״נטים יורדים.', 'להשכיב', () => { layTripod(); goStage(st.key); });
+    } else {
+      if (!stageDone(st.k != null ? STAGES.find(s => s.id === 'build' && s.k === st.k).key : 'build')) { infoCard('קודם כופתים את החצובה על הקרקע', 'מניחים שלוש רגליים זו לצד זו וכופתים אותן יחד ליד הראש. רק אז אפשר להקים.'); return; }
+      if (id !== 'spread' && G.tri.up < 1) { infoCard('קודם מקימים את החצובה', 'חיזוקים ובז״נטים מוסיפים לחצובה שכבר עומדת, כשהרגליים שלה במקומן.'); return; }
+      if (id !== 'spread' && !feetOnPlan()) { infoCard('קודם מעמידים את הרגליים במקומן', `בשרטוט יש ${TRI.footApart.toFixed(1)} מ׳ בדיוק בין כל שתי רגליים. גוררים כל רגל אל העיגול שלה על הקרקע.`); return; }
+      selectPole(null); G.tri.sim = null;
     }
+  } else if (st.k != null) {
     if (id === 'build' && G.sim && G.sim.angle() > 12 && !G.falling) {
       return confirmCard('להוריד את הקלף לקרקע?', 'כדי לשנות סנדות צריך להשכיב את הקלף חזרה על השרטוט. הבז״נטים נשארים במקומם.', 'להוריד', () => { lowerKlaf(); goStage(st.key); });
     }
@@ -474,13 +495,8 @@ function goStage(key) {
     }
     if (!enterCube()) return;
     if (id !== 'cube') selectPole(null);
-  } else if (LV.tripod) {
-    if (!stageDone('build')) { infoCard('קודם כופתים את החצובה על הקרקע', 'מניחים שלוש רגליים זו לצד זו וכופתים אותן יחד ליד הראש. רק אז אפשר להקים.'); return; }
-    if (id !== 'spread' && G.tri.up < 1) { infoCard('קודם מקימים את החצובה', 'חיזוקים ובז״נטים מוסיפים לחצובה שכבר עומדת, כשהרגליים שלה במקומן.'); return; }
-    if (id !== 'spread' && !feetOnPlan()) { infoCard('קודם מעמידים את הרגליים במקומן', `בשרטוט יש ${TRI.footApart.toFixed(1)} מ׳ בדיוק בין כל שתי רגליים. גוררים כל רגל אל העיגול שלה על הקרקע.`); return; }
-    selectPole(null); G.tri.sim = null;
   } else {
-    selectPole(null); if (!G.sim) startSim();
+    selectPole(null); if (!G.sim && !triOn()) startSim();
   }
   G.stage = id; G.stageKey = st.key; G.armed = null; hideRaiseIcon();
   closePicker();
@@ -489,8 +505,8 @@ function goStage(key) {
   $('crew-panel').hidden = id !== 'raise';
   if (id !== 'build' && id !== 'cube' && !seatStage(id)) $('length-panel').hidden = true;
   // close enough to tap the small parts in stages with fine work, far and high otherwise
-  setCameraMode(LV.tripod && id !== 'build' ? (id === 'brace' ? 'triWork' : 'triView') : id === 'build' ? 'buildView' : (id === 'stakes' || id === 'anchor' || id === 'unguy') ? 'workView' : id === 'seat' ? 'seatView' : (id === 'cube' || id === 'hang') ? 'cubeView' : 'orbit');
-  refreshChips(); refreshActions(); refreshHint();
+  setCameraMode(triOn() && id !== 'build' ? (id === 'brace' ? 'triWork' : 'triView') : id === 'build' ? 'buildView' : (id === 'stakes' || id === 'anchor' || id === 'unguy') ? 'workView' : id === 'seat' ? 'seatView' : (id === 'cube' || id === 'hang') ? 'cubeView' : 'orbit');
+  refreshChips(); refreshActions(); refreshHint(); renderPile();
 }
 const nextStage = () => STAGES[STAGES.findIndex(s => s.key === G.stageKey) + 1];
 // ---- the cube (level 2) ----
@@ -563,12 +579,12 @@ function stagePose(mode) {
   // narrower screens step back a little; free build's sheet is bigger than a 2×2 klaf
   // (the carousel's 5 m cube is seen from further away, aimed higher)
   const S = LV.camScale ?? 1;
-  const far = (aspect < 1.6 ? 1.25 : 1) * S * (LV.free ? (mode === 'buildView' ? 1.5 : Math.max(1, LEVEL.height / 2 * 1.1)) : 1);
+  const far = (aspect < 1.6 ? 1.25 : 1) * S * (freeKlaf() ? (mode === 'buildView' ? 1.5 : Math.max(1, LEVEL.height / 2 * 1.1)) : 1);
   // Omer's reference: a fixed high three-quarter view (about 50 to 60 degrees up),
   // turned about 45 degrees so the structure is seen corner-on, through a narrow lens
   const at = (target, dist, elev, azim) => ({ target, pos: target.clone().add(new THREE.Vector3(Math.sin(azim) * Math.cos(elev), Math.sin(elev), -Math.cos(azim) * Math.cos(elev)).multiplyScalar(dist * far)) });
   const z = LV.cube && cubeStage(G.stage) ? (LV.cube.span ?? LV.cube.depth) / 2 : z0();
-  if (LV.tripod) {
+  if (triOn()) {
     const c = triCentre();
     if (mode === 'buildView') return at(new THREE.Vector3(0, 0, z + 2.3), 23, 1.08, 0.5);
     if (mode === 'triWork') return at(new THREE.Vector3(c[0], 0.6, c[1]), 17, 0.85, 0.72);
@@ -669,7 +685,7 @@ function collectTargets() {
   const T = [];
   const st = G.stage, sim = G.sim, b = G.build;
   const busy = G.falling || G.check?.running;
-  if (!busy && LV.tripod && st !== 'build') collectTriTargets(T);
+  if (!busy && triOn() && st !== 'build') collectTriTargets(T);
   else if (!busy && LV.cube && cubeStage(st)) collectCubeTargets(T);
   else if (!busy) {
     // klaf lashings: tie (ring) or change (on the coil)
@@ -790,7 +806,7 @@ function onTap(x, y) {
     if (seatStage(G.stage)) slot = nearestSeatSlot(x, y);
     else if (G.stage === 'cube') slot = nearestCubeSlot(x, y);
     else if (G.stage === 'brace') slot = nearestBrace(x, y);
-    else if (LV.free) return; // free build lays the pole with a drag on the grid (see layFree)
+    else if (freeKlaf()) return; // free build lays the pole with a drag on the grid (see layFree)
     else { const p = groundAt(x, y); if (p) slot = nearestSlot(p.x, p.z - z0()); }
     if (slot) { G.lastLength = G.armed; placePole(slot); refreshAll(); return; }
   }
@@ -865,7 +881,7 @@ function onTarget(t, x, y) {
 // where the finger went down and points where it is dragged. A tap stands it upright.
 let lay = null;
 const toKlaf = (x, y) => { const p = groundAt(x, y); return p ? [p.x, p.z - z0()] : null; };
-const canLay = () => !decor?.active && LV.free && G.stage === 'build' && G.armed && !G.falling && !closeup;
+const canLay = () => !decor?.active && freeKlaf() && G.stage === 'build' && G.armed && !G.falling && !closeup;
 function layGhost(pole) {
   const h = pole.length / 2, e = k => [pole.centre[0] + pole.dir[0] * k, 0.12, pole.centre[1] + pole.dir[1] * k + z0()];
   placeCylinder(ghost, e(-h), e(h));
@@ -895,7 +911,7 @@ const LASHED_MSG = '<b>הסנדה הזו כבר כפותה</b> ולא זזה. כ
 let moveDrag = null;
 function onRing(x, y, r = 15) { return targets.some(t => { const sp = toScreen(t.pos); return sp && Math.hypot(sp[0] - x, sp[1] - y) < r; }); }
 canvas.addEventListener('pointerdown', e => {
-  if (decor?.active || !LV.free || G.stage !== 'build' || G.armed || G.falling || closeup || G.sim) return;
+  if (decor?.active || !freeKlaf() || G.stage !== 'build' || G.armed || G.falling || closeup || G.sim) return;
   if (onRing(e.clientX, e.clientY)) return; // right on a ring: that press ties a lashing
   const sid = pickPole(e.clientX, e.clientY); if (!sid || G.carrying[sid]) return;
   const a = toKlaf(e.clientX, e.clientY); if (!a) return;
@@ -929,26 +945,32 @@ canvas.addEventListener('pointercancel', endMove);
 // ---- the raise icon (Omer, 2026-11-16) ----
 // A klaf that has its two legs and every crossing lashed is ready. Tapping it opens
 // an icon over it, and the icon starts its raise (stakes first).
-const freeReady = () => !!(G.build.poles.legL && G.build.poles.legR) && JOINTS.length > 0 && JOINTS.every(j => G.build.joints[j.id]);
+const freeReady = () => freeTri() ? stageDone('build') && G.tri.up <= 0 && !G.tri.raising
+  : !!(G.build.poles.legL && G.build.poles.legR) && JOINTS.length > 0 && JOINTS.every(j => G.build.joints[j.id]);
 const raiseIcon = Object.assign(document.createElement('button'), { type: 'button', id: 'raise-icon', hidden: true, innerHTML: '<span class="arrow">⬆</span><span>הרמת הקלף</span>' });
 document.body.appendChild(raiseIcon);
-function showRaiseIcon() { G.raiseIconFor = G.ki; raiseIcon.hidden = false; placeRaiseIcon(); }
+function showRaiseIcon() { G.raiseIconFor = G.ki; raiseIcon.lastChild.textContent = freeTri() ? 'הקמת החצובה' : 'הרמת הקלף'; raiseIcon.hidden = false; placeRaiseIcon(); }
 function hideRaiseIcon() { if (G) G.raiseIconFor = null; raiseIcon.hidden = true; }
 function placeRaiseIcon() {
   if (raiseIcon.hidden) return;
   if (!LV.free || G.stage !== 'build' || G.raiseIconFor !== G.ki || !freeReady()) return hideRaiseIcon();
-  const p = toScreen([0, 0.4, z0() + LEVEL.height * 0.5]); if (!p) return;
+  const p = toScreen([0, 0.4, z0() + (freeTri() ? TRI.legLength * 0.5 : LEVEL.height * 0.5)]); if (!p) return;
   raiseIcon.style.left = Math.max(70, Math.min(window.innerWidth - 190, p[0])) + 'px';
   raiseIcon.style.top = Math.max(70, Math.min(window.innerHeight - 120, p[1])) + 'px';
 }
 raiseIcon.addEventListener('click', () => {
-  const st = STAGES.find(q => q.id === 'stakes' && (q.k == null || q.k === G.ki));
+  const want = freeTri() ? 'spread' : 'stakes', st = STAGES.find(q => q.id === want && (q.k == null || q.k === G.ki));
   hideRaiseIcon(); sfx.tick();
   if (st) goStage(st.key);
 });
 // what a klaf still needs before it can be raised
 function freeMissing() {
   const b = G.build;
+  if (freeTri()) {
+    const n = LEG_IDS.filter(id => b.poles[id]).length;
+    if (n < 3) return `<b>לחצובה צריך שלוש רגליים.</b> בחרו אורך בערימה והקישו על קו בשרטוט · ${n}/3`;
+    return b.joints.TJ ? '' : '<b>כפתו את שלוש הרגליים יחד</b> ליד הראש (הקישו על הטבעת), ואז הקשה על החצובה פותחת את ההקמה';
+  }
   if (!b.poles.legL || !b.poles.legR) return '<b>כדי להרים, לקלף צריכות להיות שתי רגליים</b> שעומדות על קו הרגליים, אחת מכל צד';
   const n = JOINTS.filter(j => !b.joints[j.id]).length;
   if (!JOINTS.length) return 'הרגליים עוד לא מחוברות: הוסיפו רוחבים ואלכסונים וכפתו אותם';
@@ -957,7 +979,7 @@ function freeMissing() {
 // a tap on another klaf of the sandbox moves the work to it
 function pickOtherKlaf(x, y) {
   const keep = G.ki; let found = null;
-  for (let i = 0; i < G.klafim.length && found == null; i++) { if (i === keep) continue; useKlaf(i); if (!G.sim && pickPole(x, y)) found = i; }
+  for (let i = 0; i < G.klafim.length && found == null; i++) { if (i === keep) continue; useKlaf(i); if (!G.sim && !(G.tri?.up > 0) && pickPole(x, y)) found = i; }
   useKlaf(keep);
   return found;
 }
@@ -988,27 +1010,37 @@ function freeSync(slots) {
   freeCfg(K().cfg, slots);
 }
 // another klaf of the same sandbox: it is designed and stands a little further back
-function addFreeKlaf() {
+// Another structure of the same sandbox, a klaf or a tripod (Omer, 2026-11-20): it is
+// built on the ground a little further back, and raised in its turn after all are built.
+// A lying tripod's legs reach 4.5 m back, so the one after it starts further away.
+const freeGap = (prev, kind) => prev.kind === 'tripod' ? 5.2 : kind === 'tripod' ? 3.2 : 2.4;
+function nameFree() {
+  const n = { klaf: 0, tripod: 0 };
+  for (const k of LV.klafim) { const kind = k.kind || 'klaf'; n[kind]++; k.he = `${kind === 'tripod' ? 'חצובה' : 'קלף'} ${n[kind]}`; k.short = (kind === 'tripod' ? 'ח' : '') + n[kind]; }
+}
+function addFreeKlaf(kind = 'klaf') {
   const n = LV.klafim.length;
-  if (n >= MAX_KLAFIM) return flashHint(`אפשר לבנות עד ${MAX_KLAFIM} קלפים`);
-  LV.klafim[0].he = 'קלף 1'; LV.klafim[0].short = '1';
-  const cfg = { ...LV.klafim[n - 1], z0: Math.round((LV.klafim[n - 1].z0 + 2.4) * 10) / 10, he: `קלף ${n + 1}`, short: String(n + 1) };
+  if (n >= MAX_KLAFIM) return flashHint(`אפשר לבנות עד ${MAX_KLAFIM} מבנים במגרש`);
+  const prev = LV.klafim[n - 1];
+  const cfg = { ...prev, kind, z0: Math.round((prev.z0 + freeGap(prev, kind)) * 10) / 10 };
+  if (kind !== 'tripod') freeCfg(cfg, []);
   LV.klafim.push(cfg); G.klafim.push(freshKlaf(cfg));
+  nameFree();
   KM[n].blueprint.visible = false;
   STAGES = stageList(); makeChips();
   goStage(`build:${n}`);
-  flashHint(`<b>קלף ${n + 1}</b> יעמוד ${(cfg.z0 - LV.klafim[n - 1].z0).toFixed(1)} מ׳ מאחורי הקודם. אפשר לקרב ולהרחיק אותו`);
+  flashHint(`<b>${cfg.he}</b> ${kind === 'tripod' ? 'תיבנה' : 'ייבנה'} ${(cfg.z0 - prev.z0).toFixed(1)} מ׳ מאחורי ה${prev.he}. אפשר לקרב ולהרחיק`);
 }
 // placing a klaf: nearer to the one before it, or further away (only while it lies on the ground)
 function moveFreeKlaf(d) {
-  const cfg = K().cfg, prev = LV.klafim[G.ki - 1]; if (!prev || G.sim) return;
-  const gap = Math.max(1.0, Math.min(6.0, Math.round((cfg.z0 - prev.z0 + d) * 10) / 10));
+  const cfg = K().cfg, prev = LV.klafim[G.ki - 1]; if (!prev || G.sim || G.tri?.up > 0) return;
+  const gap = Math.max(1.0, Math.min(8.0, Math.round((cfg.z0 - prev.z0 + d) * 10) / 10));
   const shift = prev.z0 + gap - cfg.z0;
   // the klafim behind it move with it
-  for (let i = G.ki; i < LV.klafim.length; i++) { if (G.klafim[i].sim) return flashHint('קלף שכבר הורם לא זז'); }
+  for (let i = G.ki; i < LV.klafim.length; i++) { if (G.klafim[i].sim || G.klafim[i].tri?.up > 0) return flashHint('מבנה שכבר הורם לא זז'); }
   for (let i = G.ki; i < LV.klafim.length; i++) LV.klafim[i].z0 = Math.round((LV.klafim[i].z0 + shift) * 10) / 10;
   camMode = null; setCameraMode('buildView');
-  sfx.tick(); flashHint(`<b>${cfg.he}</b> עומד ${gap.toFixed(1)} מ׳ מאחורי ${prev.he}`);
+  sfx.tick(); flashHint(`<b>${cfg.he}</b> · ${gap.toFixed(1)} מ׳ מאחורי ה${prev.he}`);
 }
 function freeHint(nPoles, nJ) {
   const b = G.build;
@@ -1085,29 +1117,41 @@ function finishFree() {
   pushArrow.visible = false;
   G.result = { stars: 0, free: true };
   sfx.ok();
-  let nP = 0, nJ = 0, metres = 0, high = 0;
+  let nP = 0, nJ = 0, metres = 0, high = 0, nK = 0, nT = 0;
   eachKlaf(() => {
     const b = G.build;
     nP += SLOTS.filter(q => b.poles[q.id]).length; nJ += JOINTS.filter(j => b.joints[j.id]).length;
-    metres += SLOTS.reduce((a, q) => a + (b.poles[q.id] ? q.length : 0), 0); high = Math.max(high, LEVEL.height);
+    metres += SLOTS.reduce((a, q) => a + (b.poles[q.id]?.length || 0), 0);
+    if (G.tri) {
+      nT++; high = Math.max(high, triState()?.height || 0);
+      const br = Object.values(G.tri.braces); nP += br.length; metres += br.reduce((a, q) => a + q.length, 0);
+      nJ += countTrue(G.tri.joints) + countTrue(G.tri.stakeJoints);
+    } else { nK++; high = Math.max(high, LEVEL.height); }
   });
   const many = G.klafim.length > 1;
+  const what = !many ? (nT ? 'החצובה שלכם עומדת!' : 'הקלף שלכם עומד!') : !nT ? `כל ${nK} הקלפים עומדים!` : !nK ? `כל ${nT} החצובות עומדות!` : `כל ${nK + nT} המבנים עומדים!`;
+  const last = G.klafim[G.klafim.length - 1];
   showModal(`
     <div class="eyebrow">תוצאות המסדר · בנייה חופשית</div>
-    <h2>${many ? `כל ${G.klafim.length} הקלפים עומדים!` : 'הקלף שלכם עומד!'}</h2>
+    <h2>${what}</h2>
     <ul class="inspect">
-      <li class="ok">${many ? 'עמדו' : 'עמד'} בדחיפות מכל הכיוונים</li>
-      <li class="ok">${many ? 'החזיקו' : 'החזיק'} את דלי המים</li>
+      <li class="ok">${many ? 'עמדו' : nT ? 'עמדה' : 'עמד'} בדחיפות מכל הכיוונים</li>
+      <li class="ok">${many ? 'החזיקו את הדלי והמשקל' : nT ? 'נשאה את המשקל על הראש' : 'החזיק את דלי המים'}</li>
     </ul>
     <div class="score-grid">
       <span>גובה</span><b>${high.toFixed(1)} מ׳</b>
+      ${many ? `<span>מבנים</span><b>${[nK ? `${nK} קלפים` : '', nT ? `${nT} חצובות` : ''].filter(Boolean).join(' · ')}</b>` : ''}
       <span>סנדות</span><b>${nP} (${metres.toFixed(1)} מ׳ עץ)</b>
-      <span>כפיתות בקלפים</span><b>${nJ}</b>
+      <span>כפיתות</span><b>${nJ}</b>
       <span>זמן</span><b>${fmt(elapsed())}</b>
     </div>
   `, [
     ['לבנות מחדש', restart, true],
-    [many ? 'לשנות את הקלף האחרון' : 'לשנות את הקלף הזה', () => { closeModal(); G.check = null; G.result = null; lowerKlaf(); goStage('build'); }],
+    [`לשנות את ה${many ? last.cfg.he : last.tri ? 'חצובה' : 'קלף'}${many ? ' (האחרון)' : ''}`, () => {
+      closeModal(); G.check = null; G.result = null;
+      if (G.tri) { G.tri.sim = null; layTripod(); } else lowerKlaf();
+      goStage(STAGES.find(s => s.id === 'build' && s.k === G.ki).key);
+    }],
     ['למסך הבית', () => { closeModal(); showHome(); }],
   ]);
   refreshAll();
@@ -1116,13 +1160,13 @@ function finishFree() {
 // ---------------- the tripod (station 3) ----------------
 // On the ground the three legs are ordinary poles on a plan (see tripod.js). From
 // the moment it is stood up, the tripod is drawn from where its feet stand.
-function triCentre() { return [LV.centre?.[0] ?? 0, z0() + (LV.centre?.[1] ?? 0.7)]; }
+function triCentre() { const c = LV.free ? null : LV.centre; return [c?.[0] ?? 0, z0() + (c?.[1] ?? 0.7)]; }
 const triLens = () => LEG_IDS.map(id => G.build.poles[id]?.length ?? TRI.legLength);
-const freshTri = () => ({ up: 0, raising: false, feet: null, braces: {}, joints: {}, stakes: {}, stakeJoints: {}, sim: null });
+function freshTri() { return { up: 0, raising: false, feet: null, braces: {}, joints: {}, stakes: {}, stakeJoints: {}, sim: null }; }
 let triCache = null;
 function triState() {
   const t = G.tri; if (!t?.feet) return null;
-  const key = JSON.stringify([t.feet, triLens()]);
+  const key = JSON.stringify([G.ki, t.feet, triLens()]);
   if (!triCache || triCache.key !== key) triCache = { key, st: standing(t.feet, triLens()) };
   return triCache.st;
 }
@@ -1214,13 +1258,13 @@ function collectTriTargets(T) {
   });
 }
 // the three distances between the feet are as in the drawing
-function feetOnPlan() { if (LV.sandbox) return true; const st = triState(); return !!st && fitsPlan(st).apart.every(Boolean); }
+function feetOnPlan() { if (triLoose()) return true; const st = triState(); return !!st && fitsPlan(st).apart.every(Boolean); }
 // a foot that already has a stake or a brace stays where it is
 const footFixed = i => (G.tri.stakes[TRI_STAKES[i].id] || 0) > 0 || BRACES.some(b => b.legs.includes(i) && G.tri.braces[b.id]);
 // spreading the legs: drag a foot over the ground, and the head follows
 let footDrag = null;
 canvas.addEventListener('pointerdown', e => {
-  if (decor?.active || !LV.tripod || G.stage !== 'spread' || G.tri.up < 1 || G.falling) return;
+  if (decor?.active || !triOn() || G.stage !== 'spread' || G.tri.up < 1 || G.falling) return;
   const st = triState(); let best = null, bd = 42;
   st.legs.forEach((L, i) => { const sp = toScreen([L.foot[0], 0.1, L.foot[2]]); if (!sp) return; const d = Math.hypot(sp[0] - e.clientX, sp[1] - e.clientY); if (d < bd) { bd = d; best = i; } });
   if (best == null) return;
@@ -1237,7 +1281,7 @@ canvas.addEventListener('pointermove', e => {
   const far = Math.hypot(x - c[0], z - c[1]); if (far > 4) { x = c[0] + (x - c[0]) * 4 / far; z = c[1] + (z - c[1]) * 4 / far; }
   // close to its spot in the drawing, the foot drops into it
   const spot = planFeet(c)[footDrag.i];
-  if (!LV.sandbox && Math.hypot(x - spot[0], z - spot[1]) < 0.25) { x = spot[0]; z = spot[1]; }
+  if (!triLoose() && Math.hypot(x - spot[0], z - spot[1]) < 0.25) { x = spot[0]; z = spot[1]; }
   const next = G.tri.feet.map((f, i) => i === footDrag.i ? [x, z] : f);
   const st = standing(next, triLens());
   if (!st || st.height < 2) return flashHint('<b>הרגליים רחוקות מדי</b>: הראש יורד נמוך מדי');
@@ -1257,14 +1301,23 @@ function raiseTripod() {
 function layTripod() { G.tri = freshTri(); triCache = null; G.check = null; G.result = null; }
 // six scouts, two to a leg
 const TRI_CREW = ['baseL', 'baseR', 'lift1', 'lift2', 'guyG1', 'guyG2'];
-function drawTripod(dt) {
+// the sheet the legs are laid on (the current tripod's), and the guide for spreading its feet
+function drawTriShared(dt) {
   drawTriGuide();
-  const on = !!LV.tripod, t = G.tri;
+  const on = triOn();
   const show = on && G.stage === 'build' && !stageDone('build');
   triSheet.material.opacity = Math.max(0, Math.min(0.96, triSheet.material.opacity + (show ? 1 : -1) * dt / 0.4));
   triSheet.visible = triSheet.material.opacity > 0.01;
   if (on) triSheet.position.z = triSheet.userData.z + z0();
-  if (!on) return;
+}
+// one tripod (run as the current klaf by eachKlaf); its crew only while it is the one being worked on
+function drawTripod(dt, current = true) {
+  const t = G.tri, triStakeMeshes = KM[G.ki].triStakes;
+  if (!t) return;
+  if (!current) {
+    if (t.raising) { t.up = Math.min(1, t.up + dt / 1.4); if (t.up >= 1) t.raising = false; }
+    TRI_STAKES.forEach((sk, i) => { if (!(t.up >= 1 && t.stakes[sk.id])) triStakeMeshes[i].visible = false; });
+  }
   const st = triState(), up = t.up >= 1;
   for (const b of BRACES) {
     const m = poleMeshes[b.id][0], pl = t.braces[b.id];
@@ -1292,6 +1345,7 @@ function drawTripod(dt) {
     g.visible = !fadedOut(); coilProgress(g, TRI_STAKE_JOINTS[i].id);
   });
   // the crew: they stand the bundle up, then hold the legs until the inspection
+  if (!current) return;
   if (t.raising) {
     const z = z0();
     TRI_CREW.forEach((k, n) => { const side = n % 2 ? 1 : -1, v = [1.6, 2.9, 4.0][n >> 1]; people[k].set([side * 0.6, 0, z + v], side * -Math.PI / 2, 0.3, 0.7 + t.up * 1.6); });
@@ -1365,12 +1419,12 @@ function scoreTripod() {
 function triStatus(nPoles, nJ) {
   const t = G.tri;
   switch (G.stage) {
-    case 'build': return `רגליים ${nPoles}/3 · כפיתה סביב שלוש הרגליים ${nJ}/1`;
+    case 'build': return `רגליים ${nPoles}/3 · כפיתה סביב שלוש הרגליים ${nJ}/1` + (LV.free ? (G.armed ? ' · <b>הקישו על קו בשרטוט</b> כדי להניח את הרגל' : nPoles === 3 && nJ ? ' · הכול כפות: <b>הקישו על החצובה</b> כדי להקים אותה' : ' · בחרו אורך בערימה') : '');
     case 'spread': {
       if (t.raising) return 'הצוות מקים את החצובה…';
       if (t.up < 1) return 'שישה צופים מקימים את החצובה, שניים לכל רגל';
       const st = triState();
-      if (LV.sandbox) return `גובה הראש <b>${st.height.toFixed(1)} מ׳</b> · בין הרגליים <b>${st.apart.map(d => d.toFixed(1)).join(' / ')}</b> מ׳ · גוררים כל רגל לאן שרוצים`;
+      if (triLoose()) return `גובה הראש <b>${st.height.toFixed(1)} מ׳</b> · בין הרגליים <b>${st.apart.map(d => d.toFixed(1)).join(' / ')}</b> מ׳ · גוררים כל רגל לאן שרוצים`;
       if (feetOnPlan()) return `הרגליים במקומן: <b>${TRI.footApart.toFixed(1)} מ׳</b> בין כל שתיים, הראש בגובה <b>${st.height.toFixed(1)} מ׳</b>`;
       return `בין הרגליים <b>${st.apart.map(d => d.toFixed(1)).join(' / ')}</b> מ׳, צריך <b>${TRI.footApart.toFixed(1)}</b> · גוררים כל רגל אל העיגול שלה`;
     }
@@ -1749,7 +1803,7 @@ trayPole.addEventListener('pointerdown', e => {
 trayPole.addEventListener('pointermove', e => {
   if (!drag) return;
   if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 8) return; // a tap, not a drag
-  if (LV.free && G.stage === 'build') return; // free build: the pole is laid with a drag on the grid itself
+  if (freeKlaf() && G.stage === 'build') return; // free build: the pole is laid with a drag on the grid itself
   const p = groundAt(e.clientX, e.clientY);
   if (!p) return;
   drag.moved = true;
@@ -1821,7 +1875,7 @@ function endDrag() {
   else if (!drag.moved) {
     // a tap on the pile: hold that length, then tap a line on the drawing
     G.armed = drag.len; renderPile();
-    if (LV.free && G.stage === 'build') { controls.enabled = false; flashHint(`נבחרה סנדה של <b>${drag.len.toFixed(1)} מ׳</b>. גררו על הרשת מהמקום שבו היא מתחילה אל הכיוון שלה. הקשה במקום מניחה אותה זקופה`); }
+    if (freeKlaf() && G.stage === 'build') { controls.enabled = false; flashHint(`נבחרה סנדה של <b>${drag.len.toFixed(1)} מ׳</b>. גררו על הרשת מהמקום שבו היא מתחילה אל הכיוון שלה. הקשה במקום מניחה אותה זקופה`); }
     else if (G.stage === 'brace') flashHint(`נבחרה סנדה של <b>${drag.len.toFixed(1)} מ׳</b>. הקישו בין שתי רגליים של החצובה כדי לשים אותה שם`);
     else if (G.stage === 'hang') flashHint(`נבחרה סנדה של <b>${drag.len.toFixed(1)} מ׳</b>. הקישו על הקו שבאמצע ה־# כדי להעביר אותה שם כתורן`);
     else if (G.stage === 'seat') flashHint(`נבחרה סנדה של <b>${drag.len.toFixed(1)} מ׳</b>. הקישו על קו בשרטוט המושב כדי להניח אותה`);
@@ -1886,7 +1940,7 @@ function updateLengthPanel() {
 }
 function changeLength(steps) {
   const sid = G.selected; if (!sid || !steps) return;
-  if (LV.free) { // free build: any length; the pole grows from its lower end
+  if (freeKlaf()) { // free build: any length; the pole grows from its lower end
     const sl = slotById(sid), nl = Math.round(Math.max(POLE_MIN, Math.min(POLE_MAX, sl.length + steps * 0.1)) * 10) / 10;
     if (nl === sl.length || G.stage !== 'build') return;
     if (poleLashed(sid)) return flashHint(LASHED_MSG);
@@ -1931,7 +1985,7 @@ function changeLength(steps) {
   $('lp-minus').addEventListener('click', () => changeLength(-1));
   $('lp-remove').addEventListener('click', () => {
     const sid = G.selected; if (!sid) return;
-    if (LV.free && poleLashed(sid)) return flashHint(LASHED_MSG);
+    if (freeKlaf() && poleLashed(sid)) return flashHint(LASHED_MSG);
     delete polesOf(sid)[sid];
     if (isSeatPole(sid)) {
       for (const j of SEAT.joints) if (j.a === sid || j.b === sid) delete G.seat.build.joints[j.id];
@@ -1942,7 +1996,7 @@ function changeLength(steps) {
       rebuildCube();
     } else for (const j of JOINTS) if (j.a === sid || j.b === sid) delete G.build.joints[j.id];
     selectPole(null);
-    if (LV.free) { meshesOf(sid).forEach(m => { m.visible = false; }); freeSync(SLOTS.filter(q => q.id !== sid)); }
+    if (freeKlaf()) { meshesOf(sid).forEach(m => { m.visible = false; }); freeSync(SLOTS.filter(q => q.id !== sid)); }
     refreshAll();
   });
 }
@@ -1954,7 +2008,8 @@ const r1 = x => Math.round(x * 10) / 10;
 function pileStock() {
   const m = new Map();
   const add = l => m.set(r1(l), (m.get(r1(l)) || 0) + 1);
-  if (LV.free) return []; // free build has a pole bar, not a pile: any length, as many as needed
+  // free build has a pole bar, not a pile: any length, as many as needed; a tripod takes its poles from an open pile
+  if (LV.free) return freeTri() ? [6.0, 5.5, 5.0, 4.5, 4.0, 3.5, 3.0, 2.5, 2.0].map(l => [l, Infinity]) : [];
   for (let i = 0; i < LV.klafim.length; i++) (LV.klafim[i].plan?.slots ?? SLOTS).forEach(s => add(s.length));
   if (LV.cube) LV.cube.slots.forEach(s => add(s.length));
   if (LV.tripod) BRACES.forEach(q => add(q.length));
@@ -1975,6 +2030,7 @@ const poleLeft = len => LV.free ? Infinity : (pileStock().find(([l]) => l === r1
 // rope: one length per lashing in the plan, and a couple to spare
 const countTrue = o => Object.values(o).filter(Boolean).length;
 function ropeTotal() {
+  if (LV.free) return Infinity; // free build: rope as needed
   if (LV.tripod) return TRI_JOINTS.length + BRACE_JOINTS.length + TRI_STAKE_JOINTS.length + (LV.ropeSpare ?? 2);
   const klafJ = LV.klafim.reduce((a, k) => a + (k.plan?.joints ?? JOINTS).length + STAKE_JOINTS.length + GUYS.length, 0);
   const seatJ = LV.carousel ? SEAT.joints.length + MAST_JOINTS.length + HANG_ROPES.length + 1 : 0;
@@ -1991,7 +2047,7 @@ function ropeUsed() {
 const ropeLeft = () => ropeTotal() - ropeUsed();
 let pileKey = '';
 function renderPile() {
-  if (LV.free) {
+  if (freeKlaf()) {
     const key = 'free' + !!G.armed;
     if (key !== pileKey) {
       pileKey = key;
@@ -2006,10 +2062,10 @@ function renderPile() {
     // rebuilt only when the counts change, never under a finger that is starting a drag
     pileKey = key;
     $('tray-pole').innerHTML = rows.map(([l, left]) => `<button type="button" class="pile-item${left ? '' : ' empty'}" data-len="${l}">
-      <span class="pile-stick" style="width:${Math.round(l * 22)}px"></span><b>${l.toFixed(1)}</b><small>×${left}</small></button>`).join('');
+      <span class="pile-stick" style="width:${Math.round(l * 22)}px"></span><b>${l.toFixed(1)}</b><small>${isFinite(left) ? '×' + left : ''}</small></button>`).join('');
   }
   for (const el of $('tray-pole').children) el.classList.toggle('on', +el.dataset.len === (G.armed ?? G.lastLength) && poleLeft(+el.dataset.len) > 0);
-  $('rope-count').innerHTML = `חבלים לכפיתות: <b>${ropeLeft()}</b>`;
+  $('rope-count').innerHTML = isFinite(ropeLeft()) ? `חבלים לכפיתות: <b>${ropeLeft()}</b>` : '';
 }
 
 // ---------------- the raise crew ----------------
@@ -2276,22 +2332,27 @@ function refreshActions() {
   }
   const nx = nextStage();
   const go = label => add(label, () => goStage(nx.key));
-  if (LV.tripod) {
-    if (G.stage === 'build' && stageDone('build')) go('המשך להקמה');
+  // where the next button leads, in words
+  const many = LV.klafim.length > 1, of = nx?.k != null && many ? LV.klafim[nx.k].he : '';
+  const nextLabel = () => nx.id === 'build' ? `המשך לבניית ה${of}` : nx.id === 'spread' ? (of ? `המשך להקמת ה${of}` : 'המשך להקמה')
+    : nx.id === 'stakes' ? (G.stage !== 'build' && of ? `המשך להרמת ה${of}` : of ? `המשך לבז״נטים, ${of}` : 'המשך לבז״נטים') : nx.id === 'check' ? 'למסדר המדריך' : nx.id === 'cube' ? 'המשך לחיבור הקובייה' : `המשך ל${nx.he}`;
+  if (LV.free && G.stage === 'build') {
+    if (G.ki > 0 && !G.sim && !(G.tri?.up > 0)) { add('◀ לקרב', () => moveFreeKlaf(-0.2), false); add('להרחיק ▶', () => moveFreeKlaf(0.2), false); }
+    if (stageDone('build') && nx.id !== 'build' && LV.klafim.length < MAX_KLAFIM) add('+ עוד מבנה', () => showModal('<h2>מה מוסיפים למגרש?</h2><p>בונים אותו על הקרקע מאחורי האחרון. אחרי שהכול בנוי מרימים את המבנים אחד אחרי השני.</p>',
+      [['קלף', () => { closeModal(); addFreeKlaf('klaf'); }, true], ['חצובה', () => { closeModal(); addFreeKlaf('tripod'); }, true], ['ביטול', closeModal]]), false);
+  }
+  if (triOn()) {
+    if (G.stage === 'build' && stageDone('build')) go(nextLabel());
     if (G.stage === 'spread' && G.tri.up <= 0 && !G.tri.raising) add('מקימים את החצובה', raiseTripod);
     if (G.stage === 'spread' && G.tri.up >= 1 && feetOnPlan()) go('המשך לחיזוקים');
-    if (G.stage === 'brace') go('למסדר המדריך');
+    if (G.stage === 'brace') go(nextLabel());
     if (G.stage === 'check' && !G.check) add('קוראים למדריך למסדר', runCheck);
     return;
   }
-  if (LV.free && G.stage === 'build') {
-    if (G.ki > 0 && !G.sim) { add('◀ לקרב', () => moveFreeKlaf(-0.2), false); add('להרחיק ▶', () => moveFreeKlaf(0.2), false); }
-    if (stageDone('build') && nx.id !== 'build' && LV.klafim.length < MAX_KLAFIM) add('+ קלף נוסף', addFreeKlaf, false);
-  }
-  if (G.stage === 'build' && stageDone('build')) go(nx.id === 'build' ? `המשך לבניית ה${LV.klafim[nx.k].he}` : LV.klafim.length > 1 ? `המשך לבז״נטים, ${LV.klafim[nx.k].he}` : 'המשך לבז״נטים');
+  if (G.stage === 'build' && stageDone('build')) go(nextLabel());
   if (G.stage === 'stakes' && stageDone('stakes')) go('המשך להרמה');
   // a raised klaf must be anchored (guy lines fixed, legs lashed to their stakes) before moving on
-  if (G.stage === 'anchor' && G.raisedOnce && stageDone('anchor')) go(nx.id === 'check' ? 'למסדר המדריך' : nx.id === 'cube' ? 'המשך לחיבור הקובייה' : `המשך להרמת ה${LV.klafim[nx.k].he}`);
+  if (G.stage === 'anchor' && G.raisedOnce && stageDone('anchor')) go(nextLabel());
   if (G.stage === 'cube' && cubeComplete()) go('המשך להורדת היתרים הפנימיים');
   if (G.stage === 'unguy' && stageDone('unguy')) go(nx.id === 'seat' ? 'המשך לבניית המושב' : 'למסדר המדריך');
   if (G.stage === 'seat' && stageDone('seat')) go('המשך לתליית הקרוסלה');
@@ -2355,7 +2416,7 @@ function hintText() {
 function statusText(nPoles, nJ) {
   const b = G.build, sim = G.sim;
   const kn = LV.klafim.length > 1 && !cubeStage(G.stage) ? `<b>${K().cfg.he}</b> · ` : '';
-  if (LV.tripod) return triStatus(nPoles, nJ);
+  if (triOn()) return kn + triStatus(nPoles, nJ);
   switch (G.stage) {
     case 'build':
       if (LV.free) return kn + freeHint(nPoles, nJ);
@@ -2397,13 +2458,28 @@ function elapsed() { if (!G.startedAt) return 0; return ((G.endedAt || performan
 function fmt(sec) { const m = Math.floor(sec / 60), s = Math.floor(sec % 60); return `${m}:${String(s).padStart(2, '0')}`; }
 
 // ---------------- the push test ----------------
-function runCheck() {
-  if (LV.tripod) {
+// the inspection of the current structure starts: everyone lets go
+function startCheckFor() {
+  if (triOn()) {
     const t = G.tri;
     rec.length = 0;
     t.sim = new TripodSim({ feet: t.feet, lens: triLens(), braces: t.braces, joints: t.joints, stakes: t.stakes, stakeJoints: t.stakeJoints });
     G.check = { t: 0, running: true, label: 'כולם עוזבים…', pushes: TRI_PUSHES, load: [9, 11.5], end: 12.2 };
-    return refreshAll();
+  } else {
+    G.sim.letGo();
+    G.check = { t: 0, running: true, label: 'כולם עוזבים…', load: [10, 12.5], end: 13 };
+  }
+  if (LV.free) { camMode = null; setCameraMode(triOn() ? 'triView' : 'orbit'); }
+  refreshAll();
+}
+const standsUp = k => k.tri ? k.tri.up >= 1 : k.raisedOnce && !!k.sim;
+function runCheck() {
+  if (LV.tripod) return startCheckFor();
+  if (LV.free) {
+    // every structure is inspected, one after another, from the first
+    if (!G.klafim.every(standsUp)) return infoCard('יש מבנה שעוד לא עומד', 'המסדר בודק את כל המבנים במגרש. קודם מרימים ומעגנים כל קלף ומקימים כל חצובה.');
+    useKlaf(0);
+    return startCheckFor();
   }
   if (LV.carousel) {
     if (!G.cube.sim) return;
@@ -2422,11 +2498,6 @@ function runCheck() {
     // with the outer guy lines first; then they come down too, and a braced cube stands by itself
     G.check = { t: 0, running: true, label: 'כולם עוזבים…', pushes: CUBE_PUSHES, release: 8, load: [18, 20.5], end: 21 };
     return refreshAll();
-  }
-  if (LV.free && G.klafim.length > 1) {
-    // every klaf is inspected, one after another, from the first
-    if (!G.klafim.every(k => k.raisedOnce && k.sim)) return infoCard('יש קלף שעוד לא הורם', 'המסדר בודק את כל הקלפים. קודם מרימים ומעגנים כל אחד מהם.');
-    useKlaf(0); camMode = null; setCameraMode('orbit');
   }
   if (!G.raisedOnce || !G.sim) return infoCard('אין עדיין מה לבדוק', 'קודם בונים את הקלף, דופקים בז״נטים ומרימים אותו.');
   G.sim.letGo();
@@ -2474,7 +2545,7 @@ function checkPush(dt) {
   if (c.ride) { const l = rideLabel(c); if (l) c.label = l; }
   if (c.load && c.t >= c.load[0] && c.t <= c.load[1]) {
     c.loading = true;
-    c.label = LV.tripod ? 'המדריך תולה <b>משקל כבד</b> על ראש החצובה' : LV.cube ? 'המדריך תולה <b>דלי מים</b> על הרוחב העליון של כל קלף' : 'המדריך תולה <b>דלי מים</b> על הרוחב העליון';
+    c.label = triOn() ? 'המדריך תולה <b>משקל כבד</b> על ראש החצובה' : LV.cube ? 'המדריך תולה <b>דלי מים</b> על הרוחב העליון של כל קלף' : 'המדריך תולה <b>דלי מים</b> על הרוחב העליון';
   }
   if (c.t > (c.end || 10.2)) { c.running = false; finish(); }
   return push;
@@ -2679,12 +2750,7 @@ function score() {
     hintsAllowed, hintCost, penalty, all };
 }
 function finish() {
-  if (LV.free && G.ki < G.klafim.length - 1) { // on to the next klaf
-    useKlaf(G.ki + 1); camMode = null; setCameraMode('orbit');
-    G.sim.letGo();
-    G.check = { t: 0, running: true, label: 'כולם עוזבים…', load: [10, 12.5], end: 13 };
-    return refreshAll();
-  }
+  if (LV.free && G.ki < G.klafim.length - 1) { useKlaf(G.ki + 1); return startCheckFor(); } // on to the next structure
   if (LV.free) return finishFree();
   if (LV.sandbox) return finishFreeTri();
   G.endedAt = G.endedAt || performance.now();
@@ -2849,7 +2915,7 @@ function useHint(s) {
 function restart() {
   closeModal();
   clearJobs();
-  if (LV.free) { LV.klafim.length = 1; Object.assign(LV.klafim[0], { z0: 0, he: 'קלף' }); delete LV.klafim[0].short; setPlan([], []); freeCfg(LV.klafim[0], []); G && (G.armed = null); controls.enabled = true; STAGES = stageList(); makeChips(); }
+  if (LV.free) { LV.klafim.length = 1; Object.assign(LV.klafim[0], { z0: 0, he: freeFirst === 'tripod' ? 'חצובה' : 'קלף', kind: freeFirst }); delete LV.klafim[0].short; setPlan([], []); freeCfg(LV.klafim[0], []); G && (G.armed = null); controls.enabled = true; STAGES = stageList(); makeChips(); }
   if (LV.tripod) setPlan(TRI_SLOTS, TRI_JOINTS);
   G = freshState();
   // each klaf's drawing on the ground, at its size (the carousel's 5 m klafim need a bigger sheet)
@@ -2870,7 +2936,7 @@ function restart() {
     m.blueprint.material.opacity = 0; m.blueprint.visible = false;
     if (used) m.blueprint.position.z = BP.v0 + LV.klafim[i].z0;
   });
-  triStakeMeshes.forEach(m => { m.visible = false; });
+  KM.forEach(m => m.triStakes.forEach(x => { x.visible = false; }));
   if (LV.cube) { for (const side of [-1, 1]) drawSideSheet(CM.sheets[side], LV.cube, side, LV.klafim.map(k => k.he)); drawTopSheet(CM.sheets[0], LV.cube, LV.klafim.map(k => k.he)); }
   $('timer').textContent = '0:00';
   drawPlaza();
@@ -3024,7 +3090,10 @@ function playLevel(n) {
   switchLevel(n);
 }
 $('home-plaza').addEventListener('click', showLevels);
-function playFree(lv = FREE_LEVEL) {
+// free build: what the plaza starts with (more klafim and tripods are added as you go)
+let freeFirst = 'klaf';
+function playFree(lv = FREE_LEVEL, first = 'klaf') {
+  freeFirst = first;
   $('home').hidden = true; $('levels').hidden = true;
   LV = lv;
   STAGES = stageList();
@@ -3045,17 +3114,10 @@ $('sketch-file').addEventListener('change', async () => {
     reportError(e);
   }
 });
-function playFreeTripod() {
-  closeModal();
-  $('home').hidden = true; $('levels').hidden = true;
-  LV = FREE_TRIPOD;
-  STAGES = stageList();
-  makeChips();
-  restart();
-}
-$('home-free').addEventListener('click', () => showModal(`<div class="eyebrow">בנייה חופשית</div><h2>מה בונים?</h2>
-  <p><b>קלפים</b>: מתכננים קלף על הרשת, מרימים ומחברים.</p><p><b>חצובה</b>: בוחרים אורך לרגליים ולחיזוקים, ומעמידים את הרגליים איפה שרוצים.</p>`,
-  [['קלפים', () => { closeModal(); playFree(); }, true], ['חצובה', playFreeTripod, true], ['ביטול', closeModal]]));
+$('home-free').addEventListener('click', () => showModal(`<div class="eyebrow">בנייה חופשית</div><h2>במה מתחילים?</h2>
+  <p>במגרש אחד אפשר לבנות כמה קלפים וחצובות. בונים את כולם על הקרקע, ואז מרימים אותם אחד אחרי השני.</p>
+  <p><b>קלף</b>: מתכננים אותו על הרשת. <b>חצובה</b>: בוחרים אורך לרגליים, ומעמידים אותן איפה שרוצים.</p>`,
+  [['קלף', () => { closeModal(); playFree(FREE_LEVEL, 'klaf'); }, true], ['חצובה', () => { closeModal(); playFree(FREE_LEVEL, 'tripod'); }, true], ['ביטול', closeModal]]));
 // the top buttons are wired before anything else here can fail
 $('levels-back').addEventListener('click', showHome);
 $('btn-home').addEventListener('click', () => { closeModal(); showHome(); });
@@ -3275,6 +3337,7 @@ let recT = 0;
 const REPLAY = { before: 1.0, speed: 0.4 };
 function fadedOut() { return G.falling && G.falling.t >= 2.2 && !G.replay; }
 function record(dt) {
+  if (!G.sim) return;
   const ps = G.sim.world.p;
   recT += dt;
   const a = new Float32Array(ps.length * 3);
@@ -3572,7 +3635,7 @@ function drawLashings() {
     g.visible = !fadedOut();
     const n = G.sim ? visNormal() : [0, 1, 0], h = (layerOff(slotById(j.a)) - layerOff(slotById(j.b))) / 2;
     if (j.all) { // one lashing round several poles lying side by side
-      const up = LV.tripod && G.tri.up > 0, d = up ? [0, 1, 0] : poleDir(j.a);
+      const up = triOn() && G.tri.up > 0, d = up ? [0, 1, 0] : poleDir(j.a);
       placeParallelLashing(g, add3(p, [1, 0, 0], -0.07), add3(p, [1, 0, 0], 0.07), d);
       g.children.forEach(c => c.scale.set(up ? 2.3 : 3.6, up ? 2.3 : 1.2, 1));
     } else
@@ -3714,7 +3777,7 @@ function drawGauge() {
   $('gauge-label').textContent = ang < 6 ? 'שוכב' : ang < 82 ? 'עולה' : ang <= 97 ? 'ניצב' : 'עבר את האנך!';
 }
 function drawInspector(push) {
-  if (LV.tripod) return triInspector(push);
+  if (triOn()) return triInspector(push);
   const c = G.check;
   if (!c?.running || G.falling || G.replay) { inspector.clear(); buckets.forEach(b => { b.visible = false; }); return; }
   const cs = G.cube?.sim && cubeStage(G.stage) ? G.cube.sim : null;
@@ -3743,8 +3806,9 @@ function drawInspector(push) {
   }
 }
 function drawPushArrow(push) {
-  if (!push || !(G.sim || G.tri?.sim)) { pushArrow.visible = false; return; }
-  const t = G.tri?.sim ? G.tri.sim.apex() : G.sim.topCentre();
+  const ts = triOn() ? G.tri.sim : null;
+  if (!push || !(ts || G.sim)) { pushArrow.visible = false; return; }
+  const t = ts ? ts.apex() : G.sim.topCentre();
   const d = new THREE.Vector3(...push).normalize();
   pushArrow.visible = true;
   pushArrow.position.set(t[0] - d.x * 1.0, t[1] + 0.1, t[2] - d.z * 1.0);
@@ -3757,7 +3821,7 @@ const CHECK_SPEED = 1.6; // how much faster than real time the push test plays
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   const cs = G.cube?.sim && cubeStage(G.stage) ? G.cube.sim : null;
-  const ts = LV.tripod ? G.tri.sim : null;
+  const ts = triOn() ? G.tri.sim : null;
   const sim = cs || ts || G.sim;
   let push = null;
   if (sim) {
@@ -3767,9 +3831,11 @@ function frame(now) {
     const wobble = !sim.lettingGo && (G.stage === 'raise' || G.stage === 'anchor');
     if (G.replay) stepReplay(dt);
     else {
+      const kiAt = G.ki;
       for (let w = 0; w < warp; w += 1) {
         const h = Math.min(1 / 30, dt * Math.min(1, warp - w));
         push = checkPush(h);
+        if (G.ki !== kiAt) break; // free build: the inspection moved on to the next structure
         const load = G.check?.loading ? (ts ? TRI_TUNING.load : TUNING.loadForce) : 0;
         // the joined structure stands still while it is built: it is tested only in the check (Omer)
         if (ts) { if (G.check?.running || G.falling) ts.step(h, { push, load }); }
@@ -3799,13 +3865,15 @@ function frame(now) {
     drawPoles(); drawLashings(); drawStakes();
   });
   { // free build: the grid lies on the ground while the klaf is designed
-    const show = LV.free && G.stage === 'build';
+    const show = freeKlaf() && G.stage === 'build';
     freeGrid.material.opacity = Math.max(0, Math.min(0.96, freeGrid.material.opacity + (show ? 1 : -1) * dt / 0.4));
     freeGrid.visible = freeGrid.material.opacity > 0.01;
     if (show) freeGrid.position.z = freeGrid.userData.z + z0();
   }
   drawCube(dt);
-  drawCrew(); drawTripod(dt); drawSeat(dt); drawTier(); drawGauge(); drawPushArrow(push); drawInspector(push);
+  drawCrew();
+  eachKlaf((k, i) => { if (k.tri) drawTripod(dt, i === cur); });
+  drawTriShared(dt); drawSeat(dt); drawTier(); drawGauge(); drawPushArrow(push); drawInspector(push);
   updateJobs(dt);
   for (const a of allActors) a.update(dt);
   collectTargets();
