@@ -2367,7 +2367,8 @@ function hintText() {
   if (G.falling) return G.falling.tri ? '<b>החצובה קורסת…</b>' : G.falling.cube ? '<b>המבנה קורס…</b>' : '<b>הקלף קורס…</b>';
   const nPoles = SLOTS.filter(s => b.poles[s.id]).length;
   const nJ = JOINTS.filter(j => b.joints[j.id]).length;
-  if (G.challenge?.kind === 'fix') return `<b>תקנו את המחנה:</b> ${FIX[LV.number].faults} תקלות: כפיתה חסרה, מסוג לא נכון, או סנדה באורך לא נכון`;
+  if (G.challenge?.kind === 'cube' && !G.check) return '<b>קובייה לא שלמה:</b> משלימים לפי תיק המבנה ומזמינים מסדר';
+  if (G.challenge?.kind === 'fix') return '<b>תקנו את המחנה:</b> משהו כאן לא בנוי לפי השרטוט. בודקים מול תיק המבנה';
   // after the first structure's tutorial: no step guidance, only where things stand
   if (!LV.tutorial) return statusText(nPoles, nJ);
   switch (G.stage) {
@@ -3185,7 +3186,7 @@ function breakCamp(ch) {
   }
   useKlaf(0);
   startClock();
-  flashHint(`<b>${ch.faults.length} תקלות מסתתרות ב${G.klafim.length > 1 ? 'קלפים' : 'קלף'}.</b> מוצאים אותן מול תיק המבנה`);
+  flashHint('<b>המחנה לא תקין.</b> בודקים מול תיק המבנה ומזמינים את המדריך');
 }
 // the 2x2 cube stands, both klafim raised and anchored, every joining pole in place but one
 // top connection (Omer, 11-20): the player finds it in the structure file, adds and lashes
@@ -3212,7 +3213,7 @@ function breakCube(ch) {
   useKlaf(0);
   goStage('cube');
   startClock();
-  flashHint('<b>חסר חיבור עליון בקובייה.</b> מוצאים בתיק המבנה איפה, מוסיפים וכופתים, מורידים יתרים פנימיים ומזמינים מסדר');
+  flashHint('<b>קובייה לא שלמה.</b> משלימים לפי תיק המבנה ומזמינים מסדר');
 }
 function faultsLeft() {
   let n = 0;
@@ -3229,7 +3230,7 @@ function fixCheck() {
   if (left) {
     ch.penalty += FIX_PENALTY;
     sfx.buzzer(); fun.shake(0.03, 0.2);
-    return infoCard(left === 1 ? 'נשארה עוד תקלה אחת' : `נשארו עוד ${left} תקלות`, `המדריך לא מגלה איפה. כל בדיקה מוקדמת מוסיפה ${FIX_PENALTY} שניות לזמן.`);
+    return infoCard('המחנה עוד לא תקין', `המדריך לא מגלה מה ואיפה. כל בדיקה מוקדמת מוסיפה ${FIX_PENALTY} שניות לזמן.`);
   }
   G.endedAt = performance.now();
   const sec = elapsed(), med = medalOf(sec, FIX[LV.number].medals);
@@ -3237,7 +3238,7 @@ function fixCheck() {
   sfx.fanfare(); fun.confetti(med === 0 ? 90 : 50);
   showModal(`<div class="eyebrow">תקנו את המחנה</div>
     <h2>${med >= 0 ? `${MEDAL_ICON[med]} מדליית ${MEDAL_HE[med]}` : 'המחנה תקין!'}</h2>
-    <p>תיקנתם את כל ${ch.faults.length} התקלות ב־<b>${fmt(sec)}</b>${ch.penalty ? ` (כולל ${ch.penalty} שניות על בדיקות מוקדמות)` : ''}.</p>
+    <p>המחנה תקין, ב־<b>${fmt(sec)}</b>${ch.penalty ? ` (כולל ${ch.penalty} שניות על בדיקות מוקדמות)` : ''}.</p>
     ${best ? '<p class="ch-best">שיא חדש!</p>' : `<p>השיא שלכם: ${fmt(bestOf(ch))}</p>`}`,
   [['עוד אתגר', showChallenges, true], ['למסך הבית', () => { closeModal(); showHome(); }]]);
   refreshAll();
@@ -3259,11 +3260,11 @@ function challengeRow(ch, label, sub) {
 function showChallenges() {
   showModal(`<div class="eyebrow">אתגרים קצרים</div><h2>אתגרים</h2>
     <div class="ch-grid">
-      ${challengeRow({ kind: 'cube', level: 0 }, 'קובייה 2×2 בלי חיבור עליון', 'הקובייה עומדת, חסר בה חיבור עליון. משלימים ועוברים מסדר')}
+      ${challengeRow({ kind: 'cube', level: 0 }, 'קובייה לא שלמה', 'משלימים ועוברים מסדר')}
       ${challengeRow({ kind: 'speed', level: 1 }, 'מול השעון: קלף 2×2', 'כל המבנה, כמה שיותר מהר')}
       ${challengeRow({ kind: 'speed', level: 3 }, 'מול השעון: חצובה', 'כל המבנה, כמה שיותר מהר')}
-      ${challengeRow({ kind: 'fix', level: 1 }, 'תקנו את המחנה: קלף', `${FIX[1].faults} תקלות בקלף אחד`)}
-      ${challengeRow({ kind: 'fix', level: 2 }, 'תקנו את המחנה: בסיס 2×4', `${FIX[2].faults} תקלות בשלושה קלפים`)}
+      ${challengeRow({ kind: 'fix', level: 1 }, 'תקנו את המחנה: קלף', 'מוצאים מה לא תקין')}
+      ${challengeRow({ kind: 'fix', level: 2 }, 'תקנו את המחנה: בסיס 2×4', 'מוצאים מה לא תקין')}
     </div>`, [['סגירה', () => { closeModal(); showHome(); }]]);
   document.querySelectorAll('.ch-row').forEach(b => b.addEventListener('click', () => playChallenge({ kind: b.dataset.k, level: +b.dataset.l })));
 }
@@ -3870,7 +3871,7 @@ function frame(now) {
   collectTargets();
   updateCamera(dt);
   hintTimer += dt;
-  if (hintTimer > 0.25) { hintTimer = 0; refreshHint(); $('timer').textContent = timerText(); $('tray-count').textContent = G.stage === 'seat' ? `${SEAT.slots.filter(s => G.seat.build.poles[s.id]).length}/${SEAT.slots.length} במושב` : G.stage === 'hang' ? (mastOn() ? 'התורן במקום' : 'חסר תורן') : G.stage === 'cube' ? `${LV.cube.slots.filter(s => G.cube.build.poles[s.id]).length}/${LV.cube.slots.length} בקובייה` : `${SLOTS.filter(s => G.build.poles[s.id]).length}/${SLOTS.length || 6} על השרטוט`; }
+  if (hintTimer > 0.25) { hintTimer = 0; refreshHint(); $('timer').textContent = timerText(); $('tray-count').textContent = G.challenge ? '' : G.stage === 'seat' ? `${SEAT.slots.filter(s => G.seat.build.poles[s.id]).length}/${SEAT.slots.length} במושב` : G.stage === 'hang' ? (mastOn() ? 'התורן במקום' : 'חסר תורן') : G.stage === 'cube' ? `${LV.cube.slots.filter(s => G.cube.build.poles[s.id]).length}/${LV.cube.slots.length} בקובייה` : `${SLOTS.filter(s => G.build.poles[s.id]).length}/${SLOTS.length || 6} על השרטוט`; }
   decor?.tick(now / 1000); placeRaiseIcon();
   fun.tick(dt, camera, toScreen); balanceTick(dt, now / 1000); stepParade(dt);
   fun.preRender(camera);
