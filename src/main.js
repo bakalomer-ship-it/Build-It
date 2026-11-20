@@ -25,6 +25,8 @@ import { sfx, buzz } from './sound.js';
 import { makeDecor } from './decor.js';
 import { makeFun } from './fun.js';
 import { makeBalance, BALANCE } from './balance.js';
+import { SPEED, FIX, FIX_PENALTY, dailyChallenge, rng, medalOf, MEDAL_HE, MEDAL_ICON, bestOf, dailyDone, recordChallenge, today } from './challenges.js';
+import * as rewards from './rewards.js';
 import { Actor, makeCrew, freeActors, CREW } from './crew.js';
 
 const $ = id => document.getElementById(id);
@@ -453,6 +455,7 @@ function goStage(key) {
   const st = STAGES.find(s => s.key === key) || STAGES.find(s => s.id === key && (s.k == null || s.k === G.ki));
   if (!st) return;
   const id = st.id;
+  if (G.challenge?.kind === 'fix' && id !== 'build') return flashHint('בתיקון המחנה עובדים על הקלפים שעל הקרקע. כשמסיימים מזמינים את המדריך');
   if (st.k != null) {
     if (st.k !== G.ki) { clearJobs(); selectPole(null); }
     leaveCube();
@@ -677,7 +680,8 @@ function collectTargets() {
       if (!jointReachable(j, b.poles)) continue;
       if (j.all && !j.all.every(id => jointReachable({ a: id, b: id, at: j.at }, b.poles))) continue; // one lashing round several poles
       const p = jointPos(j); if (!p) continue;
-      T.push({ kind: b.joints[j.id] ? 'lashed' : 'joint', id: j.id, pos: p, show: !b.joints[j.id] });
+      // fixing the broken camp: every joint gets a ring, so a ring alone does not give a fault away
+      T.push({ kind: b.joints[j.id] ? 'lashed' : 'joint', id: j.id, pos: p, show: !b.joints[j.id] || G.challenge?.kind === 'fix' });
     }
     // leg stakes
     if (st !== 'build') for (const s of LEG_STAKES) {
@@ -2265,6 +2269,11 @@ function refreshActions() {
     b.textContent = label; b.addEventListener('click', fn); el.appendChild(b);
   };
   if (G.falling || G.check?.running) return;
+  if (G.challenge?.kind === 'fix') {
+    G.klafim.forEach((k, i) => { if (i !== G.ki) add(`ל${LV.klafim[i].he}`, () => goStage(STAGES.find(q => q.id === 'build' && q.k === i).key), false); });
+    add('המדריך בודק את התיקונים', fixCheck);
+    return;
+  }
   const nx = nextStage();
   const go = label => add(label, () => goStage(nx.key));
   if (LV.tripod) {
@@ -2298,6 +2307,7 @@ function hintText() {
   if (G.falling) return G.falling.tri ? '<b>החצובה קורסת…</b>' : G.falling.cube ? '<b>המבנה קורס…</b>' : '<b>הקלף קורס…</b>';
   const nPoles = SLOTS.filter(s => b.poles[s.id]).length;
   const nJ = JOINTS.filter(j => b.joints[j.id]).length;
+  if (G.challenge?.kind === 'fix') return `<b>תקנו את המחנה:</b> ${FIX[LV.number].faults} תקלות: כפיתה חסרה, מסוג לא נכון, או סנדה באורך לא נכון`;
   // after the first structure's tutorial: no step guidance, only where things stand
   if (!LV.tutorial) return statusText(nPoles, nJ);
   switch (G.stage) {
@@ -2383,7 +2393,7 @@ function refreshAll() {
 
 // ---------------- clock ----------------
 function startClock() { if (!G.startedAt) G.startedAt = performance.now(); }
-function elapsed() { if (!G.startedAt) return 0; return ((G.endedAt || performance.now()) - G.startedAt) / 1000; }
+function elapsed() { if (!G.startedAt) return 0; return ((G.endedAt || performance.now()) - G.startedAt) / 1000 + (G.challenge?.penalty || 0); }
 function fmt(sec) { const m = Math.floor(sec / 60), s = Math.floor(sec % 60); return `${m}:${String(s).padStart(2, '0')}`; }
 
 // ---------------- the push test ----------------
@@ -2683,7 +2693,7 @@ function finish() {
   saveStars(LV.number, s.stars);
   // the scouts use the structure first, and the stars light up as they do (Omer's מסדר idea)
   if (!G.paraded) { G.paraded = true; return celebrate(s, finish); }
-  if (s.stars >= 2) onWin?.(s);
+  const extra = s.stars >= 2 ? (onWin?.(s) || '') : G.challenge ? '<p class="ch-note">באתגר הזמן נספר רק כשכל הכפיתות שבשרטוט כפותות.</p>' : '';
   sfx.ok();
   const stars = [1, 2, 3].map(i => `<span class="${i <= s.stars ? 'on' : ''}">★</span>`).join('');
   const nMissing = s.total - s.tied;
@@ -2692,6 +2702,7 @@ function finish() {
     <div class="eyebrow">תוצאות המסדר</div>
     <h2>${s.stars === 3 ? 'בנייה מושלמת!' : s.stars ? 'עברתם את השלב' : 'עוד לא עברתם את השלב'}</h2>
     <div class="stars">${stars}</div>
+    ${extra}
     <ul class="inspect">
       <li class="ok">${LV.tripod ? 'החצובה עמדה' : LV.carousel ? 'מסגרת הקרוסלה עמדה' : LV.cube ? 'הקובייה עמדה' : 'הקלף עמד'} בדחיפות מכל הכיוונים${LV.cube ? ', גם בלי יתרים' : ''}</li>
       ${LV.cube ? `<li class="ok">איקס מרחבי מלא בכל צד ובחלק העליון${LV.cube.bays > 1 ? ', וגם בחיבור בין הקוביות' : ''}</li>` : ''}
@@ -2865,6 +2876,7 @@ function restart() {
   drawPlaza();
   goStage(STAGES[0].key);
   refreshAll();
+  startChallenge();
 }
 function switchLevel(n) {
   resetPlan();
@@ -2978,6 +2990,10 @@ function showHome() {
   try { drawPlaza(); } catch (e) { reportError(e); }
   const total = LEVELS.reduce((a, l) => a + starsOf(l.number), 0);
   $('home-stars').textContent = total ? `★ ${total} / ${LEVELS.length * 3}` : 'מתחילים מהקלף הראשון';
+  const st = rewards.streak(), rb = document.getElementById('home-rewards');
+  if (rb) rb.querySelector('span').textContent = st ? `🔥 ${st} ${st === 1 ? 'יום' : 'ימים'} ברצף${rewards.playedToday() ? '' : ' · שחקו היום כדי להמשיך'}` : 'חבלים צבעוניים ועוד';
+  const cb = document.getElementById('home-challenges');
+  if (cb) cb.classList.toggle('done', !!dailyDone());
   $('levels').hidden = true; $('home').hidden = false;
 }
 function showLevels() {
@@ -3047,6 +3063,7 @@ $('btn-level').addEventListener('click', () => { closeModal(); showLevels(); });
 try { decor = makeDecor({
   scene, camera, controls, canvas, allOpen: ALL_LEVELS_OPEN,
   stars: () => LEVELS.reduce((a, l) => a + starsOf(l.number), 0),
+  streak: () => rewards.bestStreak(),
   onExit: () => { camMode = null; showHome(); },
 }); } catch (e) { reportError(e); }
 $('home-decor').addEventListener('click', () => {
@@ -3054,6 +3071,154 @@ $('home-decor').addEventListener('click', () => {
   closeModal(); closePicker(); camTween = null; closeup = null; camMode = null;
   decor.enter();
 });
+// ---------------- short challenges (challenges.js) ----------------
+// A speed run, "fix the broken camp" and a challenge of the day. They are played on a
+// copy of the level without the tutorial; a speed run is the whole level against the
+// clock, and a fixed camp is judged by the מדריך right on the ground.
+function timerText() {
+  const t = fmt(elapsed()), ch = G.challenge;
+  if (ch?.kind === 'speed') return `${t} · ${MEDAL_ICON[0]} ${fmt(SPEED[LV.number].medals[0])}`;
+  if (ch?.kind === 'fix') return `${t} · ${MEDAL_ICON[0]} ${fmt(FIX[LV.number].medals[0])}`;
+  return t;
+}
+const chName = ch => `${ch.kind === 'speed' ? 'מול השעון' : 'תקנו את המחנה'}: ${LEVELS[ch.level - 1].name}`;
+function playChallenge(ch) {
+  closeModal();
+  $('home').hidden = true; $('levels').hidden = true;
+  resetPlan();
+  LV = { ...LEVELS[ch.level - 1], tutorial: false, challenge: ch };
+  STAGES = stageList(); makeChips(); restart();
+}
+// restart() calls this: a challenge starts again from the same point
+function startChallenge() {
+  const ch = LV.challenge; if (!ch) return;
+  G.challenge = { ...ch, penalty: 0, calls: 0 };
+  if (ch.kind === 'fix') breakCamp(G.challenge);
+  else flashHint(`<b>מול השעון:</b> בונים את כל המבנה ומזמינים מסדר. הזמן נספר רק אם כל הכפיתות כפותות`);
+  refreshAll();
+}
+// lay every klaf on its drawing, built and lashed, then hide faults in them
+function breakCamp(ch) {
+  const rand = rng(ch.seed ?? Math.floor(Math.random() * 1e9));
+  const spots = [];
+  eachKlaf((k, i) => {
+    const b = G.build;
+    for (const sl of SLOTS) b.poles[sl.id] = { length: sl.length };
+    for (const j of JOINTS) b.joints[j.id] = j.correct;
+    for (const j of JOINTS) spots.push({ i, kind: rand() < 0.5 ? 'miss' : 'type', id: j.id });
+    // a pole too long: only where the pile holds a longer one
+    for (const sl of SLOTS) { const longer = (LV.stockExtra || []).filter(l => l > sl.length + 0.05).sort((a, c) => a - c)[0]; if (longer) spots.push({ i, kind: 'long', id: sl.id, len: longer }); }
+  });
+  ch.faults = [];
+  const used = new Set(), longs = new Set();
+  let guard = 0;
+  while (ch.faults.length < FIX[LV.number].faults && guard++ < 500) {
+    const f = spots[Math.floor(rand() * spots.length)];
+    const key = f.i + ':' + f.id;
+    if (used.has(key)) continue;
+    if (f.kind === 'long' && (longs.has(f.len) || rand() < 0.5)) continue; // one of each spare pole at most
+    used.add(key); if (f.kind === 'long') longs.add(f.len);
+    ch.faults.push(f);
+  }
+  for (const f of ch.faults) {
+    const b = G.klafim[f.i].build;
+    if (f.kind === 'miss') delete b.joints[f.id];
+    else if (f.kind === 'type') { const j = JOINTS.find(q => q.id === f.id); const other = LASHING_ORDER.filter(t => t !== j.correct); b.joints[f.id] = other[Math.floor(rand() * other.length)]; }
+    else b.poles[f.id] = { length: f.len };
+  }
+  useKlaf(0);
+  startClock();
+  flashHint(`<b>${ch.faults.length} תקלות מסתתרות ב${G.klafim.length > 1 ? 'קלפים' : 'קלף'}.</b> מוצאים אותן מול תיק המבנה`);
+}
+function faultsLeft() {
+  let n = 0;
+  eachKlaf(() => {
+    const b = G.build;
+    for (const sl of SLOTS) if (!b.poles[sl.id] || Math.abs(b.poles[sl.id].length - sl.length) > 0.05) n++;
+    for (const j of JOINTS) if (b.joints[j.id] !== j.correct) n++;
+  });
+  return n;
+}
+function fixCheck() {
+  const ch = G.challenge, left = faultsLeft();
+  ch.calls++;
+  if (left) {
+    ch.penalty += FIX_PENALTY;
+    sfx.buzzer(); fun.shake(0.03, 0.2);
+    return infoCard(left === 1 ? 'נשארה עוד תקלה אחת' : `נשארו עוד ${left} תקלות`, `המדריך לא מגלה איפה. כל בדיקה מוקדמת מוסיפה ${FIX_PENALTY} שניות לזמן.`);
+  }
+  G.endedAt = performance.now();
+  const sec = elapsed(), med = medalOf(sec, FIX[LV.number].medals);
+  const best = recordChallenge(ch, sec);
+  const opened = rewards.recordDay();
+  sfx.fanfare(); fun.confetti(med === 0 ? 90 : 50);
+  showModal(`<div class="eyebrow">${ch.daily ? 'אתגר היום' : 'תקנו את המחנה'}</div>
+    <h2>${med >= 0 ? `${MEDAL_ICON[med]} מדליית ${MEDAL_HE[med]}` : 'המחנה תקין!'}</h2>
+    <p>תיקנתם את כל ${ch.faults.length} התקלות ב־<b>${fmt(sec)}</b>${ch.penalty ? ` (כולל ${ch.penalty} שניות על בדיקות מוקדמות)` : ''}.</p>
+    ${best ? '<p class="ch-best">שיא חדש!</p>' : `<p>השיא שלכם: ${fmt(bestOf(ch))}</p>`}
+    ${streakNote(opened)}`,
+  [['עוד אתגר', showChallenges, true], ['למסך הבית', () => { closeModal(); showHome(); }]]);
+  refreshAll();
+}
+// a structure passed with every lashing tied (two stars or more)
+onWin = s => {
+  const opened = rewards.recordDay();
+  const ch = G.challenge;
+  if (ch?.kind !== 'speed') return streakNote(opened);
+  const sec = s.sec, med = medalOf(sec, SPEED[LV.number].medals), best = recordChallenge(ch, sec);
+  if (med >= 0) fun.confetti(40);
+  return `<div class="ch-result">${med >= 0 ? `${MEDAL_ICON[med]} <b>מדליית ${MEDAL_HE[med]}</b> מול השעון` : 'בלי מדליה הפעם'} · ${fmt(sec)}${best ? ' · <b>שיא חדש!</b>' : ''}</div>${streakNote(opened)}`;
+};
+function streakNote(opened) {
+  const n = rewards.streak();
+  const got = opened.length ? `<br>נפתח: ${opened.map(o => `<b>${o.he}</b>`).join(', ')}` : '';
+  return n ? `<p class="ch-streak">🔥 רצף של ${n} ${n === 1 ? 'יום' : 'ימים'}${got}</p>` : '';
+}
+function challengeRow(ch, label, sub) {
+  const best = bestOf(ch), m = best != null ? medalOf(best, (ch.kind === 'speed' ? SPEED : FIX)[ch.level].medals) : -1;
+  return `<button type="button" class="ch-row" data-k="${ch.kind}" data-l="${ch.level}"><span class="ch-nm">${label}</span><span class="ch-sub">${sub}</span>
+    <span class="ch-best">${best != null ? `${m >= 0 ? MEDAL_ICON[m] : ''} ${fmt(best)}` : 'עוד לא'}</span></button>`;
+}
+function showChallenges() {
+  const d = dailyChallenge(), done = dailyDone();
+  showModal(`<div class="eyebrow">אתגרים קצרים</div><h2>אתגרים</h2>
+    <button type="button" class="ch-daily${done ? ' done' : ''}" id="ch-daily"><span class="ch-tag">אתגר היום · ${today().split('-').reverse().slice(0, 2).join('.')}</span>
+      <span class="ch-nm">${chName(d)}</span><span class="ch-sub">${done ? `✓ הושלם היום (${fmt(done.sec)})` : 'אותו אתגר לכולם היום. שומר על הרצף 🔥'}</span></button>
+    <div class="ch-grid">
+      ${challengeRow({ kind: 'speed', level: 1 }, 'מול השעון: קלף 2×2', 'כל המבנה, כמה שיותר מהר')}
+      ${challengeRow({ kind: 'speed', level: 3 }, 'מול השעון: חצובה', 'כל המבנה, כמה שיותר מהר')}
+      ${challengeRow({ kind: 'fix', level: 1 }, 'תקנו את המחנה: קלף', `${FIX[1].faults} תקלות בקלף אחד`)}
+      ${challengeRow({ kind: 'fix', level: 2 }, 'תקנו את המחנה: בסיס 2×4', `${FIX[2].faults} תקלות בשלושה קלפים`)}
+    </div>`, [['סגירה', () => { closeModal(); showHome(); }]]);
+  $('ch-daily').addEventListener('click', () => playChallenge(d));
+  document.querySelectorAll('.ch-row').forEach(b => b.addEventListener('click', () => playChallenge({ kind: b.dataset.k, level: +b.dataset.l })));
+}
+// ---------------- rewards for a streak (rewards.js) ----------------
+function showRewards() {
+  const best = rewards.bestStreak(), now = rewards.streak(), ch = rewards.chosen();
+  const open = r => ALL_LEVELS_OPEN || best >= r.streak;
+  const opt = (kind, r, swatch) => `<button type="button" class="rw-opt${ch[kind] === r.id ? ' on' : ''}${open(r) ? '' : ' locked'}" data-kind="${kind}" data-id="${r.id}">
+    <span class="rw-sw" style="background:${swatch}"></span><span>${r.he}</span>${open(r) ? '' : `<span class="rw-lock">🔥 ${r.streak}</span>`}</button>`;
+  const hex = h => '#' + (h ?? 0xd8b878).toString(16).padStart(6, '0');
+  showModal(`<div class="eyebrow">פרסים על רצף</div><h2>🔥 ${now} ${now === 1 ? 'יום' : 'ימים'} ברצף</h2>
+    <p>בכל יום שבו מסיימים מבנה (עם כל הכפיתות) או אתגר, הרצף גדל. הפרסים נפתחים לפי הרצף הכי ארוך שלכם (${best}), ולא נלקחים אם מפספסים יום.${ALL_LEVELS_OPEN ? ' <b>גרסת בדיקה: הכול פתוח.</b>' : ''}</p>
+    <div class="rw-title">צבע החבלים</div><div class="rw-row">${rewards.ROPES.map(r => opt('rope', r, hex(r.hex))).join('')}</div>
+    <div class="rw-title">הצוות</div><div class="rw-row">${rewards.LOOKS.map(r => opt('look', r, hex(r.cap))).join('')}</div>
+    <div class="rw-title">למגרש (בקישוט המגרש)</div><p class="rw-note">שרשרת פנסים 🔥 2 · ערסל 🔥 4 · פעמון המחנה 🔥 6</p>`,
+  [['סגירה', () => { closeModal(); showHome(); }, true]]);
+  document.querySelectorAll('.rw-opt').forEach(b => b.addEventListener('click', () => {
+    const r = (b.dataset.kind === 'rope' ? rewards.ROPES : rewards.LOOKS).find(q => q.id === b.dataset.id);
+    if (!open(r)) return;
+    rewards.choose(b.dataset.kind, r.id); sfx.tick(); showRewards();
+  }));
+}
+try { rewards.apply(); } catch (e) { reportError(e); }
+{
+  const grid = document.querySelector('.home-soon');
+  const tile = (id, name, sub) => { const b = Object.assign(document.createElement('button'), { type: 'button', id, className: 'soon open hot', innerHTML: `<b>${name}</b><span>${sub}</span>` }); grid.prepend(b); return b; };
+  tile('home-rewards', 'פרסים ורצף', 'חבלים צבעוניים ועוד').addEventListener('click', showRewards);
+  tile('home-challenges', 'אתגרים', 'אתגר היום ועוד').addEventListener('click', showChallenges);
+}
 // a direct link to a level (?level=2) skips the home screen
 if (new URLSearchParams(location.search).get('level')) $('home').hidden = true; else showHome();
 
@@ -3646,7 +3811,7 @@ function frame(now) {
   collectTargets();
   updateCamera(dt);
   hintTimer += dt;
-  if (hintTimer > 0.25) { hintTimer = 0; refreshHint(); $('timer').textContent = fmt(elapsed()); $('tray-count').textContent = G.stage === 'seat' ? `${SEAT.slots.filter(s => G.seat.build.poles[s.id]).length}/${SEAT.slots.length} במושב` : G.stage === 'hang' ? (mastOn() ? 'התורן במקום' : 'חסר תורן') : G.stage === 'cube' ? `${LV.cube.slots.filter(s => G.cube.build.poles[s.id]).length}/${LV.cube.slots.length} בקובייה` : `${SLOTS.filter(s => G.build.poles[s.id]).length}/${SLOTS.length || 6} על השרטוט`; }
+  if (hintTimer > 0.25) { hintTimer = 0; refreshHint(); $('timer').textContent = timerText(); $('tray-count').textContent = G.stage === 'seat' ? `${SEAT.slots.filter(s => G.seat.build.poles[s.id]).length}/${SEAT.slots.length} במושב` : G.stage === 'hang' ? (mastOn() ? 'התורן במקום' : 'חסר תורן') : G.stage === 'cube' ? `${LV.cube.slots.filter(s => G.cube.build.poles[s.id]).length}/${LV.cube.slots.length} בקובייה` : `${SLOTS.filter(s => G.build.poles[s.id]).length}/${SLOTS.length || 6} על השרטוט`; }
   decor?.tick(now / 1000); placeRaiseIcon();
   fun.tick(dt, camera, toScreen); balanceTick(dt, now / 1000); stepParade(dt);
   fun.preRender(camera);
