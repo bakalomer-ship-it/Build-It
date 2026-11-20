@@ -3864,7 +3864,7 @@ function frame(now) {
   }
   drawCube(dt);
   drawCrew();
-  eachKlaf((k, i) => { if (k.tri) drawTripod(dt, i === cur); });
+  if (G.klafim.some(k => k.tri)) eachKlaf((k, i) => { if (k.tri) drawTripod(dt, i === cur); });
   drawTriShared(dt); drawSeat(dt); drawTier(); drawGauge(); drawPushArrow(push); drawInspector(push);
   updateJobs(dt);
   for (const a of allActors) a.update(dt);
