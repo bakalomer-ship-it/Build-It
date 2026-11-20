@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Scout pioneering (בנייה מחנאית) game, level 1 web prototype",
   "scripts": {
-    "test": "node tools/simtest.mjs && node tools/cubetest.mjs && node tools/tripodtest.mjs && node tools/carouseltest.mjs",
+    "test": "node tools/simtest.mjs && node tools/cubetest.mjs && node tools/tripodtest.mjs && node tools/carouseltest.mjs && node tools/leantest.mjs",
     "build:single": "node tools/build-single.mjs"
   },
   "devDependencies": {

@@ -2,6 +2,7 @@
 // plan in level1.js) plus, for the cube, the side poles that join them.
 // Sizes come from blueprints.js.
 import { SIZES } from './blueprints.js';
+import { fitAllowance } from './allowance.js';
 import { LEVEL as KLAF } from './level1.js';
 import { GATE_PLAN, BACK_PLAN, JOIN, CAR, CAR_LEG_V } from './carousel.js';
 
@@ -105,12 +106,13 @@ function makeCube(bays) {
     add(topX(b, bays));
     if (b < bays - 1) add(linkX(b));
   }
+  fitAllowance(slots, joints); // מרחק כפיתה
   return { depth: D, bays, span: bays * D, slots, joints };
 }
 // heights on each leg where a side pole is lashed (the legs need a point there)
 const legV = bays => [C.sideBottomHeight, C.sideTopHeight, C.sideDiagLow, C.sideDiagHigh].flatMap(v => [...Array(bays).keys()].map(b => v + b * BAY_DV));
 const CUBE_LEG_V = legV(1), BASE_LEG_V = legV(2);
-const IN = C.innerGuyDistance;
+// every guy line, front or back, reaches a stake one klaf-height out at 45° (Omer, 11-20)
 
 export const LEVELS = [
   {
@@ -125,9 +127,9 @@ export const LEVELS = [
     number: 2, name: 'בסיס מתקן 2×4', tutorial: false, targetTimeSec: 26 * 60,
     stockExtra: [3.0, 2.2, 1.6], ropeSpare: 3, crew: 6,
     klafim: [
-      { ...SOLO, he: 'קלף קדמי', short: 'א׳', backDist: IN, anchorX: { front: 1.05, back: 0.65 }, inner: 1, extraLegV: BASE_LEG_V },
-      { ...SOLO, he: 'קלף אמצעי', short: 'ב׳', z0: D, frontDist: IN, backDist: IN, pullDist: 1.3, anchorX: { front: 0.65, back: 0.65 }, inner: 'both', extraLegV: BASE_LEG_V },
-      { ...SOLO, he: 'קלף אחורי', short: 'ג׳', z0: 2 * D, frontDist: IN, pullDist: 1.3, anchorX: { front: 0.65, back: 1.05 }, inner: -1, extraLegV: BASE_LEG_V },
+      { ...SOLO, he: 'קלף קדמי', short: 'א׳', inner: 1, extraLegV: BASE_LEG_V },
+      { ...SOLO, he: 'קלף אמצעי', short: 'ב׳', z0: D, inner: 'both', extraLegV: BASE_LEG_V },
+      { ...SOLO, he: 'קלף אחורי', short: 'ג׳', z0: 2 * D, inner: -1, extraLegV: BASE_LEG_V },
     ],
     cube: makeCube(2),
   },
@@ -143,11 +145,12 @@ export const LEVELS = [
     // קרוסלה מחנאית on a 5×5×5 cube (Omer, 2026-11-18; see carousel.js)
     number: 4, name: 'קרוסלה 5×5', tutorial: false, targetTimeSec: 45 * 60, carousel: true, camScale: 2.1,
     stockExtra: [6.0, 4.0, 3.0, 2.0, 1.2], ropeSpare: 4, crew: 6,
+    // every guy line, front or back, leaves at 45° and reaches a stake as far out as the front ones (Omer, 11-20)
     klafim: [
-      { ...SOLO, he: 'קלף השער', short: 'א׳', plan: GATE_PLAN, frontDist: CAR.guyDistance, backDist: CAR.innerGuyDistance, pullDist: CAR.guyDistance + 1.4,
-        anchorX: { front: 1.05, back: 0.65 }, inner: 1, extraLegV: CAR_LEG_V, backGripCap: CAR.backGripCap },
-      { ...SOLO, he: 'קלף אחורי', short: 'ב׳', plan: BACK_PLAN, z0: CAR.width, frontDist: CAR.innerGuyDistance, backDist: CAR.guyDistance, pullDist: 2.2,
-        anchorX: { front: 0.65, back: 1.05 }, inner: -1, extraLegV: CAR_LEG_V, backGripCap: CAR.backGripCap },
+      { ...SOLO, he: 'קלף השער', short: 'א׳', plan: GATE_PLAN, frontDist: CAR.guyDistance, backDist: CAR.guyDistance, pullDist: CAR.guyDistance + 1.4,
+        anchorX: { front: 1.05, back: 1.05 }, inner: 1, extraLegV: CAR_LEG_V, backGripCap: CAR.backGripCap },
+      { ...SOLO, he: 'קלף אחורי', short: 'ב׳', plan: BACK_PLAN, z0: CAR.width, frontDist: CAR.guyDistance, backDist: CAR.guyDistance, pullDist: CAR.guyDistance + 1.4,
+        anchorX: { front: 1.05, back: 1.05 }, inner: -1, extraLegV: CAR_LEG_V, backGripCap: CAR.backGripCap },
     ],
     cube: JOIN,
   },
@@ -166,8 +169,8 @@ export const CUBE_LEVEL = {
     number: 0, name: 'קובייה 2×2', tutorial: false, targetTimeSec: 16 * 60,
     stockExtra: [3.0, 2.2, 1.6], ropeSpare: 2, crew: 6, // a proper klaf raise takes 6 (Omer)
     klafim: [
-      { ...SOLO, he: 'קלף קדמי', short: 'א׳', backDist: IN, anchorX: { front: 1.05, back: 0.65 }, inner: 1, extraLegV: CUBE_LEG_V },
-      { ...SOLO, he: 'קלף אחורי', short: 'ב׳', z0: D, frontDist: C.innerGuyDistance, pullDist: 1.3, anchorX: { front: 0.65, back: 1.05 }, inner: -1, extraLegV: CUBE_LEG_V },
+      { ...SOLO, he: 'קלף קדמי', short: 'א׳', inner: 1, extraLegV: CUBE_LEG_V },
+      { ...SOLO, he: 'קלף אחורי', short: 'ב׳', z0: D, inner: -1, extraLegV: CUBE_LEG_V },
     ],
     cube: makeCube(1),
   };

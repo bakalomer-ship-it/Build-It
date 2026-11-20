@@ -2,6 +2,7 @@
 // in one shared physics world, joined by the side poles the player lashes
 // on, and braced by the spatial Xs (איקסים מרחביים).
 import { World } from './physics.js';
+import { LASH_ALLOW } from './blueprints.js';
 import { KlafSim, TUNING, slotById } from './klafSim.js';
 import { LEVEL, GUYS } from './level1.js';
 
@@ -17,7 +18,7 @@ export function cubeJointReachable(j, cube, poles) {
   for (const sid of j.b ? [j.a, j.b] : [j.a]) {
     const p = poles[sid]; if (!p) return false;
     const slot = cube.slots.find(s => s.id === sid);
-    if (Math.abs(cubeSlotParam(slot, j.at)) > p.length / 2 - 0.04) return false;
+    if (Math.abs(cubeSlotParam(slot, j.at)) > p.length / 2 - LASH_ALLOW + 0.005) return false;
   }
   return true;
 }

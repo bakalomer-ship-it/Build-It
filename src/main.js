@@ -12,10 +12,10 @@ import { FREE_LEVEL, GRID, POLE_MIN, POLE_MAX, layPole, onSheet, idFor, slotFor,
 import { SIZES } from './blueprints.js';
 import { KlafSim, TUNING, jointReachable, guyAnchor, slotById, slotParam, slotPoint, klafToWorld } from './klafSim.js';
 import { CubeSim, cubeSlotPoint, cubeSlotParam, cubeJointReachable } from './cubeSim.js';
-import { LEVELS } from './levels.js';
+import { LEVELS, CUBE_LEVEL } from './levels.js';
 import { loadSketch } from './sketch.js';
 import { CAR, SEAT, SEAT_C, MAST, MAST_JOINTS, HANG_ROPES, PIVOT, CarouselSim, CAR_TUNING, mastReaches, mastTopY, seatY, cornerAt, KLAF_XS } from './carousel.js';
-import { TRI, TRI_SLOTS, TRI_JOINTS, LEG_IDS, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, TRI_TUNING, TripodSim, startFeet, planFeet, standing, braceReaches, fitsPlan } from './tripod.js';
+import { TRI, TRI_SLOTS, TRI_JOINTS, LEG_IDS, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, TRI_TUNING, TripodSim, startFeet, planFeet, standing, braceReaches, fitsPlan, setLashFor } from './tripod.js';
 import {
   R, makeRenderer, makeWorld, makeBlueprintMesh, drawBlueprint, BP, makePoleMesh, placeCylinder, makeSideSheet, drawSideSheet, makeTopSheet, drawTopSheet, POLE_LOOK,
   makeLashing, placeLashing, placeParallelLashing, RopeViz, makeStake, makeDriver, makeFreeGrid, makeTripodSheet, drawTripodFolder,
@@ -23,6 +23,9 @@ import {
 } from './scene.js';
 import { sfx, buzz } from './sound.js';
 import { makeDecor } from './decor.js';
+import { makeFun } from './fun.js';
+import { makeBalance, BALANCE } from './balance.js';
+import { SPEED, FIX, CUBE_FIX, FIX_PENALTY, rng, medalOf, MEDAL_HE, MEDAL_ICON, bestOf, recordChallenge } from './challenges.js';
 import { Actor, makeCrew, freeActors, CREW } from './crew.js';
 
 const $ = id => document.getElementById(id);
@@ -130,6 +133,8 @@ const canvas = $('scene');
 const renderer = makeRenderer(canvas);
 const scene = new THREE.Scene();
 makeWorld(scene);
+// sounds, shakes, sparkles and confetti (fun.js): only shows what happened, never changes it
+const fun = makeFun(scene);
 const camera = new THREE.PerspectiveCamera(22, 1, 0.2, 400) // narrow lens: almost isometric, like the reference;
 const controls = new OrbitControls(camera, canvas);
 // the plaza's decoration, earned with stars (see decor.js); made once the home screen code is ready
@@ -422,7 +427,7 @@ function makeChips() {
     stagesEl.appendChild(b);
   });
   $('level-name').textContent = LV.name;
-  $('level-no').textContent = LV.sketch ? 'לפי שרטוט' : LV.free ? 'ארגז חול' : `שלב ${LV.number}`;
+  $('level-no').textContent = LV.sketch ? 'לפי שרטוט' : LV.free ? 'ארגז חול' : LV.challenge ? 'אתגר' : `שלב ${LV.number}`;
   $('btn-folder').hidden = !!LV.free && !LV.sketch;
 }
 makeChips();
@@ -462,6 +467,7 @@ function goStage(key) {
   const st = STAGES.find(s => s.key === key) || STAGES.find(s => s.id === key && (s.k == null || s.k === G.ki));
   if (!st) return;
   const id = st.id;
+  if (G.challenge?.kind === 'fix' && id !== 'build') return flashHint('בתיקון המחנה עובדים על הקלפים שעל הקרקע. כשמסיימים מזמינים את המדריך');
   if (st.k != null) {
     if (st.k !== G.ki) { clearJobs(); selectPole(null); camMode = null; }
     leaveCube();
@@ -689,7 +695,8 @@ function collectTargets() {
       if (!jointReachable(j, b.poles)) continue;
       if (j.all && !j.all.every(id => jointReachable({ a: id, b: id, at: j.at }, b.poles))) continue; // one lashing round several poles
       const p = jointPos(j); if (!p) continue;
-      T.push({ kind: b.joints[j.id] ? 'lashed' : 'joint', id: j.id, pos: p, show: !b.joints[j.id] });
+      // fixing the broken camp: every joint gets a ring, so a ring alone does not give a fault away
+      T.push({ kind: b.joints[j.id] ? 'lashed' : 'joint', id: j.id, pos: p, show: !b.joints[j.id] || G.challenge?.kind === 'fix' });
     }
     // leg stakes
     if (st !== 'build') for (const s of LEG_STAKES) {
@@ -853,7 +860,7 @@ function onTarget(t, x, y) {
       G.seat.ropes[t.id] = true; sfx.lash(); buzz(12);
       break;
     }
-    case 'tstake': G.tri.stakes[t.id] = (G.tri.stakes[t.id] || 0) + 1; sfx.hammer(); buzz(15); break;
+    case 'tstake': G.tri.stakes[t.id] = (G.tri.stakes[t.id] || 0) + 1; sfx.hammer(); buzz(15); fun.shake(0.015, 0.12); fun.dust(t.pos, 4, 0.35); break;
     case 'foot': flashHint('<b>גררו את הרגל</b> על הקרקע כדי להזיז אותה'); break;
     case 'guyOff': {
       // an inner guy line comes down: untie it from its stake
@@ -1036,9 +1043,9 @@ function moveFreeKlaf(d) {
 }
 function freeHint(nPoles, nJ) {
   const b = G.build;
-  if (G.armed) return '<b>ציירו את הסנדה על הרשת:</b> גררו מהמקום שבו היא מתחילה עד המקום שבו היא נגמרת. האורך נקבע לפי הגרירה';
+  if (G.armed) return '<b>ציירו את הסנדה על הרשת:</b> גררו מהמקום שבו היא מתחילה עד המקום שבו היא נגמרת. האורך נקבע לפי הגרירה. <b>מרחק כפיתה:</b> הסנדה ממשיכה 15 ס״מ אחרי כל מפגש, אחרת אי אפשר לכפות שם';
   if (!b.poles.legL || !b.poles.legR) return 'הקישו על <b>סנדה</b> וציירו רגל: גררו מ<b>קו הרגליים</b> ישר למעלה. לקלף שתי רגליים, אחת מכל צד של קו האמצע';
-  if (nPoles === 2) return 'יש רגליים. הוסיפו <b>רוחבים ואלכסונים</b>: לוקחים סנדה ומציירים אותה על הרשת';
+  if (nPoles === 2) return 'יש רגליים. הוסיפו <b>רוחבים ואלכסונים</b>: לוקחים סנדה ומציירים אותה על הרשת, 15 ס״מ מעבר לכל רגל (מרחק כפיתה)';
   if (nJ < JOINTS.length) return `סנדות ${nPoles} · כפיתות ${nJ}/${JOINTS.length} · הקישו על <b>טבעת</b> במפגש סנדות כדי לכפות`;
   return `סנדות ${nPoles} · כפיתות ${nJ}/${JOINTS.length} · הכול כפות: <b>הקישו על הקלף</b> כדי להתחיל להרים אותו`;
 }
@@ -1342,7 +1349,7 @@ function drawTripod(dt, current = true) {
     const z = z0();
     TRI_CREW.forEach((k, n) => { const side = n % 2 ? 1 : -1, v = [1.6, 2.9, 4.0][n >> 1]; people[k].set([side * 0.6, 0, z + v], side * -Math.PI / 2, 0.3, 0.7 + t.up * 1.6); });
     if (t.up > 0 || TRI_CREW.every(k => people[k].arrived())) t.up += dt / 1.4;
-    if (t.up >= 1) { t.up = 1; t.raising = false; sfx.ok(); setCameraMode('triView'); refreshAll(); }
+    if (t.up >= 1) { t.up = 1; t.raising = false; sfx.ok(); fun.landed(triApex()); setCameraMode('triView'); refreshAll(); }
   } else if (up && !G.check && !G.falling) {
     st.legs.forEach((L, i) => {
       const n = norm2(L.foot[0] - st.apex[0], L.foot[2] - st.apex[2]);
@@ -1370,7 +1377,7 @@ function watchTripod() {
   const kind = ts.slid() > 0.35 ? 'slid' : ts.sunk() > 0.25 * ts.h0 ? 'down' : null;
   if (!kind) return;
   G.falling = { kind, t: 0, tri: true, explain: explainTri(kind) };
-  sfx.crash(); buzz([60, 40, 90]);
+  sfx.crash(); buzz([60, 40, 90]); fun.collapse(G.sim?.topCentre?.() || [0, 0, z0()]);
   closePicker(); refreshAll();
 }
 function explainTri(kind) {
@@ -1480,7 +1487,8 @@ function cornerPos(k) {
   const c = cornerAt(k), sid = `S.o${k + 1}`;
   return add3(seatPoint(sid, [c[0], LEVEL.poleRadius, c[1]]), seatOff(seatSlot(sid)), 1);
 }
-function mastRopePos() { const ss = G.seat.sim; return ss?.mast ? ss.pos(ss.mast.rope) : [SEAT_C[0], CAR.seat.ropeHeight, SEAT_C[1]]; }
+// the hanging ropes are tied at the centre of the roof X (Omer, 11-20)
+function mastRopePos() { return roofCentre(); }
 // the roof X's centre, where the ring hangs (it moves with the frame in the check)
 function roofCentre() {
   const cs = G.cube?.sim, q = cs?.findParticle('C.xAT', 0);
@@ -1489,7 +1497,7 @@ function roofCentre() {
 const seatPolesIn = () => SEAT.slots.every(s => G.seat.build.poles[s.id]);
 function seatReachable(j) { return cubeJointReachable(j, SEAT, G.seat.build.poles); }
 function liftSeat() {
-  if (!seatPolesIn()) return infoCard('קודם בונים את כל המושב', 'שמונה סנדות למתומן וארבע ל־# שבתוכו, כולן במקומן על השרטוט. רק אז מרימים אותו.');
+  if (!seatPolesIn()) return infoCard('קודם בונים את כל המושב', 'שמונה סנדות למתומן, ארבע ל־# שבתוכו וארבע לאיקס הכפול, כולן במקומן על השרטוט. רק אז מרימים אותו.');
   startClock(); G.seat.lifting = true; refreshAll();
 }
 // back to building the seat: it comes down, and the mast with everything on it comes off
@@ -1631,7 +1639,7 @@ function watchCarousel() {
   else if (ss.mastTilt() > 20) kind = 'tilt';
   if (!kind) return;
   G.falling = { kind, t: 0, carousel: true, explain: explainCarousel(kind) };
-  sfx.crash(); buzz([60, 40, 90]);
+  sfx.crash(); buzz([60, 40, 90]); fun.collapse(G.sim?.topCentre?.() || [0, 0, z0()]);
   closePicker(); refreshAll();
 }
 function explainCarousel(kind) {
@@ -1764,6 +1772,7 @@ function chooseLashing(type) {
     }
     G.tying = { id: t.id, t: 0 };
     sfx.lash();
+    if (!(t.kind === 'lashed' || t.kind === 'stakeLashed' || t.kind === 'clashed' || t.kind === 'blashed' || t.kind === 'tsjd' || t.kind === 'slashed' || t.kind === 'mlashed')) { const pos = t.pos; setTimeout(() => fun.lashed(pos), 280); }
     refreshAll();
   };
   // changing the type of a lashing already tied needs no close-up
@@ -1926,7 +1935,7 @@ function updateLengthPanel() {
   $('lp-value').style.color = LV.free ? '' : Math.abs(d) < 0.05 ? '#9be37f' : d < 0 ? '#ff9a85' : '';
   document.querySelector('.lp-plan').hidden = !!LV.free;
   $('lp-remove').textContent = LV.free ? 'הסרת הסנדה' : 'החזרה לערימה';
-  $('lp-fit').textContent = LV.free ? 'החליקו למעלה או למטה כדי לשנות את האורך' : Math.abs(d) < 0.05 ? 'בדיוק כמו בשרטוט' : d < 0 ? 'קצרה מדי: לא תגיע לכל הכפיתות' : 'ארוכה מהשרטוט: תעבוד, אבל בפחות נקודות';
+  $('lp-fit').textContent = LV.free ? 'החליקו למעלה או למטה כדי לשנות את האורך' : Math.abs(d) < 0.05 ? 'בדיוק כמו בשרטוט' : d < 0 ? 'קצרה מדי: צריך 15 ס״מ מעבר לכל כפיתה (מרחק כפיתה)' : 'ארוכה מהשרטוט: תעבוד, אבל בפחות נקודות';
 }
 function changeLength(steps) {
   const sid = G.selected; if (!sid || !steps) return;
@@ -2130,12 +2139,51 @@ $('crew-list').addEventListener('click', e => { const r = e.target.closest('.cre
     ropeOff += dy;
     $('rp-rope').style.backgroundPosition = `0 ${ropeOff}px`;
     G.sim.pullTo(G.sim.target + dy * 0.16);
+    lastPull = performance.now(); if (G.sim.angle() > 10) balanceFor().stroke(dy);
     const now = performance.now();
     if (now - lastCreak > 180 + Math.random() * 120) { lastCreak = now; sfx.creak(Math.min(1, dy / 12)); }
   });
   pad.addEventListener('pointerup', () => { on = false; });
   pad.addEventListener('pointercancel', () => { on = false; });
 }
+
+// ---------------- the raise's balance (a skill moment, fun.js) ----------------
+// A jerky pull makes the klaf lean; the two buttons steady it. The lean is a real
+// sideways push on the klaf: a klaf built without its X racks under it.
+let bal = null, lastPull = 0, balSign = 1;
+const balUI = Object.assign(document.createElement('div'), { id: 'balance', hidden: true,
+  innerHTML: '<button type="button" class="bal-btn" data-s="-1" aria-label="ליישר שמאלה">◀</button><div class="bal-bar"><div class="bal-zone"></div><div class="bal-dot" id="bal-dot"></div></div><button type="button" class="bal-btn" data-s="1" aria-label="ליישר ימינה">▶</button><div class="bal-label">שומרים על הקלף ישר</div>' });
+$('app').appendChild(balUI);
+function balanceFor() { if (!bal || bal.k !== G.ki || bal.lv !== LV || bal.g !== G) bal = Object.assign(makeBalance(!!LV.tutorial), { k: G.ki, lv: LV, g: G }); return bal; }
+const balanceOn = () => G.stage === 'raise' && !!G.sim && !G.raisedOnce && !G.falling && !G.check;
+function balanceHide() { bal = null; balUI.hidden = true; }
+balUI.addEventListener('pointerdown', e => {
+  const b = e.target.closest('.bal-btn'); if (!b || !balanceOn()) return;
+  e.preventDefault();
+  const B = balanceFor(), before = B.saves;
+  B.steer(+b.dataset.s * balSign);
+  b.classList.remove('hit'); void b.offsetWidth; b.classList.add('hit');
+  sfx.tick();
+  if (B.saves > before) fun.bubble(G.sim.topCentre(), 'הצלה!', 'good');
+});
+function balanceTick(dt, t) {
+  const on = balanceOn() && G.sim.angle() > 10;
+  balUI.hidden = !on;
+  if (!on) return;
+  const B = balanceFor();
+  // which way on the screen the klaf's own sideways is (the camera is turned)
+  const top = G.sim.topCentre(), a = toScreen(top), b = toScreen(add3(top, [1, 0, 0], 1));
+  if (a && b) balSign = b[0] >= a[0] ? 1 : -1;
+  const r = B.tick(dt, performance.now() - lastPull < 450, t);
+  $('bal-dot').style.left = `${50 + B.lean * balSign * 46}%`;
+  balUI.classList.toggle('warn', Math.abs(B.lean) > 0.7);
+  if (r === 'slip') {
+    G.sim.slip(BALANCE.slip);
+    fun.shake(0.05, 0.3); sfx.thud();
+    flashHint('<b>הקלף נטה הצידה</b> והמושכים הורידו אותו מעט. מושכים לאט ובקצב קבוע, ומיישרים בכפתורים ◀ ▶');
+  }
+}
+const balanceLean = () => (balanceOn() && bal && G.sim.angle() > 15 ? bal.force() : 0);
 
 // ---------------- crew jobs: carrying poles, driving stakes ----------------
 const jobs = [];
@@ -2188,7 +2236,7 @@ function updateDrive(job, dt) {
       job.t = 0; job.queued--;
       const store = job.kind === 'leg' ? G.build.stakes : G.build.anchors;
       store[job.id] = (store[job.id] || 0) + 1;
-      sfx.hammer(); buzz(15);
+      sfx.hammer(); buzz(15); fun.shake(0.015, 0.12); fun.dust([(a1.pos.x + a2.pos.x) / 2, 0, (a1.pos.z + a2.pos.z) / 2], 4, 0.35);
       if (job.kind === 'leg' && store[job.id] >= LEG_STAKE_HITS && G.sim && G.sim.angle() < 8) startSim(); // feet now rest against the stakes
       refreshAll();
     }
@@ -2276,6 +2324,11 @@ function refreshActions() {
     b.textContent = label; b.addEventListener('click', fn); el.appendChild(b);
   };
   if (G.falling || G.check?.running) return;
+  if (G.challenge?.kind === 'fix') {
+    G.klafim.forEach((k, i) => { if (i !== G.ki) add(`ל${LV.klafim[i].he}`, () => goStage(STAGES.find(q => q.id === 'build' && q.k === i).key), false); });
+    add('המדריך בודק את התיקונים', fixCheck);
+    return;
+  }
   const nx = nextStage();
   const go = label => add(label, () => goStage(nx.key));
   // where the next button leads, in words
@@ -2314,6 +2367,7 @@ function hintText() {
   if (G.falling) return G.falling.tri ? '<b>החצובה קורסת…</b>' : G.falling.cube ? '<b>המבנה קורס…</b>' : '<b>הקלף קורס…</b>';
   const nPoles = SLOTS.filter(s => b.poles[s.id]).length;
   const nJ = JOINTS.filter(j => b.joints[j.id]).length;
+  if (G.challenge?.kind === 'fix') return `<b>תקנו את המחנה:</b> ${FIX[LV.number].faults} תקלות: כפיתה חסרה, מסוג לא נכון, או סנדה באורך לא נכון`;
   // after the first structure's tutorial: no step guidance, only where things stand
   if (!LV.tutorial) return statusText(nPoles, nJ);
   switch (G.stage) {
@@ -2394,11 +2448,12 @@ function statusText(nPoles, nJ) {
   return '';
 }
 function refreshHint() { if (performance.now() > flashUntil) $('hint-text').innerHTML = hintText(); }
-function refreshAll() { refreshChips(); refreshActions(); refreshHint(); renderPile(); renderCrew(); }
+function refreshAll() {
+  if (LV.tripod) setLashFor(LV.sandbox ? LEG_IDS.filter(id => G.build?.poles[id]).map(id => G.build.poles[id].length) : null); refreshChips(); refreshActions(); refreshHint(); renderPile(); renderCrew(); }
 
 // ---------------- clock ----------------
 function startClock() { if (!G.startedAt) G.startedAt = performance.now(); }
-function elapsed() { if (!G.startedAt) return 0; return ((G.endedAt || performance.now()) - G.startedAt) / 1000; }
+function elapsed() { if (!G.startedAt) return 0; return ((G.endedAt || performance.now()) - G.startedAt) / 1000 + (G.challenge?.penalty || 0); }
 function fmt(sec) { const m = Math.floor(sec / 60), s = Math.floor(sec % 60); return `${m}:${String(s).padStart(2, '0')}`; }
 
 // ---------------- the push test ----------------
@@ -2513,7 +2568,7 @@ const topMissing = b => !b.poles.topH || !b.joints.J3 || !b.joints.J4;
 function watchSim(dt) {
   const sim = G.sim; if (!sim || G.falling) return;
   const ang = sim.angle(), top = sim.topCentre();
-  if (ang > 82 && ang < 98) { G.uprightFor += dt; if (G.uprightFor > 0.6 && !G.raisedOnce) { G.raisedOnce = true; sfx.ok(); if (G.stage === 'raise') setTimeout(() => G.stage === 'raise' && !G.falling && goStage('anchor'), 500); refreshAll(); } }
+  if (ang > 82 && ang < 98) { G.uprightFor += dt; if (G.uprightFor > 0.6 && !G.raisedOnce) { G.raisedOnce = true; sfx.ok(); fun.landed(top); balanceHide(); if (G.stage === 'raise') setTimeout(() => G.stage === 'raise' && !G.falling && goStage('anchor'), 500); refreshAll(); } }
   else G.uprightFor = 0;
   let kind = null;
   if (sim.baseSlid() > 0.35) kind = 'slid';
@@ -2524,7 +2579,7 @@ function watchSim(dt) {
   if (kind) {
     G.falling = { kind, t: 0, explain: explain(kind) };
     sim.flat = false;
-    sfx.crash(); buzz([60, 40, 90]);
+    sfx.crash(); buzz([60, 40, 90]); fun.collapse(G.sim?.topCentre?.() || [0, 0, z0()]);
     closePicker(); refreshAll();
   }
 }
@@ -2538,7 +2593,7 @@ function watchCube(dt) {
   else if (cs.lowestTop() < 0.7 * (LV.cube.height ?? 2.0)) kind = 'down';
   if (kind) {
     G.falling = { kind, t: 0, cube: true, explain: explainCube(kind) };
-    sfx.crash(); buzz([60, 40, 90]);
+    sfx.crash(); buzz([60, 40, 90]); fun.collapse(G.sim?.topCentre?.() || [0, 0, z0()]);
     closePicker(); refreshAll();
   }
 }
@@ -2565,10 +2620,16 @@ function explainCube(kind) {
   if (missH.length) return { rule: 'שני הקלפים מחוברים בחיבור תחתון ועליון בכל צד', detail: `חסרות ${missH.length} סנדות חיבור, והקלפים זזו זה מול זה.`, focus: { cubeGhosts: [] } };
   return { rule: 'הקובייה לא עמדה בבדיקה', detail: 'בדקו בשרטוטי הצדדים שכל הכפיתות כפותות.', focus };
 }
-function xComplete() {
+// the joints that hold a diagonal to the rest of the klaf (not its crossing with the other diagonal)
+const diagJoints = d => JOINTS.filter(j => (j.a === d || j.b === d) && !(slotById(j.a === d ? j.b : j.a)?.id || '').startsWith('diag'));
+function diagOk(d) {
   const b = G.build;
-  const has = (d, j1, j2) => b.poles[d] && b.joints[j1] && b.joints[j2] && jointReachable(JOINTS.find(j => j.id === j1), b.poles) && jointReachable(JOINTS.find(j => j.id === j2), b.poles);
-  return { A: has('diagA', 'J5', 'J6'), B: has('diagB', 'J7', 'J8') };
+  return !!b.poles[d] && diagJoints(d).every(j => b.joints[j.id] && jointReachable(j, b.poles));
+}
+// A: every diagonal of the A family (diagA, and diagC on klafim with two X's); B likewise
+function xComplete() {
+  const fam = ds => ds.filter(d => slotById(d)).every(diagOk);
+  return { A: fam(['diagA', 'diagC']), B: fam(['diagB', 'diagD']) };
 }
 function explain(kind) {
   const e = explainRule(kind);
@@ -2590,13 +2651,14 @@ function explainRule(kind) {
     let detail;
     if (!x.A && !x.B) detail = `אין בקלף איקס. מלבן של סנדות עם כפיתות בפינות בלבד מתעקם למקבילית, והקלף נפל ${dir}.`;
     else {
-      const miss = slotById(x.A ? 'diagB' : 'diagA').he.match(/\((.*)\)/)[1];
-      detail = `חסר האלכסון שהולך מ${miss}, או שאחד הקצוות שלו לא כפות לרגל, והקלף נפל ${dir}. אלכסון לבד מחזיק רק בכיוון אחד: כשמושכים אותו הוא נמתח ומחזיק, כשדוחפים אותו הוא מתכופף.`;
+      const d = ['diagA', 'diagB', 'diagC', 'diagD'].find(q => slotById(q) && !diagOk(q)), he = slotById(d).he, m = he.match(/\((.*)\)/);
+      detail = `${m ? `חסר האלכסון שהולך מ${m[1]}` : `חסר האלכסון "${he}"`}, או שאחד הקצוות שלו לא כפות, והקלף נפל ${dir}. אלכסון לבד מחזיק רק בכיוון אחד: כשמושכים אותו הוא נמתח ומחזיק, כשדוחפים אותו הוא מתכופף.`;
     }
     // what the slow-motion replay points at: the half-tied diagonal, or a red ghost where a diagonal is missing
     const focus = { poles: [], ghosts: [], joints: [] };
-    for (const [d, ok, js] of [['diagA', x.A, ['J5', 'J6']], ['diagB', x.B, ['J7', 'J8']]]) {
-      if (ok) continue;
+    for (const d of ['diagA', 'diagB', 'diagC', 'diagD']) {
+      if (!slotById(d) || diagOk(d)) continue;
+      const js = diagJoints(d).map(j => j.id);
       if (!b.poles[d]) focus.ghosts.push(js);
       else { focus.poles.push(d); focus.joints.push(...js.filter(id => !b.joints[id])); }
     }
@@ -2690,10 +2752,13 @@ function finish() {
   if (LV.free && G.ki < G.klafim.length - 1) { useKlaf(G.ki + 1); return startCheckFor(); } // on to the next structure
   if (LV.free) return finishFree();
   if (LV.sandbox) return finishFreeTri();
-  G.endedAt = performance.now();
+  G.endedAt = G.endedAt || performance.now();
   pushArrow.visible = false;
   const s = G.result = score();
-  saveStars(LV.number, s.stars);
+  if (LV.number) saveStars(LV.number, s.stars); // the cube challenge is not a level
+  // the scouts use the structure first, and the stars light up as they do (Omer's מסדר idea)
+  if (!G.paraded) { G.paraded = true; return celebrate(s, finish); }
+  const extra = s.stars >= 2 ? (onWin?.(s) || '') : G.challenge ? '<p class="ch-note">באתגר הזמן נספר רק כשכל הכפיתות שבשרטוט כפותות.</p>' : '';
   sfx.ok();
   const stars = [1, 2, 3].map(i => `<span class="${i <= s.stars ? 'on' : ''}">★</span>`).join('');
   const nMissing = s.total - s.tied;
@@ -2702,6 +2767,7 @@ function finish() {
     <div class="eyebrow">תוצאות המסדר</div>
     <h2>${s.stars === 3 ? 'בנייה מושלמת!' : s.stars ? 'עברתם את השלב' : 'עוד לא עברתם את השלב'}</h2>
     <div class="stars">${stars}</div>
+    ${extra}
     <ul class="inspect">
       <li class="ok">${LV.tripod ? 'החצובה עמדה' : LV.carousel ? 'מסגרת הקרוסלה עמדה' : LV.cube ? 'הקובייה עמדה' : 'הקלף עמד'} בדחיפות מכל הכיוונים${LV.cube ? ', גם בלי יתרים' : ''}</li>
       ${LV.cube ? `<li class="ok">איקס מרחבי מלא בכל צד ובחלק העליון${LV.cube.bays > 1 ? ', וגם בחיבור בין הקוביות' : ''}</li>` : ''}
@@ -2726,18 +2792,100 @@ function finish() {
   `, [
     s.stars < 3 ? ['להשלים ולתקן', reopenForFixes, true] : null,
     s.stars < 3 && G.hintsUsed < s.hintsAllowed && G.result ? [`רמז (${s.hintsAllowed - G.hintsUsed} נותרו, −${s.hintCost} נק׳)`, () => useHint(s)] : null,
-    LEVELS[LV.number] && s.stars ? [`לשלב ${LV.number + 1}: ${LEVELS[LV.number].name}`, () => switchLevel(LV.number + 1), s.stars === 3] : null,
+    LV.number && LEVELS[LV.number] && s.stars ? [`לשלב ${LV.number + 1}: ${LEVELS[LV.number].name}`, () => switchLevel(LV.number + 1), s.stars === 3] : null,
     ['למגרש שלי', () => { closeModal(); showLevels(); }, s.stars === 3 && !LEVELS[LV.number]],
     ['לבנות מחדש', restart],
   ].filter(Boolean));
   refreshAll();
 }
 function reopenForFixes() {
-  closeModal(); G.check = null; G.result = null; G.endedAt = null;
+  closeModal(); G.check = null; G.result = null; G.endedAt = null; G.paraded = false;
   if (LV.tripod) { G.tri.sim = null; goStage('brace'); }
   else if (LV.carousel) { G.cube.sim = null; G.seat.sim = null; goStage('hang'); }
   else if (LV.cube) { G.cube.sim = null; goStage('cube'); } else goStage('anchor');
 }
+// ---------------- the festive מסדר ----------------
+// After the inspection the scouts actually use what they built: one climbs it (on a
+// base he stands right on top), the rest cheer. The stars light up with what happens:
+// ★ it stood every push, ★★ every lashing in the drawing is there so a scout may climb,
+// ★★★ every lashing is the right type. Missing lashings: the מדריך stops the climb.
+// A tap skips it. Short on purpose: animations must be fast (Omer).
+let parade = null;
+let onWin = null; // challenges listen here
+function paradeCentre() {
+  if (LV.tripod) return triApex() || [0, 4, z0()];
+  if (LV.carousel) return [SEAT_C[0], 2.5, SEAT_C[1]];
+  const cs = G.cube?.sim;
+  if (cs) { const t = cs.klafim.map(k => k.topCentre()); return [0, 1, 2].map(i => t.reduce((a, q) => a + q[i], 0) / t.length); }
+  return G.sim ? G.sim.topCentre() : [0, 2, z0()];
+}
+function celebrate(s, done) {
+  const c = paradeCentre();
+  const cam = new THREE.Vector3(camera.position.x - c[0], 0, camera.position.z - c[2]).normalize();
+  const side = new THREE.Vector3(-cam.z, 0, cam.x);
+  const big = LV.carousel ? 3.4 : LV.cube || LV.tripod ? 2.6 : 1.9;
+  const free = crew.filter(a => !a.busy && !a.want?.sit && !a.want?.lock);
+  const climber = LV.carousel ? null : free.shift() || null;
+  const cheer = free.slice(0, 4);
+  // where the climber goes: up a leg of a klaf, onto the top of a base, or hanging from a tripod
+  let base, topY;
+  if (LV.tripod) { base = [c[0] + cam.x * 0.3, 0, c[2] + cam.z * 0.3]; topY = 0.35; }
+  else if (LV.cube && !LV.carousel) { base = [c[0], 0, c[2]]; topY = Math.max(0.5, c[1] + 0.02); }
+  else { const lt = G.sim && legTop('legL'); base = lt ? [lt[0] + cam.x * 0.28, 0, lt[2] + cam.z * 0.28] : [c[0], 0, c[2]]; topY = Math.min(1.1, Math.max(0.4, (lt?.[1] ?? 2) - 1.0)); }
+  parade = { t: 0, s, done, c, cam, side, big, climber, cheer, base, topY, lit: 0, ok: s.stars >= 2 };
+  fun.starsShow();
+  controls.enabled = true;
+}
+function endParade() {
+  if (!parade) return;
+  const p = parade; parade = null;
+  for (const a of [p.climber, ...p.cheer]) a?.clear();
+  fun.starsHide();
+  p.done();
+}
+function stepParade(dt) {
+  const p = parade; if (!p) return;
+  p.t += dt;
+  const t = p.t, s = p.s;
+  const face = Math.atan2(-p.cam.x, -p.cam.z);
+  // cheering scouts: in an arc between the structure and the camera, jumping once things go well
+  p.cheer.forEach((a, i) => {
+    const off = (i - (p.cheer.length - 1) / 2) * 0.9;
+    const pos = [p.c[0] + p.cam.x * (p.big + 0.6) + p.side.x * off, 0, p.c[2] + p.cam.z * (p.big + 0.6) + p.side.z * off];
+    const happy = p.ok && t > 2.2;
+    if (happy && a.arrived()) pos[1] = Math.abs(Math.sin(t * 8 + i * 1.3)) * 0.22;
+    a.set(pos, face, happy ? -0.1 : 0.05, happy ? Math.PI * 0.92 : 0.3);
+  });
+  // the climber
+  const a = p.climber;
+  if (a) {
+    const at = Math.hypot(a.pos.x - p.base[0], a.pos.z - p.base[2]) < 0.05;
+    let y = 0;
+    if (at && t > 0.5) {
+      const go = p.ok ? 1 : 0.18; // missing lashings: the מדריך stops him almost at once
+      y = p.topY * go * Math.min(1, (t - 0.5) / 1.4);
+    }
+    const climbing = at && t > 0.5 && t < 1.9;
+    const wave = p.ok && t >= 1.9 ? 0.25 * Math.sin(t * 10) : 0;
+    a.set([p.base[0], y, p.base[2]], LV.cube && !LV.carousel && p.ok && t > 1.9 ? face : face + Math.PI, climbing ? 0.25 : 0, (climbing ? Math.PI * (0.8 + 0.15 * Math.sin(t * 14)) : p.ok && t >= 1.9 ? Math.PI * 0.95 : 0.4) + wave);
+  }
+  // the stars, one by one
+  const light = (i, label) => { if (p.lit > i) return; p.lit = i + 1; fun.starOn(i, label); };
+  if (t > 0.4) {
+    if (p.ok) light(0, LV.carousel ? 'הקרוסלה עמדה והסתובבה עם הרוכבים' : 'המבנה עמד בכל הדחיפות');
+    else if (!p.bad) { p.bad = true; fun.starLabel('<b>המדריך עוצר:</b> חסרות כפיתות שבשרטוט, לא עולים על המבנה', true); sfx.buzzer(); }
+  }
+  if (p.ok && t > 1.9) light(1, LV.carousel ? 'כל הכפיתות במקום: אפשר לעלות' : LV.tripod ? 'צופה נתלה על החצובה: כל הכפיתות במקום' : LV.cube ? 'צופה עומד על המבנה: כל הכפיתות במקום' : 'צופה טיפס על הקלף: כל הכפיתות במקום');
+  if (p.ok && t > 2.2 && !p.cheered) { p.cheered = true; sfx.cheer(); }
+  if (p.ok && t > 2.6) {
+    if (s.stars === 3) { if (p.lit < 3) { light(2, 'כל כפיתה מהסוג הנכון!'); fun.confetti(); sfx.fanfare(); } }
+    else if (!p.noThird) { p.noThird = true; fun.starLabel('יש כפיתות מסוג לא נכון: אין כוכב שלישי'); fun.confetti(30); }
+  }
+  if (t > (p.ok ? 3.9 : 2.6)) endParade();
+}
+// a tap skips the festive inspection
+$('app').addEventListener('pointerdown', () => { if (parade && parade.t > 0.3) endParade(); }, true);
+
 // where a lashing is, as the structure file names it: the drawing sheet and the height band
 function sheetOf(j) {
   if (LV.tripod) return j.tri === 'head' ? 'שרטוט החצובה, בראש' : j.tri === 'stake' ? 'שרטוט החצובה, ליד הקרקע (רגל לבז״נט)' : 'שרטוט החצובה, בחיזוקים';
@@ -2793,6 +2941,7 @@ function restart() {
   drawPlaza();
   goStage(STAGES[0].key);
   refreshAll();
+  startChallenge();
 }
 function switchLevel(n) {
   resetPlan();
@@ -2854,7 +3003,7 @@ function makeDisplay(L) {
     for (const sl of SEAT.slots) { const h = sl.length / 2, o = (sl.layer || 0) * GAP; pole([sl.centre[0] - sl.dir[0] * h, sl.centre[1] + y + o, sl.centre[2] - sl.dir[2] * h], [sl.centre[0] + sl.dir[0] * h, sl.centre[1] + y + o, sl.centre[2] + sl.dir[2] * h]); }
     pole([SEAT_C[0], CAR.seat.mastFoot, SEAT_C[1]], [SEAT_C[0], mastTopY(MAST.length), SEAT_C[1]]);
     const rm = new THREE.MeshStandardMaterial({ color: 0xd8b878, roughness: 1 });
-    for (let k = 0; k < 8; k++) { const c = cornerAt(k), rr = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 1, 5), rm); placeCylinder(rr, [SEAT_C[0], CAR.seat.ropeHeight, SEAT_C[1]], [c[0], LEVEL.poleRadius + y, c[1]]); g.add(rr); }
+    for (let k = 0; k < 8; k++) { const c = cornerAt(k), rr = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 1, 5), rm); placeCylinder(rr, [SEAT_C[0], PIVOT[1], SEAT_C[1]], [c[0], LEVEL.poleRadius + y, c[1]]); g.add(rr); }
   }
   SLOTS.length = 0; SLOTS.push(...keep.slots); JOINTS.length = 0; JOINTS.push(...keep.joints);
   LEG_STAKES.forEach((q, i) => { q.u = keep.u[i]; }); LEVEL.height = keep.h;
@@ -2978,6 +3127,151 @@ $('home-decor').addEventListener('click', () => {
   closeModal(); closePicker(); camTween = null; closeup = null; camMode = null;
   decor.enter();
 });
+// ---------------- short challenges (challenges.js) ----------------
+// A speed run, "fix the broken camp" and a challenge of the day. They are played on a
+// copy of the level without the tutorial; a speed run is the whole level against the
+// clock, and a fixed camp is judged by the מדריך right on the ground.
+function timerText() {
+  const t = fmt(elapsed()), ch = G.challenge;
+  if (ch?.kind === 'speed') return `${t} · ${MEDAL_ICON[0]} ${fmt(SPEED[LV.number].medals[0])}`;
+  if (ch?.kind === 'fix') return `${t} · ${MEDAL_ICON[0]} ${fmt(FIX[LV.number].medals[0])}`;
+  if (ch?.kind === 'cube') return `${t} · ${MEDAL_ICON[0]} ${fmt(CUBE_FIX.medals[0])}`;
+  return t;
+}
+function playChallenge(ch) {
+  closeModal();
+  $('home').hidden = true; $('levels').hidden = true;
+  resetPlan();
+  LV = { ...(ch.kind === 'cube' ? CUBE_LEVEL : LEVELS[ch.level - 1]), tutorial: false, challenge: ch };
+  STAGES = stageList(); makeChips(); restart();
+}
+// restart() calls this: a challenge starts again from the same point
+function startChallenge() {
+  const ch = LV.challenge; if (!ch) return;
+  G.challenge = { ...ch, penalty: 0, calls: 0 };
+  if (ch.kind === 'fix') breakCamp(G.challenge);
+  else if (ch.kind === 'cube') breakCube(G.challenge);
+  else flashHint(`<b>מול השעון:</b> בונים את כל המבנה ומזמינים מסדר. הזמן נספר רק אם כל הכפיתות כפותות`);
+  refreshAll();
+}
+// lay every klaf on its drawing, built and lashed, then hide faults in them
+function breakCamp(ch) {
+  const rand = rng(ch.seed ?? Math.floor(Math.random() * 1e9));
+  const spots = [];
+  eachKlaf((k, i) => {
+    const b = G.build;
+    for (const sl of SLOTS) b.poles[sl.id] = { length: sl.length };
+    for (const j of JOINTS) b.joints[j.id] = j.correct;
+    for (const j of JOINTS) spots.push({ i, kind: rand() < 0.5 ? 'miss' : 'type', id: j.id });
+    // a pole too long: only where the pile holds a longer one
+    for (const sl of SLOTS) { const longer = (LV.stockExtra || []).filter(l => l > sl.length + 0.05).sort((a, c) => a - c)[0]; if (longer) spots.push({ i, kind: 'long', id: sl.id, len: longer }); }
+  });
+  ch.faults = [];
+  const used = new Set(), longs = new Set();
+  let guard = 0;
+  while (ch.faults.length < FIX[LV.number].faults && guard++ < 500) {
+    const f = spots[Math.floor(rand() * spots.length)];
+    const key = f.i + ':' + f.id;
+    if (used.has(key)) continue;
+    if (f.kind === 'long' && (longs.has(f.len) || rand() < 0.5)) continue; // one of each spare pole at most
+    used.add(key); if (f.kind === 'long') longs.add(f.len);
+    ch.faults.push(f);
+  }
+  for (const f of ch.faults) {
+    const b = G.klafim[f.i].build;
+    if (f.kind === 'miss') delete b.joints[f.id];
+    else if (f.kind === 'type') { const j = JOINTS.find(q => q.id === f.id); const other = LASHING_ORDER.filter(t => t !== j.correct); b.joints[f.id] = other[Math.floor(rand() * other.length)]; }
+    else b.poles[f.id] = { length: f.len };
+  }
+  useKlaf(0);
+  startClock();
+  flashHint(`<b>${ch.faults.length} תקלות מסתתרות ב${G.klafim.length > 1 ? 'קלפים' : 'קלף'}.</b> מוצאים אותן מול תיק המבנה`);
+}
+// the 2x2 cube stands, both klafim raised and anchored, every joining pole in place but one
+// top connection (Omer, 11-20): the player finds it in the structure file, adds and lashes
+// it, takes the inner guy lines down, and calls the מסדר. Without it the cube racks.
+function breakCube(ch) {
+  const rand = rng(Math.floor(Math.random() * 1e9));
+  const crewIds = [...GUYS.map(g => g.id), 'L1', 'L2'];
+  eachKlaf(k => {
+    const b = G.build;
+    for (const sl of SLOTS) b.poles[sl.id] = { length: sl.length };
+    for (const j of JOINTS) b.joints[j.id] = j.correct;
+    for (const st of LEG_STAKES) b.stakes[st.id] = LEG_STAKE_HITS;
+    for (const g of GUYS) { b.guyTop[g.id] = true; b.anchors[g.id] = ANCHOR_HITS; b.guyTies[g.id] = 'guy'; }
+    for (const sj of STAKE_JOINTS) b.stakeJoints[sj.id] = sj.correct;
+    crewIds.forEach((id, n) => { b.crew[id] = n; });
+    k.raisedOnce = true;
+    k.sim = new KlafSim(b, k.cfg); k.sim.standUp();
+  });
+  const side = rand() < 0.5 ? 'L' : 'R', gone = `C.top${side}`;
+  ch.missing = gone;
+  const cb = G.cube.build;
+  for (const sl of LV.cube.slots) if (sl.id !== gone) cb.poles[sl.id] = { length: sl.length };
+  for (const j of LV.cube.joints) if (j.a !== gone && j.b !== gone) cb.joints[j.id] = j.correct;
+  useKlaf(0);
+  goStage('cube');
+  startClock();
+  flashHint('<b>חסר חיבור עליון בקובייה.</b> מוצאים בתיק המבנה איפה, מוסיפים וכופתים, מורידים יתרים פנימיים ומזמינים מסדר');
+}
+function faultsLeft() {
+  let n = 0;
+  eachKlaf(() => {
+    const b = G.build;
+    for (const sl of SLOTS) if (!b.poles[sl.id] || Math.abs(b.poles[sl.id].length - sl.length) > 0.05) n++;
+    for (const j of JOINTS) if (b.joints[j.id] !== j.correct) n++;
+  });
+  return n;
+}
+function fixCheck() {
+  const ch = G.challenge, left = faultsLeft();
+  ch.calls++;
+  if (left) {
+    ch.penalty += FIX_PENALTY;
+    sfx.buzzer(); fun.shake(0.03, 0.2);
+    return infoCard(left === 1 ? 'נשארה עוד תקלה אחת' : `נשארו עוד ${left} תקלות`, `המדריך לא מגלה איפה. כל בדיקה מוקדמת מוסיפה ${FIX_PENALTY} שניות לזמן.`);
+  }
+  G.endedAt = performance.now();
+  const sec = elapsed(), med = medalOf(sec, FIX[LV.number].medals);
+  const best = recordChallenge(ch, sec);
+  sfx.fanfare(); fun.confetti(med === 0 ? 90 : 50);
+  showModal(`<div class="eyebrow">תקנו את המחנה</div>
+    <h2>${med >= 0 ? `${MEDAL_ICON[med]} מדליית ${MEDAL_HE[med]}` : 'המחנה תקין!'}</h2>
+    <p>תיקנתם את כל ${ch.faults.length} התקלות ב־<b>${fmt(sec)}</b>${ch.penalty ? ` (כולל ${ch.penalty} שניות על בדיקות מוקדמות)` : ''}.</p>
+    ${best ? '<p class="ch-best">שיא חדש!</p>' : `<p>השיא שלכם: ${fmt(bestOf(ch))}</p>`}`,
+  [['עוד אתגר', showChallenges, true], ['למסך הבית', () => { closeModal(); showHome(); }]]);
+  refreshAll();
+}
+// a structure passed with every lashing tied (two stars or more)
+onWin = s => {
+  const ch = G.challenge;
+  if (ch?.kind !== 'speed' && ch?.kind !== 'cube') return '';
+  const medals = ch.kind === 'cube' ? CUBE_FIX.medals : SPEED[LV.number].medals;
+  const sec = s.sec, med = medalOf(sec, medals), best = recordChallenge(ch, sec);
+  if (med >= 0) fun.confetti(40);
+  return `<div class="ch-result">${med >= 0 ? `${MEDAL_ICON[med]} <b>מדליית ${MEDAL_HE[med]}</b>` : 'בלי מדליה הפעם'} · ${fmt(sec)}${best ? ' · <b>שיא חדש!</b>' : ''}</div>`;
+};
+function challengeRow(ch, label, sub) {
+  const best = bestOf(ch), m = best != null ? medalOf(best, ch.kind === 'cube' ? CUBE_FIX.medals : (ch.kind === 'speed' ? SPEED : FIX)[ch.level].medals) : -1;
+  return `<button type="button" class="ch-row" data-k="${ch.kind}" data-l="${ch.level}"><span class="ch-nm">${label}</span><span class="ch-sub">${sub}</span>
+    <span class="ch-best">${best != null ? `${m >= 0 ? MEDAL_ICON[m] : ''} ${fmt(best)}` : 'עוד לא'}</span></button>`;
+}
+function showChallenges() {
+  showModal(`<div class="eyebrow">אתגרים קצרים</div><h2>אתגרים</h2>
+    <div class="ch-grid">
+      ${challengeRow({ kind: 'cube', level: 0 }, 'קובייה 2×2 בלי חיבור עליון', 'הקובייה עומדת, חסר בה חיבור עליון. משלימים ועוברים מסדר')}
+      ${challengeRow({ kind: 'speed', level: 1 }, 'מול השעון: קלף 2×2', 'כל המבנה, כמה שיותר מהר')}
+      ${challengeRow({ kind: 'speed', level: 3 }, 'מול השעון: חצובה', 'כל המבנה, כמה שיותר מהר')}
+      ${challengeRow({ kind: 'fix', level: 1 }, 'תקנו את המחנה: קלף', `${FIX[1].faults} תקלות בקלף אחד`)}
+      ${challengeRow({ kind: 'fix', level: 2 }, 'תקנו את המחנה: בסיס 2×4', `${FIX[2].faults} תקלות בשלושה קלפים`)}
+    </div>`, [['סגירה', () => { closeModal(); showHome(); }]]);
+  document.querySelectorAll('.ch-row').forEach(b => b.addEventListener('click', () => playChallenge({ kind: b.dataset.k, level: +b.dataset.l })));
+}
+{
+  const grid = document.querySelector('.home-soon');
+  const tile = (id, name, sub) => { const b = Object.assign(document.createElement('button'), { type: 'button', id, className: 'soon open hot', innerHTML: `<b>${name}</b><span>${sub}</span>` }); grid.prepend(b); return b; };
+  tile('home-challenges', 'אתגרים', 'אתגר היום ועוד').addEventListener('click', showChallenges);
+}
 // a direct link to a level (?level=2) skips the home screen
 if (new URLSearchParams(location.search).get('level')) $('home').hidden = true; else showHome();
 
@@ -3145,6 +3439,7 @@ function poleTable() {
       ['אלכסונים לאיקס הגג, מפינה לפינה', 2, m(C.topDiagLength)],
       ['צלעות המתומן במושב', 8, m(S.sideLength)],
       ['סנדות ה־# במושב', 4, m(S.plusLength)],
+      ['האיקס הכפול במושב (זוג בכל כיוון, מחובר ל־#)', 4, m(SEAT.slots.find(q => q.xd).length)],
       ['התורן', 1, m(S.mastLength)],
       ['בז״נטים לרגליים', 4, m(1.0)], ['בז״נטים ליתרים', 8, m(0.6)],
     ];
@@ -3206,11 +3501,11 @@ function openFolder(tab = LV.sketch ? 'sk0' : LV.carousel ? 'klaf0' : 'drawing')
     img.getContext('2d').drawImage(c, 0, 0);
     body.appendChild(img);
     body.insertAdjacentHTML('beforeend', `<ol>
-      <li>בונים את המושב שוכב על השרטוט שבאמצע הקובייה: מתומן של 8 סנדות, ובתוכו # של 4 סנדות.</li>
+      <li>בונים את המושב שוכב על השרטוט שבאמצע הקובייה: מתומן של 8 סנדות, ובתוכו # של 4 סנדות ואיקס כפול של 4 סנדות שכפות ל־#.</li>
       <li>שישה צופים מרימים את המושב ל־${Math.round(CAR.seat.height * 100)} ס״מ.</li>
       <li>מעבירים את התורן (${MAST.length.toFixed(1)} מ׳) דרך הריבוע שבאמצע ה־#, ותולים אותו בטבעת חבל מאמצע איקס הגג, כך שיוכל להסתובב.</li>
       <li>כופתים את התורן לשתי סנדות האורך של ה־#.</li>
-      <li>קושרים 8 חבלי תלייה מהתורן, בגובה ${CAR.seat.ropeHeight.toFixed(1)} מ׳, אל כל פינה של המתומן.</li>
+      <li>קושרים 8 חבלי תלייה ממרכז איקס הגג אל כל פינה של המתומן.</li>
       <li>מסדר: המדריך דוחף את המסגרת, כל היתרים יורדים, שמונה צופים עולים, מסובבים את הקרוסלה, והמדריך דוחף את המושב הצידה.</li></ol>`);
   } else if (tab === 'sideR' || tab === 'sideL') {
     const c = document.createElement('canvas');
@@ -3352,6 +3647,11 @@ function drawLashings() {
 function coilProgress(g, id) {
   const n = G.tying && G.tying.id === id ? Math.ceil(Math.min(1, G.tying.t / 0.32) * g.children.length) : g.children.length;
   g.children.forEach((c, i) => { c.visible = i < n; });
+  // the coils go on loose and are pulled tight
+  if (G.tying && G.tying.id === id) {
+    const k = Math.min(1, Math.max(0, (G.tying.t - 0.2) / 0.3)), f = 1 + 0.45 * (1 - k * k * (3 - 2 * k));
+    g.children.forEach(c => { c.scale.x *= f; c.scale.y *= f; });
+  }
 }
 // A guy stake leans away from the klaf along its line (out at 45°), and the line is
 // fixed (קיבוע) just below its top
@@ -3533,7 +3833,7 @@ function frame(now) {
         else if (cs) {
           if (LV.carousel && G.seat.sim && (G.check?.running || G.falling)) stepCarousel(h);
           if (G.check?.running || G.falling) cs.step(h, { push, load });
-        } else sim.step(h, { wobble, push, load });
+        } else sim.step(h, { wobble, push, load, lean: balanceLean() });
         if (!ts) record(h);
         // beyond a single klaf, the structure is tested only in the check at the end (Omer)
         if (ts) { if (G.check?.running) watchTripod(); } else if (cs) { if (G.check?.running) { watchCube(h); if (LV.carousel) watchCarousel(); } } else watchSim(h);
@@ -3570,13 +3870,16 @@ function frame(now) {
   collectTargets();
   updateCamera(dt);
   hintTimer += dt;
-  if (hintTimer > 0.25) { hintTimer = 0; refreshHint(); $('timer').textContent = fmt(elapsed()); $('tray-count').textContent = G.stage === 'seat' ? `${SEAT.slots.filter(s => G.seat.build.poles[s.id]).length}/${SEAT.slots.length} במושב` : G.stage === 'hang' ? (mastOn() ? 'התורן במקום' : 'חסר תורן') : G.stage === 'cube' ? `${LV.cube.slots.filter(s => G.cube.build.poles[s.id]).length}/${LV.cube.slots.length} בקובייה` : `${SLOTS.filter(s => G.build.poles[s.id]).length}/${SLOTS.length || 6} על השרטוט`; }
+  if (hintTimer > 0.25) { hintTimer = 0; refreshHint(); $('timer').textContent = timerText(); $('tray-count').textContent = G.stage === 'seat' ? `${SEAT.slots.filter(s => G.seat.build.poles[s.id]).length}/${SEAT.slots.length} במושב` : G.stage === 'hang' ? (mastOn() ? 'התורן במקום' : 'חסר תורן') : G.stage === 'cube' ? `${LV.cube.slots.filter(s => G.cube.build.poles[s.id]).length}/${LV.cube.slots.length} בקובייה` : `${SLOTS.filter(s => G.build.poles[s.id]).length}/${SLOTS.length || 6} על השרטוט`; }
   decor?.tick(now / 1000); placeRaiseIcon();
+  fun.tick(dt, camera, toScreen); balanceTick(dt, now / 1000); stepParade(dt);
+  fun.preRender(camera);
   renderer.render(scene, camera);
+  fun.postRender(camera);
   requestAnimationFrame(frame);
 }
 restart();
 requestAnimationFrame(frame);
 
 // debug hook for automated tests
-window.__game = { get state() { return G; }, triGuide, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, score: () => score(), SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
+window.__game = { get state() { return G; }, fun, balanceFor, finish, celebrate, get parade() { return parade; }, triGuide, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, score: () => score(), SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
