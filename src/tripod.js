@@ -44,6 +44,18 @@ export function setLashFor(lens) {
   TRI_JOINTS[0].at[1] = lens?.length ? TRI.legLength / 2 + shortest / 2 - TRI.lashFromTop : LASH_V;
 }
 
+// A tripod's drawing: how its legs lie, where its feet stand and what fits it.
+// The station-3 tripod is the default; the giant wheel's 90° tripods have their own.
+export const TRI_SPEC = {
+  slots: TRI_SLOTS, joints: TRI_JOINTS,
+  get lashV() { return TRI_JOINTS[0].at[1]; },
+  lashFromTop: TRI.lashFromTop, height: TRI.height,
+  apart: [TRI.footApart, TRI.footApart, TRI.footApart],
+  braceLengths: Object.fromEntries(BRACES.map(b => [b.id, b.length])),
+  planFeet: c => planFeet(c),
+};
+// how far along leg i, from its foot, the lashing sits: a pole lies centred on its line
+export const legSOf = (spec, i, len) => spec.lashV - (spec.slots[i].centre[1] - len / 2);
 // where the feet stand when the bundle has just been stood up: a small triangle
 export function startFeet(c, radius = 0.4) {
   return [210, 90, 330].map(d => { const a = d * Math.PI / 180; return [c[0] + radius * Math.cos(a), c[1] + radius * Math.sin(a)]; });
@@ -70,8 +82,8 @@ const along = (a, d, k) => [a[0] + d[0] * k, a[1] + d[1] * k, a[2] + d[2] * k];
 
 // a standing tripod, as points: for each leg its foot, its direction, the point at
 // the braces' height, and its top
-export function standing(feet, lens) {
-  const s = lens.map(legS);
+export function standing(feet, lens, spec = TRI_SPEC) {
+  const s = lens.map((l, i) => legSOf(spec, i, l));
   const apex = apexOf(feet, s); if (!apex) return null;
   const legs = feet.map((f, i) => {
     const foot = [f[0], r, f[1]];
@@ -88,10 +100,10 @@ export function braceReaches(st, brace, length) {
   return length >= len3(sub(a, b)) + 2 * LASH_ALLOW; // מרחק כפיתה at both ends
 }
 // how close the standing tripod is to the drawing: its height and the three distances between the feet
-export function fitsPlan(st) {
+export function fitsPlan(st, spec = TRI_SPEC) {
   return {
-    height: Math.abs(st.height - TRI.height) <= 0.1,
-    apart: st.apart.map(d => Math.abs(d - TRI.footApart) <= 0.1),
+    height: Math.abs(st.height - spec.height) <= 0.1,
+    apart: st.apart.map((d, i) => Math.abs(d - spec.apart[i]) <= 0.1),
   };
 }
 
@@ -105,10 +117,11 @@ export const TRI_TUNING = {
 // three heads, a brace tied at both ends keeps its two legs apart, a foot lashed
 // to its stake stays put, and any other foot is held only by the sand.
 export class TripodSim {
-  constructor({ feet, lens, braces, joints, stakes, stakeJoints }) {
-    const st = standing(feet, lens);
-    const W = this.world = new World();
-    W.mu = 0; W.iterations = 3;
+  // world: a world shared with other structures (the giant wheel's two tripods)
+  constructor({ feet, lens, braces, joints, stakes, stakeJoints, spec = TRI_SPEC, world = null }) {
+    const st = standing(feet, lens, spec);
+    const W = this.world = world || new World();
+    if (!world) { W.mu = 0; W.iterations = 3; }
     this.h0 = st.apex[1];
     this.legs = st.legs.map((L, i) => {
       const ss = [0, L.sb, L.s, lens[i]];
@@ -139,12 +152,12 @@ export class TripodSim {
   bracePoint(i) { return this.pos(this.legs[i].brace); }
   slid() { return Math.max(0, ...this.holds.map(c => c.slid)); }
   sunk() { return this.h0 - this.apex()[1]; }
-  step(dt, { push = null, load = 0 } = {}) {
+  forces({ push = null, load = 0 } = {}) {
     const W = this.world;
     for (const L of this.legs) {
       if (push) W.applyForce(L.head, push.map(v => v / 3));
       if (load) W.applyForce(L.head, [0, -load / 3, 0]);
     }
-    W.step(dt, 30);
   }
+  step(dt, f = {}) { this.forces(f); this.world.step(dt, 30); }
 }

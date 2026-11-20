@@ -1,68 +1,55 @@
-// The giant wheel (גלגל ענק), station 5 (Omer's model photo, 2026-11-20).
+// The giant wheel (גלגל ענק), station 5 (Omer's photos, 2026-11-20).
 //
-// Omer confirmed (11-20): the tower legs lean in like an A, there is ONE seat, and
-// the axle turns in the forks with the wheel lashed to it.
+// Omer (11-20): ONE seat; the axle turns in the forks with the wheel lashed to it;
+// the towers are 90° tripods (חצובה ב־90 מעלות), their upright leg on the wheel's
+// side, and the box (the wheel) rests on a pole between the tripods' tops (the axle).
 //
-//  - Two tower klafim, each an A: two legs crossing at the fork (a כפיתת חצובה), two
-//    rungs. They stand across the axle, facing each other, and are raised like
-//    any klaf (stakes first, crew of 6, יתרים at 45°).
-//  - One pole each side joins the towers' feet (the cube's format, levels.js).
+//  - Two 90° tripods: three legs laid side by side, tops together, one כפיתת חצובה;
+//    stood up by six scouts, the upright leg's foot right under the head and the two
+//    leaning legs' feet out to the sides, away from the wheel; braces low between
+//    the legs and a stake at each foot, as in station 3.
 //  - The wheel: two square klafim stood on a corner (diamonds), each with an X whose
 //    centre is lashed to the axle, joined by four corner poles. It is built standing
-//    on its bottom corner between the towers, and six scouts lift it into the forks.
+//    on its bottom corner between the tripods, and six scouts lift it into the forks.
 //  - The seat: a small flat klaf with an X, built on the ground under the wheel,
 //    lifted and hung on four ropes from the bottom corner pole.
 //
-// World coordinates: x across (the towers' u), y up, z along the axle. Tower k
-// stands at z = k · apart.
+// World coordinates: x across, y up, z along the axle. The upright legs stand at
+// x = 0, z = 0 (front tripod) and z = apart (back tripod).
 import { SIZES, LASH_ALLOW } from './blueprints.js';
 import { LEVEL } from './level1.js';
 import { World } from './physics.js';
 import { fitAllowance } from './allowance.js';
+import { BRACES, legSOf } from './tripod.js';
 
 export const WH = SIZES.wheel;
 const r = LEVEL.poleRadius;
-const D = WH.apart, F = WH.forkHeight, A = WH.footHalf;
+const D = WH.apart, F = WH.forkHeight;
 
-// ---------------- the tower klafim (A-frames) ----------------
-// |u| of a leg at height v (below the fork)
-export const towerU = v => A * (1 - v / F);
-function towerPlan() {
-  const L = WH.legLength;
-  const leg = (id, he, s) => {
-    const dx = -s * A, l = Math.hypot(dx, F), d = [dx / l, F / l];
-    return { id, he, centre: [s * A + d[0] * L / 2, d[1] * L / 2], dir: d, length: L, layer: s > 0 ? 0 : -1 };
+// ---------------- the 90° tripods ----------------
+// lying side by side with their tops together: the upright leg (shorter) in the middle
+function tri90() {
+  const Lu = WH.uprightLength, Ll = WH.leanLength, top = Math.max(Lu, Ll);
+  const leg = (i, he, L) => ({ id: 't' + (i + 1), he, centre: [(i - 1) * 0.14, top - L / 2], dir: [0, 1], length: L, layer: 0, kind: 'v' });
+  const slots = [leg(0, 'רגל נוטה ימנית', Ll), leg(1, 'הרגל הזקופה', Lu), leg(2, 'רגל נוטה שמאלית', Ll)];
+  const joints = [{ id: 'TJ', a: 't1', b: 't3', all: slots.map(q => q.id), at: [0, top - WH.lashFromTop], correct: 'tripod' }];
+  const spec = {
+    slots, joints, lashV: top - WH.lashFromTop, lashFromTop: WH.lashFromTop, height: F, ninety: true,
+    // c: where the upright leg stands; out: -1 for the front tripod, +1 for the back one
+    planFeet: (c, out = -1) => [[c[0] + WH.footSide, c[1] + out * WH.footOut], [c[0], c[1]], [c[0] - WH.footSide, c[1] + out * WH.footOut]],
   };
-  const bot = WH.bottomHeight, mid = WH.rungHeight;
-  const bar = (id, he, v) => ({ id, he, centre: [0, v], dir: [1, 0], length: 2 * towerU(v), layer: 1 });
-  const slots = [leg('legR', 'רגל שמאל', 1), leg('legL', 'רגל ימין', -1), bar('botH', 'שלב תחתון', bot), bar('midH', `שלב עליון, ${mid.toFixed(1)} מ׳`, mid)];
-  const sq = (id, a, b, at) => ({ id, a, b, at, correct: 'square' });
-  const joints = [
-    // the legs cross at the fork, tied like a tripod's head with two poles
-    { id: 'Jf', a: 'legL', b: 'legR', at: [0, F], correct: 'tripod' },
-    sq('J1', 'legL', 'botH', [-towerU(bot), bot]), sq('J2', 'legR', 'botH', [towerU(bot), bot]),
-    sq('J3', 'legL', 'midH', [-towerU(mid), mid]), sq('J4', 'legR', 'midH', [towerU(mid), mid]),
-  ];
-  return { slots, joints, tower: true };
+  const f = spec.planFeet([0, 0]), d = (a, b) => Math.hypot(f[a][0] - f[b][0], f[a][1] - f[b][1]);
+  spec.apart = [d(0, 1), d(1, 2), d(2, 0)];
+  // the braces at about 50 cm, with מרחק כפיתה at both ends, in 10 cm steps
+  const s = [Ll, Lu, Ll].map((l, i) => legSOf(spec, i, l)), hb = 0.5;
+  spec.braceLengths = Object.fromEntries(BRACES.map(b => {
+    const k = 1 - hb / F, gap = d(b.legs[0], b.legs[1]) * k;
+    return [b.id, Math.ceil((gap + 2 * LASH_ALLOW) * 10 - 1e-6) / 10];
+  }));
+  spec.legLengths = [Ll, Lu, Ll];
+  return spec;
 }
-export const TOWER_PLANS = [towerPlan(), towerPlan()];
-for (const P of TOWER_PLANS) fitAllowance(P.slots, P.joints, ['legR', 'legL'].map(id => [id, [Math.sign(P.slots.find(q => q.id === id).dir[0]) * -towerU(WH.sideHeight), WH.sideHeight]]));
-// how far along a leg (from its centre) the fork is
-export const forkS = slot => (F - slot.centre[1]) / slot.dir[1];
-
-// ---------------- joining the towers' feet ----------------
-function makeJoin() {
-  const slots = [], joints = [];
-  for (const side of [-1, 1]) {
-    const S = side > 0 ? 'L' : 'R', name = side > 0 ? 'צד שמאל' : 'צד ימין', leg = side > 0 ? 'legR' : 'legL', v = WH.sideHeight, x = side * towerU(v);
-    slots.push({ id: `C.bot${S}`, he: `חיבור בין המגדלים (${name})`, side, bay: 0, kind: 'h', layer: 1, centre: [x, r + v, D / 2], dir: [0, 0, 1], length: D });
-    for (const k of [0, 1]) joints.push({ id: `C.j${k + 1}${S}`, a: `C.bot${S}`, klaf: k, leg, v, correct: 'square', side, bay: 0, at: [x, r + v, k * D] });
-  }
-  fitAllowance(slots, joints);
-  return { depth: D, bays: 1, span: D, slots, joints, xs: [], height: F + 0.3, legX: A, wheel: true, unflatten: false };
-}
-export const WJOIN = makeJoin();
-export const WHEEL_LEG_V = [WH.sideHeight];
+export const TRI90 = tri90();
 
 // ---------------- the wheel ----------------
 export const AXLE_Y = F + WH.axleAbove;

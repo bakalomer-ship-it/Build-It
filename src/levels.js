@@ -5,7 +5,7 @@ import { SIZES } from './blueprints.js';
 import { fitAllowance } from './allowance.js';
 import { LEVEL as KLAF } from './level1.js';
 import { GATE_PLAN, BACK_PLAN, JOIN, CAR, CAR_LEG_V } from './carousel.js';
-import { TOWER_PLANS, WJOIN, WH, WHEEL_LEG_V } from './wheel.js';
+import { TRI90, WH } from './wheel.js';
 
 const K = SIZES.klaf, C = SIZES.cube;
 const r = KLAF.poleRadius;
@@ -156,13 +156,16 @@ export const LEVELS = [
     cube: JOIN,
   },
   {
-    // גלגל ענק: two A-frame towers, a wheel turning on the axle in their forks, one seat (Omer, 2026-11-20; see wheel.js)
+    // גלגל ענק: two 90° tripods, a wheel turning on the axle across their heads, one seat (Omer, 2026-11-20; see wheel.js)
     number: 5, name: 'גלגל ענק', tutorial: false, targetTimeSec: 45 * 60, wheel: true, camScale: 1.2,
     stockExtra: [4.0, 3.0, 2.0, 1.2], ropeSpare: 4, crew: 6,
-    // the inner guy lines (between the towers) come down before the wheel goes up; the outer ones stay
-    klafim: [0, 1].map(i => ({ ...SOLO, he: i ? 'מגדל אחורי' : 'מגדל קדמי', short: i ? 'ב׳' : 'א׳', plan: TOWER_PLANS[i], z0: i * WH.apart,
-      frontDist: WH.guyDistance, backDist: WH.guyDistance, pullDist: WH.guyDistance + 1.4, anchorX: { front: 1.05, back: 1.05 }, inner: i ? -1 : 1, extraLegV: WHEEL_LEG_V })),
-    cube: WJOIN,
+    // each tripod's legs lie from z0 towards +z, tops together; it stands with its upright
+    // leg's foot at `centre` (from z0), its leaning legs out, away from the wheel (`out`)
+    klafim: [
+      { ...SOLO, kind: 'tripod', he: 'חצובה קדמית', short: 'א׳', tri: TRI90, plan: { slots: TRI90.slots, joints: TRI90.joints }, z0: -3.8, centre: [0, 3.8], out: -1 },
+      { ...SOLO, kind: 'tripod', he: 'חצובה אחורית', short: 'ב׳', tri: TRI90, plan: { slots: TRI90.slots, joints: TRI90.joints }, z0: WH.apart, centre: [0, 0], out: 1 },
+    ],
+    cube: null,
   },
 ];
 // Free build, tripod (Omer 2026-11-19): the tripod station with no drawing to

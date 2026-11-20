@@ -15,8 +15,9 @@ import { CubeSim, cubeSlotPoint, cubeSlotParam, cubeJointReachable } from './cub
 import { LEVELS, CUBE_LEVEL } from './levels.js';
 import { loadSketch } from './sketch.js';
 import { CAR, SEAT, SEAT_C, MAST, MAST_JOINTS, HANG_ROPES, PIVOT, CarouselSim, CAR_TUNING, mastReaches, mastTopY, seatY, cornerAt, KLAF_XS } from './carousel.js';
-import { WH, WHEEL, GOND, RIG, SEAT_ROPES, WheelSim, WH_TUNING, AXLE_Y, WHEEL_DROP, SEAT_DROP, SEAT_C as WSEAT_C, SEAT_Y as WSEAT_Y, ropeTop, ropeFoot, rigReachable, forkS, WHEEL_Z } from './wheel.js';
-import { TRI, TRI_SLOTS, TRI_JOINTS, LEG_IDS, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, TRI_TUNING, TripodSim, startFeet, planFeet, standing, braceReaches, fitsPlan, setLashFor } from './tripod.js';
+import { WH, WHEEL, GOND, RIG, SEAT_ROPES, WheelSim, WH_TUNING, AXLE_Y, WHEEL_DROP, SEAT_DROP, SEAT_C as WSEAT_C, SEAT_Y as WSEAT_Y, ropeTop, ropeFoot, rigReachable, WHEEL_Z, TRI90 } from './wheel.js';
+import { TRI, TRI_SLOTS, TRI_JOINTS, LEG_IDS, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, TRI_TUNING, TripodSim, startFeet, planFeet, standing, braceReaches, fitsPlan, setLashFor, TRI_SPEC } from './tripod.js';
+import { World } from './physics.js';
 import {
   R, makeRenderer, makeWorld, makeBlueprintMesh, drawBlueprint, BP, makePoleMesh, placeCylinder, makeSideSheet, drawSideSheet, makeTopSheet, drawTopSheet, POLE_LOOK,
   makeLashing, placeLashing, placeParallelLashing, RopeViz, makeStake, makeDriver, makeFreeGrid, makeTripodSheet, drawTripodFolder,
@@ -69,7 +70,7 @@ function stageList() {
   }
   if (LV.wheel) {
     L.push({ key: 'wheel', id: 'wheel', k: null, he: 'בניית הגלגל' });
-    L.push({ key: 'wlift', id: 'wlift', k: null, he: 'הרמת הגלגל אל ראשי המגדלים' });
+    L.push({ key: 'wlift', id: 'wlift', k: null, he: 'הרמת הגלגל אל ראשי החצובות' });
     L.push({ key: 'gond', id: 'gond', k: null, he: 'המושב' });
   }
   if (LV.carousel) {
@@ -99,7 +100,7 @@ function freshKlaf(cfg) {
     // feet stand, and what has been added to it
     tri: LV.tripod || cfg.kind === 'tripod' ? freshTri() : null,
     // free build: this klaf's own design (a tripod's is the tripod's plan)
-    plan: cfg.kind === 'tripod' ? { slots: TRI_SLOTS, joints: TRI_JOINTS } : { slots: [], joints: [] },
+    plan: cfg.kind === 'tripod' ? (cfg.plan || { slots: TRI_SLOTS, joints: TRI_JOINTS }) : { slots: [], joints: [] },
   };
 }
 function freshState() {
@@ -136,7 +137,19 @@ const K = () => G.klafim[G.ki];
 const z0 = () => K().cfg.z0;
 // the current structure is a tripod: the tripod station, or a tripod of free build
 const freeTri = () => !!LV.free && K()?.cfg.kind === 'tripod';
-const triOn = () => !!LV.tripod || freeTri();
+// the giant wheel's two 90° tripods are worked on in their own stages, like klafim
+const wheelTri = () => !!LV.wheel && K()?.cfg.kind === 'tripod' && !wheelStage(G?.stage) && G?.stage !== 'check';
+const triOn = () => !!LV.tripod || freeTri() || wheelTri();
+// drawn as a tripod (standing once it is up), whatever stage the level is in
+const triShape = () => triOn() || (!!LV.wheel && K()?.cfg.kind === 'tripod');
+// the current tripod's drawing (station 3's, or the giant wheel's 90° tripod)
+const triSpec = () => K()?.cfg.tri || TRI_SPEC;
+const triPlanFeet = () => triSpec().planFeet(triCentre(), K()?.cfg.out);
+// the distances between the feet, in words
+function apartText(sp = triSpec()) {
+  if (sp.ninety) return `${sp.apart[0].toFixed(2)} מ׳ מהרגל הזקופה לכל רגל נוטה, ו־${sp.apart[2].toFixed(1)} מ׳ בין שתי הנוטות`;
+  return `${sp.apart[0].toFixed(1)} מ׳ בין כל שתי רגליים`;
+}
 // a klaf of free build (designed on the grid)
 const freeKlaf = () => !!LV.free && !freeTri();
 // no drawing to follow: the feet go anywhere
@@ -210,8 +223,8 @@ for (const m of KM) {
   }
   m.triStakes = TRI_STAKES.map(() => { const s = makeStake(TRI.stakeLength); s.visible = false; scene.add(s); return s; });
 }
-const triSheet = makeTripodSheet({ slots: TRI_SLOTS, lashV: TRI_JOINTS[0].at[1], legLength: TRI.legLength });
-scene.add(triSheet);
+const triSheets = [makeTripodSheet({ slots: TRI_SLOTS, lashV: TRI_JOINTS[0].at[1], legLength: TRI.legLength }), makeTripodSheet({ slots: TRI90.slots, lashV: TRI90.lashV, legLength: Math.max(...TRI90.legLengths) })];
+triSheets.forEach(m => scene.add(m));
 // guide lines for spreading the tripod: where each foot goes, and the distance between every two feet
 const triGuide = (() => {
   const g = new THREE.Group(); g.visible = false;
@@ -222,26 +235,32 @@ const triGuide = (() => {
     m.rotation.x = -Math.PI / 2; g.add(m); return m;
   });
   // the length on each side of the triangle
-  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 96;
-  const cx = cv.getContext('2d'); cx.fillStyle = 'rgba(246,234,208,.92)'; cx.fillRect(8, 8, 240, 80);
-  cx.fillStyle = '#2f63b0'; cx.font = 'bold 54px Rubik, Arial, sans-serif'; cx.textAlign = 'center'; cx.textBaseline = 'middle';
-  cx.fillText(`${TRI.footApart.toFixed(1)} מ׳`, 128, 50);
-  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
-  g.userData.labels = [0, 1, 2].map(() => { const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false })); m.scale.set(1.0, 0.38, 1); m.renderOrder = 5; g.add(m); return m; });
+  const texs = {};
+  g.userData.texFor = text => {
+    if (texs[text]) return texs[text];
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 96;
+    const cx = cv.getContext('2d'); cx.fillStyle = 'rgba(246,234,208,.92)'; cx.fillRect(8, 8, 240, 80);
+    cx.fillStyle = '#2f63b0'; cx.font = 'bold 54px Rubik, Arial, sans-serif'; cx.textAlign = 'center'; cx.textBaseline = 'middle';
+    cx.fillText(text, 128, 50);
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+    return (texs[text] = tex);
+  };
+  g.userData.labels = [0, 1, 2].map(() => { const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: g.userData.texFor(`${TRI.footApart.toFixed(1)} מ׳`), depthTest: false })); m.scale.set(1.0, 0.38, 1); m.renderOrder = 5; g.add(m); return m; });
   g.renderOrder = 2;
   scene.add(g);
   return g;
 })();
 function drawTriGuide() {
-  const on = !!LV.tripod && !LV.sandbox && G.stage === 'spread' && G.tri?.up >= 1 && !G.check && !G.falling;
+  const on = (!!LV.tripod && !LV.sandbox || wheelTri()) && G.stage === 'spread' && G.tri?.up >= 1 && !G.check && !G.falling;
   triGuide.visible = on; if (!on) return;
-  const spots = planFeet(triCentre()), feet = G.tri.feet, ok = feetOnPlan();
+  const spots = triPlanFeet(), feet = G.tri.feet, ok = feetOnPlan(), sp = triSpec();
   const { edges, rings, labels } = triGuide.userData, y = 0.03;
   spots.forEach((p, i) => {
     const q = spots[(i + 1) % 3], dx = q[0] - p[0], dz = q[1] - p[1], L = Math.hypot(dx, dz);
     const e = edges[i]; e.position.set((p[0] + q[0]) / 2, y, (p[1] + q[1]) / 2); e.scale.x = L - 0.68; e.rotation.z = -Math.atan2(dz, dx);
     const c = triCentre(), mx = (p[0] + q[0]) / 2, mz = (p[1] + q[1]) / 2, o = norm2(mx - c[0], mz - c[1]);
     labels[i].position.set(mx + o[0] * 0.35, 0.2, mz + o[2] * 0.35);
+    const tx = triGuide.userData.texFor(`${(Math.round(sp.apart[i] * 100) / 100).toFixed(sp.ninety ? 2 : 1)} מ׳`); if (labels[i].material.map !== tx) { labels[i].material.map = tx; labels[i].material.needsUpdate = true; }
     const on = Math.hypot(feet[i][0] - p[0], feet[i][1] - p[1]) < 0.05;
     rings[i].position.set(p[0], y, p[1]);
     rings[i].material.color.setHex(on ? 0x3f8a2e : 0xe0a93b);
@@ -374,7 +393,7 @@ function visNormal() {
   return n ? [-n[0], -n[1], -n[2]] : [0, 1, 0];
 }
 function poleSegs(sid) {
-  if (triOn() && G.tri.up > 0) return triLegSegs(sid);
+  if (triShape() && G.tri.up > 0) return triLegSegs(sid);
   const slot = slotById(sid);
   const off = layerOff(slot);
   if (G.sim) {
@@ -394,7 +413,7 @@ function poleDir(sid) {
   return [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
 }
 function jointPos(j) {
-  if (triOn() && G.tri.up > 0) return triApex();
+  if (triShape() && G.tri.up > 0) return triApex();
   const off = (layerOff(slotById(j.a)) + layerOff(slotById(j.b))) / 2;
   if (G.sim) {
     const id = G.sim.findParticle(j.a, slotParam(slotById(j.a), j.at));
@@ -490,13 +509,13 @@ function goStage(key) {
     leaveCube();
     useKlaf(st.k);
   }
-  if (triOn() && (LV.tripod || id !== 'check')) {
+  if (triOn() && (LV.tripod || st.k != null) || LV.wheel && st.k != null) {
     if (id === 'build') {
       if (G.tri.up > 0 || G.tri.raising) return confirmCard('להשכיב את החצובה?', 'כדי לשנות את הרגליים או את כפיתת החצובה צריך להשכיב אותה חזרה על הקרקע. החיזוקים והבז״נטים יורדים.', 'להשכיב', () => { layTripod(); goStage(st.key); });
     } else {
       if (!stageDone(st.k != null ? STAGES.find(s => s.id === 'build' && s.k === st.k).key : 'build')) { infoCard('קודם כופתים את החצובה על הקרקע', 'מניחים שלוש רגליים זו לצד זו וכופתים אותן יחד ליד הראש. רק אז אפשר להקים.'); return; }
       if (id !== 'spread' && G.tri.up < 1) { infoCard('קודם מקימים את החצובה', 'חיזוקים ובז״נטים מוסיפים לחצובה שכבר עומדת, כשהרגליים שלה במקומן.'); return; }
-      if (id !== 'spread' && !feetOnPlan()) { infoCard('קודם מעמידים את הרגליים במקומן', `בשרטוט יש ${TRI.footApart.toFixed(1)} מ׳ בדיוק בין כל שתי רגליים. גוררים כל רגל אל העיגול שלה על הקרקע.`); return; }
+      if (id !== 'spread' && !feetOnPlan()) { infoCard('קודם מעמידים את הרגליים במקומן', `בשרטוט יש ${apartText()}. גוררים כל רגל אל העיגול שלה על הקרקע.`); return; }
       selectPole(null); G.tri.sim = null;
     }
   } else if (st.k != null) {
@@ -505,15 +524,18 @@ function goStage(key) {
     }
     if (id === 'build' && G.sim) lowerKlaf();
     if (id !== 'build') { selectPole(null); if (!G.sim) startSim(); }
-  } else if (LV.cube) {
-    if (LV.wheel && id === 'wheel' && G.wheel.lift > 0 && !G.check) {
-      return confirmCard('להוריד את הגלגל?', 'כדי לשנות את הגלגל מורידים אותו מראשי המגדלים חזרה לקרקע. המושב יורד ממנו, והחבלים שלו מותרים.', 'להוריד', () => { lowerWheel(); goStage('wheel'); });
+  } else if (LV.cube || LV.wheel) {
+    if (LV.wheel && wheelStage(id) && !G.klafim.every((k, i) => stageDone(STAGES.find(q => q.id === 'brace' && q.k === i).key) && k.tri.up >= 1)) {
+      infoCard('קודם מקימים את שתי החצובות', 'הגלגל נח על ראשי שתי החצובות. קודם מקימים כל חצובה, מעמידים את הרגליים שלה במקומן, ומוסיפים חיזוקים ובז״נטים.'); return;
     }
-    if (LV.wheel && id === 'gond' && G.wheel.lift < 1) { infoCard('קודם מרימים את הגלגל', 'המושב נבנה על הקרקע מתחת לגלגל, ונתלה על סנדת הפינה התחתונה שלו. קודם בונים את הגלגל ומרימים אותו אל ראשי המגדלים.'); return; }
+    if (LV.wheel && id === 'wheel' && G.wheel.lift > 0 && !G.check) {
+      return confirmCard('להוריד את הגלגל?', 'כדי לשנות את הגלגל מורידים אותו מראשי החצובות חזרה לקרקע. המושב יורד ממנו, והחבלים שלו מותרים.', 'להוריד', () => { lowerWheel(); goStage('wheel'); });
+    }
+    if (LV.wheel && id === 'gond' && G.wheel.lift < 1) { infoCard('קודם מרימים את הגלגל', 'המושב נבנה על הקרקע מתחת לגלגל, ונתלה על סנדת הפינה התחתונה שלו. קודם בונים את הגלגל ומרימים אותו אל ראשי החצובות.'); return; }
     if (LV.carousel && id === 'seat' && G.seat.lift > 0 && !G.check) {
       return confirmCard('להוריד את המושב?', 'כדי לשנות את המושב מורידים אותו חזרה לקרקע. התורן, החבלים והכפיתות שלו יורדים, והסנדה חוזרת לערימה.', 'להוריד', () => { lowerSeat(); goStage('seat'); });
     }
-    if (!enterCube()) return;
+    if (LV.cube && !enterCube()) return;
     if (id !== 'cube') selectPole(null);
   } else {
     selectPole(null); if (!G.sim && !triOn()) startSim();
@@ -612,7 +634,7 @@ function stagePose(mode) {
   }
   if (mode === 'seatView') return at(new THREE.Vector3(SEAT_C[0], 0.2, SEAT_C[1]), 6.5, 1.12, 0.6);
   if (mode === 'wheelView') return at(new THREE.Vector3(0, 1.6, WHEEL_Z), 17, 0.6, 0.42);
-  if (mode === 'gondView') return at(new THREE.Vector3(WSEAT_C[0], 1.2, WSEAT_C[1]), 13, 0.7, 0.45);
+  if (mode === 'gondView') return at(new THREE.Vector3(WSEAT_C[0], 1.3, WSEAT_C[1]), 17, 0.62, 0.45);
   if (mode === 'buildView') return at(new THREE.Vector3(0, 0, z + (LV.free ? 1.6 : 1.0 * S)), 16.5, 1.08, 0.5);
   if (mode === 'workView') return at(new THREE.Vector3(0, 0.6 * S, z + 0.2), 15, 0.95, 0.72);
   if (mode === 'cubeView') return at(new THREE.Vector3(0, 0.9 * S, z), 17 + 4 * ((LV.cube?.bays ?? 1) - 1), 0.92, 0.78);
@@ -709,6 +731,7 @@ function collectTargets() {
   const busy = G.falling || G.check?.running;
   if (!busy && triOn() && st !== 'build') collectTriTargets(T);
   else if (!busy && LV.cube && cubeStage(st)) collectCubeTargets(T);
+  else if (LV.wheel && (wheelStage(st) || st === 'check')) { if (!busy && wheelStage(st)) collectWheelTargets(T); }
   else if (!busy) {
     // klaf lashings: tie (ring) or change (on the coil)
     // lashings on the klaf can only be tied or changed while it lies on the ground
@@ -1192,14 +1215,14 @@ function finishFree() {
 // ---------------- the tripod (station 3) ----------------
 // On the ground the three legs are ordinary poles on a plan (see tripod.js). From
 // the moment it is stood up, the tripod is drawn from where its feet stand.
-function triCentre() { const c = LV.free ? null : LV.centre; return [c?.[0] ?? 0, z0() + (c?.[1] ?? 0.7)]; }
-const triLens = () => LEG_IDS.map(id => G.build.poles[id]?.length ?? TRI.legLength);
+function triCentre() { const c = LV.free ? null : (K()?.cfg.centre || LV.centre); return [c?.[0] ?? 0, z0() + (c?.[1] ?? 0.7)]; }
+const triLens = () => LEG_IDS.map((id, i) => G.build.poles[id]?.length ?? triSpec().slots[i].length);
 function freshTri() { return { up: 0, raising: false, feet: null, braces: {}, joints: {}, stakes: {}, stakeJoints: {}, sim: null }; }
 let triCache = null;
 function triState() {
   const t = G.tri; if (!t?.feet) return null;
   const key = JSON.stringify([G.ki, t.feet, triLens()]);
-  if (!triCache || triCache.key !== key) triCache = { key, st: standing(t.feet, triLens()) };
+  if (!triCache || triCache.key !== key) triCache = { key, st: standing(t.feet, triLens(), triSpec()) };
   return triCache.st;
 }
 const norm2 = (x, z) => { const l = Math.hypot(x, z) || 1; return [x / l, 0, z / l]; };
@@ -1228,7 +1251,7 @@ function triApex() {
   if (t.up >= 1) return triState().apex;
   const seg = triLegSegs('t2'); if (!seg) return null;
   const [a, b] = seg[0], len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
-  return add3(a, [(b[0] - a[0]) / len, (b[1] - a[1]) / len, (b[2] - a[2]) / len], len - TRI.lashFromTop);
+  return add3(a, [(b[0] - a[0]) / len, (b[1] - a[1]) / len, (b[2] - a[2]) / len], len - triSpec().lashFromTop);
 }
 // where a leg is at the braces' height, and at the height it is lashed to its stake
 const triLegPoint = (i, what) => (what === 'brace' && G.tri.sim) ? G.tri.sim.bracePoint(i) : triState().legs[i][what];
@@ -1290,7 +1313,7 @@ function collectTriTargets(T) {
   });
 }
 // the three distances between the feet are as in the drawing
-function feetOnPlan() { if (triLoose()) return true; const st = triState(); return !!st && fitsPlan(st).apart.every(Boolean); }
+function feetOnPlan() { if (triLoose()) return true; const st = triState(); return !!st && fitsPlan(st, triSpec()).apart.every(Boolean); }
 // a foot that already has a stake or a brace stays where it is
 const footFixed = i => (G.tri.stakes[TRI_STAKES[i].id] || 0) > 0 || BRACES.some(b => b.legs.includes(i) && G.tri.braces[b.id]);
 // spreading the legs: drag a foot over the ground, and the head follows
@@ -1312,10 +1335,10 @@ canvas.addEventListener('pointermove', e => {
   let x = snap(p.x), z = snap(p.z);
   const far = Math.hypot(x - c[0], z - c[1]); if (far > 4) { x = c[0] + (x - c[0]) * 4 / far; z = c[1] + (z - c[1]) * 4 / far; }
   // close to its spot in the drawing, the foot drops into it
-  const spot = planFeet(c)[footDrag.i];
+  const spot = triPlanFeet()[footDrag.i];
   if (!triLoose() && Math.hypot(x - spot[0], z - spot[1]) < 0.25) { x = spot[0]; z = spot[1]; }
   const next = G.tri.feet.map((f, i) => i === footDrag.i ? [x, z] : f);
-  const st = standing(next, triLens());
+  const st = standing(next, triLens(), triSpec());
   if (!st || st.height < 2) return flashHint('<b>הרגליים רחוקות מדי</b>: הראש יורד נמוך מדי');
   if (Math.min(...st.apart) < 0.4) return;
   G.tri.feet = next; refreshHint();
@@ -1338,9 +1361,12 @@ function drawTriShared(dt) {
   drawTriGuide();
   const on = triOn();
   const show = on && G.stage === 'build' && !stageDone('build');
-  triSheet.material.opacity = Math.max(0, Math.min(0.96, triSheet.material.opacity + (show ? 1 : -1) * dt / 0.4));
-  triSheet.visible = triSheet.material.opacity > 0.01;
-  if (on) triSheet.position.z = triSheet.userData.z + z0();
+  triSheets.forEach((sh, i) => {
+    const mine = show && (i === 1) === (triSpec() === TRI90);
+    sh.material.opacity = Math.max(0, Math.min(0.96, sh.material.opacity + (mine ? 1 : -1) * dt / 0.4));
+    sh.visible = sh.material.opacity > 0.01;
+    if (mine) sh.position.z = sh.userData.z + z0();
+  });
 }
 // one tripod (run as the current klaf by eachKlaf); its crew only while it is the one being worked on
 function drawTripod(dt, current = true) {
@@ -1418,7 +1444,7 @@ function explainTri(kind) {
   const loose = [0, 1, 2].filter(i => !ts.staked[i]).length;
   const minApart = Math.min(...st.apart);
   if (minApart < 1.6 && !(kind === 'slid' && ts.braced.length < 3))
-    return { rule: 'חצובה צריכה בסיס רחב', detail: `הרגליים עומדות רק ${minApart.toFixed(1)} מ׳ זו מזו, והראש בגובה ${st.height.toFixed(1)} מ׳. חצובה גבוהה וצרה מתהפכת בדחיפה. בשרטוט יש ${TRI.footApart.toFixed(1)} מ׳ בין רגל לרגל.` };
+    return { rule: 'חצובה צריכה בסיס רחב', detail: `הרגליים עומדות רק ${minApart.toFixed(1)} מ׳ זו מזו, והראש בגובה ${st.height.toFixed(1)} מ׳. חצובה גבוהה וצרה מתהפכת בדחיפה. בשרטוט יש ${apartText()}.` };
   if (ts.braced.length < 3 && loose)
     return { rule: 'רגלי חצובה לא נשארות במקום לבד', detail: `כשכולם עזבו, ${loose === 3 ? 'הרגליים' : 'רגל שלא כפותה לבז״נט'} החליקו החוצה על החול, והחצובה נפתחה ושקעה. חיזוק שכפות בשני הקצוות שלו בין כל שתי רגליים, ובז״נט שהרגל כפותה אליו, מחזיקים את הרגליים במקום.` };
   if (loose) return { rule: 'כל רגל של החצובה נכפתת לבז״נט', detail: 'החיזוקים החזיקו את הרגליים יחד, אבל בלי בז״נטים החצובה כולה זזה או התהפכה כשדחפו אותה.' };
@@ -1457,8 +1483,8 @@ function triStatus(nPoles, nJ) {
       if (t.up < 1) return 'שישה צופים מקימים את החצובה, שניים לכל רגל';
       const st = triState();
       if (triLoose()) return `גובה הראש <b>${st.height.toFixed(1)} מ׳</b> · בין הרגליים <b>${st.apart.map(d => d.toFixed(1)).join(' / ')}</b> מ׳ · גוררים כל רגל לאן שרוצים`;
-      if (feetOnPlan()) return `הרגליים במקומן: <b>${TRI.footApart.toFixed(1)} מ׳</b> בין כל שתיים, הראש בגובה <b>${st.height.toFixed(1)} מ׳</b>`;
-      return `בין הרגליים <b>${st.apart.map(d => d.toFixed(1)).join(' / ')}</b> מ׳, צריך <b>${TRI.footApart.toFixed(1)}</b> · גוררים כל רגל אל העיגול שלה`;
+      if (feetOnPlan()) return `הרגליים במקומן: <b>${apartText()}</b>, הראש בגובה <b>${st.height.toFixed(1)} מ׳</b>`;
+      return `בין הרגליים <b>${st.apart.map(d => d.toFixed(1)).join(' / ')}</b> מ׳, צריך <b>${triSpec().apart.map(d => d.toFixed(1)).join(' / ')}</b> · גוררים כל רגל אל העיגול שלה`;
     }
     case 'brace': {
       const n = BRACES.filter(q => t.braces[q.id]).length, j = BRACE_JOINTS.filter(q => t.joints[q.id]).length;
@@ -1855,7 +1881,7 @@ function collectWheelTargets(T) {
 }
 // the inspection: the מדריך pushes the towers, two scouts get on, the crew turns it a full turn, he pushes the seat
 const WHEEL_PUSHES = [
-  { from: 1.5, to: 3.0, f: [1, 0, 0], label: 'המדריך דוחף את המגדלים <b>שמאלה</b>' },
+  { from: 1.5, to: 3.0, f: [1, 0, 0], label: 'המדריך דוחף את החצובות <b>שמאלה</b>' },
   { from: 3.5, to: 5.0, f: [-1, 0, 0], label: 'המדריך דוחף <b>ימינה</b>' },
   { from: 5.5, to: 7.0, f: [0, 0, 1], label: 'המדריך דוחף <b>לאורך הציר</b>' },
 ];
@@ -1868,46 +1894,66 @@ function wheelRideLabel(c) {
   if (t >= WRIDE.board[0]) return 'הגלגל מסתובב…';
   return null;
 }
-function towerForks() {
-  const cs = G.cube?.sim; if (!cs) return null;
-  return cs.klafim.map(k => k.findParticle('legR', forkS(k.slotById('legR'))));
-}
+// the inspection's physics: both tripods in one world, the axle holding their heads
+// apart, and the wheel (with its seat) in a world of its own lying on their heads
 function startWheelSim() {
-  const W = G.wheel, cs = G.cube.sim;
+  const W = G.wheel, TW = new World();
+  TW.mu = 0; TW.iterations = 3;
+  eachKlaf(k => {
+    const t = k.tri;
+    t.sim = new TripodSim({ feet: t.feet, lens: triLens(), braces: t.braces, joints: t.joints, stakes: t.stakes, stakeJoints: t.stakeJoints, spec: triSpec(), world: TW });
+  });
+  W.triWorld = TW;
+  const heads = G.klafim.map(k => k.tri.sim.legs[1].head);
+  // the axle lies on both heads: they stay their distance apart
+  if (W.build.poles['W.axle']) TW.add('rigid', heads[0], heads[1], { tag: 'axle' });
   W.sim = new WheelSim(W.build, { seat: true, ropes: W.ropes });
-  // the axle holds the two forks at their distance
-  W.forks = towerForks();
-  if (W.forks?.every(q => q != null)) cs.world.add('rigid', W.forks[0], W.forks[1], { tag: 'axle' });
 }
-function stepWheel(h) {
+function stopWheelSims() {
+  if (!G.wheel) return;
+  G.wheel.sim = null; G.wheel.triWorld = null;
+  G.klafim.forEach(k => { if (k.tri) k.tri.sim = null; });
+}
+// where the axle lies on a tripod's head, from where the head is
+const axleOn = sim => add3(sim.pos(sim.legs[1].head), [0, AXLE_Y - (WH.forkHeight + R), 0], 1);
+function stepWheel(h, push) {
   const W = G.wheel, ws = W.sim, c = G.check; if (!ws) return;
-  const t = c?.t ?? 99, cs = G.cube.sim;
+  const t = c?.t ?? 99;
   const riders = c && t >= WRIDE.board[0] ? Math.min(2, (t - WRIDE.board[0]) / (WRIDE.board[1] - WRIDE.board[0]) * 2.2) : (G.falling ? (c?.riders || 0) : 0);
   if (c) c.riders = riders;
-  if (W.forks?.every(q => q != null)) ws.setPivots(W.forks.map(q => add3(cs.pos(q), [0, WH.axleAbove, 0], 1)));
+  // the towers: the מדריך pushes the front tripod's head; the wheel, with its riders, lies on both
+  const sims = G.klafim.map(k => k.tri.sim);
+  const N = ws.mass() * 9.81 + Math.min(2, riders) * WH_TUNING.rider;
+  sims.forEach((ts, i) => ts.forces({ push: i === 0 ? push : null, load: N / 2 }));
+  W.triWorld.step(h, 30);
+  ws.setPivots(sims.map(axleOn));
   ws.step(h, { riders, spin: !!c && t >= WRIDE.spin[0] && t < WRIDE.spin[1], side: c && t >= WRIDE.side[0] && t < WRIDE.side[1] ? [0, 0, WH_TUNING.sidePush] : null });
-  // the wheel's weight, with its riders, lies on the two forks
-  if (W.forks?.every(q => q != null)) {
-    const N = ws.mass() * 9.81 + Math.min(2, riders) * WH_TUNING.rider;
-    for (const q of W.forks) cs.world.applyForce(q, [0, -N / 2, 0]);
-  }
 }
 function watchWheel() {
   const ws = G.wheel.sim; if (!ws || G.falling || !G.check?.running) return;
   if ((G.check.t ?? 0) < 1) return;
-  let kind = null;
-  if (ws.rack() > WH_TUNING.rackLimit) kind = 'rack';
+  let kind = null, tower = -1;
+  G.klafim.forEach((k, i) => { const ts = k.tri.sim; if (tower < 0 && (ts.slid() > 0.35 || ts.sunk() > 0.25 * ts.h0)) tower = i; });
+  if (tower >= 0) kind = 'tower';
+  else if (ws.rack() > WH_TUNING.rackLimit) kind = 'rack';
   else if (ws.slip() > WH_TUNING.slipLimit) kind = 'slip';
   else if (ws.seatBend() > WH_TUNING.seatBend) kind = 'bend';
   else if (ws.seatTilt() > WH_TUNING.seatTilt) kind = 'tilt';
   else if (ws.seatDrop() > 0.3) kind = 'drop';
   if (!kind) return;
-  G.falling = { kind, t: 0, wheel: true, explain: explainWheel(kind) };
+  G.falling = { kind, t: 0, wheel: true, explain: explainWheel(kind, tower) };
   sfx.crash(); buzz([60, 40, 90]); fun.collapse([0, AXLE_Y, WHEEL_Z]);
   closePicker(); refreshAll();
 }
-function explainWheel(kind) {
+function explainWheel(kind, tower = 0) {
   const W = G.wheel, b = W.build;
+  if (kind === 'tower') {
+    const k = G.klafim[tower], ts = k.tri.sim, loose = [0, 1, 2].filter(i => !ts.staked[i]).length;
+    const stage = STAGES.find(q => q.id === 'brace' && q.k === tower).key, he = LV.klafim[tower].he;
+    if (ts.braced.length < 3 && loose) return { stage, rule: 'רגלי חצובה לא נשארות במקום לבד', detail: `ב${he} ${loose === 3 ? 'הרגליים' : 'רגל שלא כפותה לבז״נט'} החליקו על החול תחת משקל הגלגל, והחצובה נפתחה ושקעה. חיזוק כפות בין כל שתי רגליים, ובז״נט לכל רגל, מחזיקים אותן במקום.`, focus: {} };
+    if (loose) return { stage, rule: 'כל רגל של החצובה נכפתת לבז״נט', detail: `ב${he} רגל לא הייתה כפותה לבז״נט, והחצובה זזה כשדחפו אותה עם הגלגל עליה.`, focus: {} };
+    return { stage, rule: 'החצובות צריכות לשאת את הגלגל', detail: `${he} לא עמדה במשקל הגלגל והרוכבים. בדקו את החיזוקים והבז״נטים שלה.`, focus: {} };
+  }
   const miss = pred => RIG.joints.filter(j => pred(j) && !(b.joints[j.id] && rigReachable(j, b.poles)));
   const sq = miss(j => j.part === 'wheel' && !j.axle);
   const ax = miss(j => j.axle);
@@ -1922,14 +1968,15 @@ function wheelStatus() {
   const W = G.wheel, b = W.build;
   const of = part => [RIG.slots.filter(s => s.part === part && b.poles[s.id]).length, RIG.slots.filter(s => s.part === part).length, RIG.joints.filter(j => j.part === part && b.joints[j.id]).length, RIG.joints.filter(j => j.part === part).length];
   if (G.stage === 'wheel') { const [p, P, j, J] = of('wheel'); return W.lift > 0 ? 'הגלגל למעלה. כדי לשנות אותו מורידים אותו (הקישו על השלב)' : `סנדות בגלגל ${p}/${P} · כפיתות ${j}/${J}`; }
-  if (G.stage === 'wlift') return W.lifting ? 'שישה צופים מרימים את הגלגל…' : W.lift >= 1 ? 'הציר נח במזלגות שבראשי המגדלים, ומסתובב בהם' : 'שישה צופים מרימים את הגלגל עד שהציר נכנס למזלגות';
+  if (G.stage === 'wlift') return W.lifting ? 'שישה צופים מרימים את הגלגל…' : W.lift >= 1 ? 'הציר נח בראשי החצובות, ומסתובב בהם' : 'שישה צופים מרימים את הגלגל עד שהציר נכנס למזלגות';
   const [p, P, j, J] = of('seat');
   if (W.seatLifting) return 'הצוות מרים את המושב…';
   if (W.seatLift < 1) return `סנדות במושב ${p}/${P} · כפיתות ${j}/${J}`;
   return `חבלי תלייה ${SEAT_ROPES.filter(h => W.ropes[h.id]).length}/4 · הקישו על כל פינה של המושב כדי לקשור אליה חבל מסנדת הפינה התחתונה`;
 }
 // the folder's drawings of the wheel (front view) and of the seat (from above)
-function wheelFolderCanvas(seat) {
+function wheelFolderCanvas(mode) {
+  const seat = mode === 'seat';
   const c = document.createElement('canvas'); c.width = 900; c.height = 640; c.className = 'bp-canvas';
   const g = c.getContext('2d');
   g.fillStyle = '#f4ecd8'; g.fillRect(0, 0, c.width, c.height);
@@ -1940,6 +1987,29 @@ function wheelFolderCanvas(seat) {
   const line = (a, b, w = 8, col = ink) => { g.strokeStyle = col; g.lineWidth = w; g.lineCap = 'round'; g.beginPath(); g.moveTo(...a); g.lineTo(...b); g.stroke(); };
   const text = (s, x, y, size = 22, col = ink) => { g.fillStyle = col; g.font = `bold ${size}px sans-serif`; g.textAlign = 'center'; g.fillText(s, x, y); };
   const dot = (p, col = '#e0a93b', r = 9) => { g.fillStyle = col; g.beginPath(); g.arc(...p, r, 0, 7); g.fill(); };
+  if (mode === 'tri') {
+    // the 90° tripod: from the side (the upright leg on the wheel's side) and from above (where the feet stand)
+    const S = 140, base = 560, O = [250, base], P = (x, y) => [O[0] - x * S, O[1] - y * S];
+    const out = WH.footOut;
+    line(P(0, 0), P(0, WH.forkHeight + WH.lashFromTop), 10);
+    line(P(-out, 0), P(out * WH.lashFromTop / WH.forkHeight, WH.forkHeight + WH.lashFromTop), 9);
+    dot(P(0, WH.forkHeight), '#e0a93b', 12);
+    line([60, base + 4], [440, base + 4], 3, '#8a6d3b');
+    text('מהצד', 250, 40);
+    text(`זקופה ${TRI90.legLengths[1].toFixed(1)} מ׳`, 160, 330, 20);
+    text(`נוטה ${TRI90.legLengths[0].toFixed(1)} מ׳`, 380, 330, 20);
+    text(`כפיתת חצובה בגובה ${WH.forkHeight.toFixed(1)} מ׳`, 250, base - WH.forkHeight * S - 50, 20);
+    text('→ הגלגל', 110, base - 40, 22, red);
+    // from above: the three feet
+    const Q = [680, 200], T = 110, pf = TRI90.planFeet([0, 0], 1).map(([x, z]) => [Q[0] - x * T, Q[1] + z * T]);
+    for (let i = 0; i < 3; i++) line(pf[i], pf[(i + 1) % 3], 3);
+    pf.forEach((p, i) => dot(p, i === 1 ? red : '#6b4423', 12));
+    text('מלמעלה', 680, 40);
+    text(`${TRI90.apart[0].toFixed(2)} מ׳`, 590, 290, 20); text(`${TRI90.apart[0].toFixed(2)} מ׳`, 770, 290, 20);
+    text(`${TRI90.apart[2].toFixed(1)} מ׳`, 680, pf[0][1] + 40, 20);
+    text('אדום: הרגל הזקופה, בצד של הגלגל', 680, 610, 20, red);
+    return c;
+  }
   if (!seat) {
     // front view: one square, its X, the axle in the middle, the corner poles' ends; the seat below
     const S = 150, O = [450, 300], P = q => [O[0] - q[0] * S, O[1] - (q[1] - AXLE_Y) * S];
@@ -2348,7 +2418,7 @@ function pileStock() {
   if (LV.cube) LV.cube.slots.forEach(s => add(s.length));
   if (LV.tripod) BRACES.forEach(q => add(q.length));
   if (LV.carousel) [...SEAT.slots, MAST].forEach(q => add(q.length));
-  if (LV.wheel) RIG.slots.forEach(q => add(q.length));
+  if (LV.wheel) { RIG.slots.forEach(q => add(q.length)); LV.klafim.forEach(k => k.tri && Object.values(k.tri.braceLengths).forEach(add)); }
   (LV.stockExtra || []).forEach(add);
   return [...m.entries()].sort((a, b) => b[0] - a[0]);
 }
@@ -2357,7 +2427,7 @@ function polesInUse() {
   const add = set => { for (const id in set) if (set[id]) { const l = r1(set[id].length); m.set(l, (m.get(l) || 0) + 1); } };
   G.klafim.forEach(k => add(k.build.poles));
   if (G.cube) add(G.cube.build.poles);
-  if (G.tri) add(G.tri.braces);
+  G.klafim.forEach(k => { if (k.tri) add(k.tri.braces); });
   if (G.seat) add(G.seat.build.poles);
   if (G.wheel) add(G.wheel.build.poles);
   return m;
@@ -2368,7 +2438,7 @@ const countTrue = o => Object.values(o).filter(Boolean).length;
 function ropeTotal() {
   if (LV.free) return Infinity; // free build: rope as needed
   if (LV.tripod) return TRI_JOINTS.length + BRACE_JOINTS.length + TRI_STAKE_JOINTS.length + (LV.ropeSpare ?? 2);
-  const klafJ = LV.klafim.reduce((a, k) => a + (k.plan?.joints ?? JOINTS).length + STAKE_JOINTS.length + GUYS.length, 0);
+  const klafJ = LV.klafim.reduce((a, k) => a + (k.kind === 'tripod' ? TRI_JOINTS.length + BRACE_JOINTS.length + TRI_STAKE_JOINTS.length : (k.plan?.joints ?? JOINTS).length + STAKE_JOINTS.length + GUYS.length), 0);
   const seatJ = LV.carousel ? SEAT.joints.length + MAST_JOINTS.length + HANG_ROPES.length + 1 : LV.wheel ? RIG.joints.length + SEAT_ROPES.length : 0;
   return klafJ + (LV.cube ? LV.cube.joints.length : 0) + seatJ + (LV.ropeSpare ?? 2);
 }
@@ -2376,7 +2446,7 @@ function ropeUsed() {
   let n = 0;
   for (const k of G.klafim) n += countTrue(k.build.joints) + countTrue(k.build.stakeJoints) + countTrue(k.build.guyTies);
   if (G.cube) n += countTrue(G.cube.build.joints);
-  if (G.tri) n += countTrue(G.tri.joints) + countTrue(G.tri.stakeJoints);
+  for (const k of G.klafim) if (k.tri) n += countTrue(k.tri.joints) + countTrue(k.tri.stakeJoints);
   if (G.seat) n += countTrue(G.seat.build.joints) + countTrue(G.seat.mastJoints) + countTrue(G.seat.ropes) + (G.seat.pivot ? 1 : 0);
   if (G.wheel) n += countTrue(G.wheel.build.joints) + countTrue(G.wheel.ropes);
   return n;
@@ -2693,7 +2763,7 @@ function refreshActions() {
   if (G.stage === 'cube' && cubeComplete()) go('המשך להורדת היתרים הפנימיים');
   if (G.stage === 'unguy' && stageDone('unguy')) go(nx.id === 'seat' ? 'המשך לבניית המושב' : nx.id === 'wheel' ? 'המשך לבניית הגלגל' : 'למסדר המדריך');
   if (G.stage === 'wheel' && stageDone('wheel')) go('המשך להרמת הגלגל');
-  if (G.stage === 'wlift' && G.wheel.lift <= 0 && !G.wheel.lifting) add('מרימים את הגלגל אל ראשי המגדלים', liftWheel);
+  if (G.stage === 'wlift' && G.wheel.lift <= 0 && !G.wheel.lifting) add('מרימים את הגלגל אל ראשי החצובות', liftWheel);
   if (G.stage === 'wlift' && stageDone('wlift')) go('המשך למושב');
   if (G.stage === 'gond' && rigDone('seat') && G.wheel.seatLift <= 0 && !G.wheel.seatLifting) add('מרימים את המושב ותולים אותו', liftWheelSeat);
   if (G.stage === 'gond' && stageDone('gond')) go('למסדר המדריך');
@@ -2826,12 +2896,10 @@ function runCheck() {
     return startCheckFor();
   }
   if (LV.wheel) {
-    if (!G.cube.sim) return;
     const Wh = G.wheel;
-    if (Wh.lift < 1 || Wh.seatLift < 1) return infoCard('הגלגל עוד לא מוכן', 'קודם מרימים את הגלגל אל ראשי המגדלים, ותולים את המושב על סנדת הפינה התחתונה.');
+    if (Wh.lift < 1 || Wh.seatLift < 1) return infoCard('הגלגל עוד לא מוכן', 'קודם מרימים את הגלגל אל ראשי החצובות, ותולים את המושב על סנדת הפינה התחתונה.');
     rec.length = 0;
     startWheelSim();
-    G.cube.sim.letGo();
     // the frame first (pushes, the outer guy lines stay), then the riders and a full turn
     G.check = { t: 0, running: true, label: 'כולם עוזבים…', pushes: WHEEL_PUSHES, load: null, end: WRIDE.end, wride: true, riders: 0 };
     return refreshAll();
@@ -3063,6 +3131,16 @@ function score() {
   let polesOk = 0, nPoles = 0;
   eachKlaf((k, i) => {
     const b = G.build;
+    if (k.tri) {
+      // a 90° tripod of the giant wheel: its head lashing, braces and stakes
+      const t = k.tri, sp = triSpec();
+      all.push([{ id: 'TJ', correct: 'tripod', tri: 'head', klaf: i, uid: `${i}:TJ` }, b.joints.TJ]);
+      for (const j of BRACE_JOINTS) all.push([{ ...j, tri: 'brace', klaf: i, uid: `${i}:${j.id}` }, t.up >= 1 && braceOn(j.brace) ? t.joints[j.id] : null]);
+      for (const j of TRI_STAKE_JOINTS) all.push([{ ...j, tri: 'stake', klaf: i, uid: `${i}:${j.id}` }, (t.stakes[j.stake] || 0) >= TRI_STAKE_HITS ? t.stakeJoints[j.id] : null]);
+      polesOk += LEG_IDS.filter((id, n) => b.poles[id] && Math.abs(b.poles[id].length - sp.slots[n].length) < 0.05).length + BRACES.filter(q => t.braces[q.id] && Math.abs(t.braces[q.id].length - sp.braceLengths[q.id]) < 0.05).length;
+      nPoles += 6;
+      return;
+    }
     for (const j of JOINTS) all.push([{ ...j, klaf: i, uid: `${i}:${j.id}` }, b.joints[j.id]]);
     for (const j of STAKE_JOINTS) all.push([{ ...j, klaf: i, uid: `${i}:${j.id}`, stake: true }, b.stakeJoints[j.id]]);
     for (const g of GUYS) all.push([{ ...g, correct: 'guy', guy: true, klaf: i, uid: `${i}:${g.id}` }, b.guyTies[g.id]]);
@@ -3134,7 +3212,7 @@ function finish() {
     <div class="stars">${stars}</div>
     ${extra}
     <ul class="inspect">
-      <li class="ok">${LV.tripod ? 'החצובה עמדה' : LV.wheel ? 'המגדלים עמדו' : LV.carousel ? 'מסגרת הקרוסלה עמדה' : LV.cube ? 'הקובייה עמדה' : 'הקלף עמד'} בדחיפות מכל הכיוונים${LV.cube && !LV.wheel ? ', גם בלי יתרים' : ''}</li>
+      <li class="ok">${LV.tripod ? 'החצובה עמדה' : LV.wheel ? 'החצובות עמדו' : LV.carousel ? 'מסגרת הקרוסלה עמדה' : LV.cube ? 'הקובייה עמדה' : 'הקלף עמד'} בדחיפות מכל הכיוונים${LV.cube && !LV.wheel ? ', גם בלי יתרים' : ''}</li>
       ${LV.cube && !LV.wheel ? `<li class="ok">איקס מרחבי מלא בכל צד ובחלק העליון${LV.cube.bays > 1 ? ', וגם בחיבור בין הקוביות' : ''}</li>` : ''}
       <li class="ok">${LV.tripod ? 'נשאה את המשקל על הראש' : LV.wheel ? 'הגלגל הסתובב סיבוב שלם עם שני רוכבים, והמושב נשאר ישר' : LV.carousel ? 'הקרוסלה נשאה שמונה רוכבים והסתובבה בלי להיתקע בתורן' : 'החזיק את דלי המים על הרוחב העליון'}</li>
       ${s.shape ? `<li class="${s.shape.ok ? 'ok' : 'no'}">${s.shape.text}</li>` : ''}
@@ -3167,7 +3245,7 @@ function reopenForFixes() {
   closeModal(); G.check = null; G.result = null; G.endedAt = null; G.paraded = false;
   if (LV.tripod) { G.tri.sim = null; goStage('brace'); }
   else if (LV.carousel) { G.cube.sim = null; G.seat.sim = null; goStage('hang'); }
-  else if (LV.wheel) { G.cube.sim = null; G.wheel.sim = null; goStage('gond'); }
+  else if (LV.wheel) { stopWheelSims(); goStage('gond'); }
   else if (LV.cube) { G.cube.sim = null; goStage('cube'); } else goStage('anchor');
 }
 // ---------------- the festive מסדר ----------------
@@ -3255,6 +3333,7 @@ $('app').addEventListener('pointerdown', () => { if (parade && parade.t > 0.3) e
 
 // where a lashing is, as the structure file names it: the drawing sheet and the height band
 function sheetOf(j) {
+  if (LV.wheel && j.tri) return `שרטוט החצובה (${LV.klafim[j.klaf].he}), ${j.tri === 'head' ? 'בראש' : j.tri === 'stake' ? 'ליד הקרקע (רגל לבז״נט)' : 'בחיזוקים'}`;
   if (LV.tripod) return j.tri === 'head' ? 'שרטוט החצובה, בראש' : j.tri === 'stake' ? 'שרטוט החצובה, ליד הקרקע (רגל לבז״נט)' : 'שרטוט החצובה, בחיזוקים';
   if (j.seat) return j.rope ? 'שרטוט המושב, חבלי התלייה' : j.mast ? 'שרטוט המושב, התורן' : 'שרטוט המושב';
   if (j.rig) return j.rope ? 'שרטוט המושב, חבלי התלייה' : j.part === 'seat' ? 'שרטוט המושב' : j.cornerPole != null ? 'שרטוט הגלגל, סנדות הפינה' : j.axle ? 'שרטוט הגלגל, הציר' : `שרטוט הגלגל, ה${j.sq ? 'ריבוע האחורי' : 'ריבוע הקדמי'}`;
@@ -3337,7 +3416,7 @@ function makeDisplay(L) {
   const N = [0, 0, -1]; // a standing klaf faces the pullers
   // the plan being played (a tripod, free build, another level) is put back afterwards
   const keep = { slots: [...SLOTS], joints: [...JOINTS], u: LEG_STAKES.map(q => q.u), h: LEVEL.height };
-  for (const cfg of L.klafim) {
+  for (const cfg of L.klafim.filter(q => q.kind !== 'tripod')) {
     if (cfg.plan) setPlan(cfg.plan.slots, cfg.plan.joints); else resetPlan();
     const at = (u, v, slot) => { const p = klafToWorld(u, v, 90); p[2] += cfg.z0; return add3(p, N, slot ? layerOff(slot) : 0); };
     for (const sl of SLOTS) {
@@ -3374,6 +3453,12 @@ function makeDisplay(L) {
     for (let k = 0; k < 8; k++) { const c = cornerAt(k), rr = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 1, 5), rm); placeCylinder(rr, [SEAT_C[0], PIVOT[1], SEAT_C[1]], [c[0], LEVEL.poleRadius + y, c[1]]); g.add(rr); }
   }
   if (L.wheel) {
+    // the two 90° tripods standing, with their braces
+    for (const cfg of L.klafim) {
+      const sp = cfg.tri, st = standing(sp.planFeet([cfg.centre[0], cfg.z0 + cfg.centre[1]], cfg.out), sp.legLengths, sp);
+      st.legs.forEach((q, i) => { const o = headOffset(i, st); pole(add3(q.foot, o, 1), add3(q.top, o, 1)); });
+      for (const b of BRACES) { const [a, c] = braceEnds(b, sp.braceLengths[b.id], st); pole(a, c); }
+    }
     // the wheel in its forks, and its seat hanging from the bottom corner pole
     for (const sl of RIG.slots) { const h = sl.length / 2, o = rigOff(sl); pole(add3(add3(sl.centre, sl.dir, -h), o, 1), add3(add3(sl.centre, sl.dir, h), o, 1)); }
     const rm = new THREE.MeshStandardMaterial({ color: 0xd8b878, roughness: 1 });
@@ -3668,9 +3753,9 @@ function infoCard(title, text) { showModal(`<h2>${title}</h2><p>${text}</p>`, [[
 function collapseCard() {
   const e = G.falling.explain;
   if (G.falling.wheel) {
-    const title = { rack: 'הגלגל התקפל', slip: 'הגלגל החליק מהציר', tilt: 'המושב נטה', bend: 'המושב נשבר', drop: 'המושב נפל' }[G.falling.kind] || 'הגלגל נשבר';
+    const title = { tower: 'חצובה קרסה', rack: 'הגלגל התקפל', slip: 'הגלגל החליק מהציר', tilt: 'המושב נטה', bend: 'המושב נשבר', drop: 'המושב נפל' }[G.falling.kind] || 'הגלגל נשבר';
     return showModal(`<div class="eyebrow">מבחן מציאות</div><h2>${title}</h2><div class="rule">${e.rule}</div><p>${e.detail}</p>`, [['חזרה לגלגל', () => {
-      closeModal(); G.falling = null; G.check = null; G.wheel.sim = null; G.cube.sim = null; setPolesOpacity(1); goStage(e.stage || 'gond');
+      closeModal(); G.falling = null; G.check = null; stopWheelSims(); setPolesOpacity(1); goStage(e.stage || 'gond');
     }, true]]);
   }
   if (G.falling.carousel) {
@@ -3800,7 +3885,7 @@ function setPolesOpacity(o) {
 function folderTabs() {
   if (LV.sketch) return LV.sketch.pages.map((_, i) => [`sk${i}`, LV.sketch.pages.length > 1 ? `עמוד ${i + 1}` : 'השרטוט']);
   if (LV.tripod) return [['drawing', 'שרטוט החצובה'], ['poles', 'רשימת סנדות']];
-  if (LV.wheel) return [['klaf0', 'המגדל (שני המגדלים זהים)'], ['sideR', 'חיבור המגדלים'], ['wheelF', 'הגלגל'], ['wseat', 'המושב'], ['poles', 'רשימת סנדות']];
+  if (LV.wheel) return [['tri90', 'חצובה ב־90 מעלות (שתיים זהות)'], ['wheelF', 'הגלגל'], ['wseat', 'המושב'], ['poles', 'רשימת סנדות']];
   if (LV.carousel) return [['klaf0', 'קלף השער'], ['klaf1', 'הקלף האחורי'], ['sideR', 'הצד הימני'], ['sideL', 'הצד השמאלי'], ['top', 'מבט על (הגג)'], ['seat', 'המושב והתורן'], ['poles', 'רשימת סנדות']];
   if (LV.cube) return [['drawing', 'שרטוט קלף'], ['sideR', 'שרטוט הצד הימני'], ['sideL', 'שרטוט הצד השמאלי'], ['top', 'שרטוט מבט על'], ['poles', 'רשימת סנדות']];
   return [['drawing', 'שרטוט הקלף'], ['poles', 'רשימת סנדות'], ...(LV.tutorial ? [['order', 'סדר עבודה (הדרכה)'], ['lashings', 'איזו כפיתה איפה (הדרכה)']] : [])];
@@ -3809,22 +3894,22 @@ function poleTable() {
   const k = SIZES.klaf, n = LV.klafim.length;
   const m = v => `${v.toFixed(1)} מ׳`;
   if (LV.wheel) {
-    const T = LV.klafim[0].plan.slots, len = id => RIG.slots.find(q => q.id === id).length, tl = id => T.find(q => q.id === id).length;
+    const len = id => RIG.slots.find(q => q.id === id).length, bl = TRI90.braceLengths;
     const rows = [
-      ['רגלי המגדלים (נפגשות במזלג)', 4, m(tl('legR'))],
-      [`שלב תחתון (${Math.round(WH.bottomHeight * 100)} ס״מ)`, 2, m(tl('botH'))],
-      [`שלב עליון (${WH.rungHeight.toFixed(1)} מ׳)`, 2, m(tl('midH'))],
-      [`חיבור בין המגדלים (${Math.round(WH.sideHeight * 100)} ס״מ, בכל צד)`, 2, m(LV.cube.slots[0].length)],
+      ['רגל זקופה (אחת בכל חצובה)', 2, m(TRI90.legLengths[1])],
+      ['רגליים נוטות', 4, m(TRI90.legLengths[0])],
+      ['חיזוקים מהרגל הזקופה לנוטות (בגובה כ־50 ס״מ)', 4, m(bl.B12)],
+      ['חיזוק בין שתי הנוטות', 2, m(bl.B31)],
       ['צלעות הריבועים בגלגל', 8, m(len('W.s10'))],
       ['אלכסונים (איקס בכל ריבוע)', 4, m(len('W.dA1'))],
       ['סנדות פינה בין הריבועים', 4, m(len('W.c0'))],
       ['הציר', 1, m(len('W.axle'))],
       ['סנדות אורך במושב', 2, m(len('W.gL1'))], ['סנדות רוחב במושב', 2, m(len('W.gE1'))], ['איקס במושב', 2, m(len('W.gA'))],
-      ['בז״נטים לרגליים', 4, m(1.0)], ['בז״נטים ליתרים', 8, m(0.6)],
+      ['בז״נטים לרגליים', 6, m(TRI.stakeLength)],
     ];
     return `<table><thead><tr><th>סנדה</th><th>כמות</th><th>אורך</th></tr></thead><tbody>
       ${rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('')}</tbody></table>
-      <p class="note">ועוד 4 חבלי תלייה למושב. היתרים הפנימיים (בין המגדלים) יורדים לפני שמרימים את הגלגל; החיצוניים נשארים. המידות זמניות, עד שיגיעו שרטוטים אמיתיים.</p>`;
+      <p class="note">ועוד 4 חבלי תלייה למושב. המידות זמניות, עד שיגיעו שרטוטים אמיתיים.</p>`;
   }
   if (LV.carousel) {
     const C = CAR, S = C.seat;
@@ -3872,7 +3957,7 @@ function poleTable() {
     ${rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('')}</tbody></table>
     <p class="note">המידות זמניות, עד שיגיעו שרטוטים אמיתיים.</p>`;
 }
-function openFolder(tab = LV.sketch ? 'sk0' : LV.carousel || LV.wheel ? 'klaf0' : 'drawing') {
+function openFolder(tab = LV.sketch ? 'sk0' : LV.wheel ? 'tri90' : LV.carousel ? 'klaf0' : 'drawing') {
   document.querySelector('#folder .folder-head h2').textContent = LV.name;
   const tabs = $('folder-tabs'); tabs.innerHTML = '';
   for (const [id, he] of folderTabs()) {
@@ -3897,16 +3982,23 @@ function openFolder(tab = LV.sketch ? 'sk0' : LV.carousel || LV.wheel ? 'klaf0' 
     drawBlueprint(c.getContext('2d'), { joints: JOINTS, title: LV.wheel ? 'מגדל · גלגל ענק' : `${LV.klafim[+tab.slice(4)].he} · קרוסלה 5×5` });
     useKlaf(keep);
     body.appendChild(c);
+  } else if (tab === 'tri90') {
+    body.appendChild(wheelFolderCanvas('tri'));
+    body.insertAdjacentHTML('beforeend', `<ol>
+      <li>מניחים שלוש רגליים זו לצד זו, הראשים יחד: הרגל הזקופה (${TRI90.legLengths[1].toFixed(1)} מ׳, הקצרה) באמצע, והנוטות (${TRI90.legLengths[0].toFixed(1)} מ׳) משני צדיה.</li>
+      <li>כופתים כפיתת חצובה ${Math.round(TRI90.lashFromTop * 100)} ס״מ מתחת לראשים.</li>
+      <li>שישה צופים מקימים את החצובה. הרגל הזקופה עומדת ישר, בצד של הגלגל; כל רגל נוטה ${WH.footSide.toFixed(1)} מ׳ הצידה ו־${WH.footOut.toFixed(2)} מ׳ החוצה, הרחק מהגלגל.</li>
+      <li>חיזוק בין כל שתי רגליים בגובה כ־50 ס״מ, ובז״נט לכל רגל. שתי החצובות זהות, ${WH.apart.toFixed(1)} מ׳ בין הרגליים הזקופות. הציר נח בין שני הראשים.</li></ol>`);
   } else if (tab === 'wheelF' || tab === 'wseat') {
-    body.appendChild(wheelFolderCanvas(tab === 'wseat'));
+    body.appendChild(wheelFolderCanvas(tab === 'wseat' ? 'seat' : 'wheel'));
     body.insertAdjacentHTML('beforeend', tab === 'wseat' ? `<ol>
       <li>בונים את המושב שוכב על הקרקע, מתחת לגלגל: מסגרת של 4 סנדות ואיקס.</li>
       <li>מרימים אותו ל־${Math.round(WSEAT_Y * 100)} ס״מ ותולים אותו בארבעה חבלים, מכל פינה של המושב אל סנדת הפינה התחתונה של הגלגל.</li>
-      <li>מסדר: המדריך דוחף את המגדלים, שני צופים עולים, הצוות מסובב את הגלגל סיבוב שלם, והמדריך דוחף את המושב.</li></ol>` : `<ol>
-      <li>בונים את הגלגל עומד על הפינה התחתונה, בין שני המגדלים: שני ריבועים (קלפים) עם איקס, אחד ליד כל מגדל.</li>
+      <li>מסדר: המדריך דוחף את החצובות, שני צופים עולים, הצוות מסובב את הגלגל סיבוב שלם, והמדריך דוחף את המושב.</li></ol>` : `<ol>
+      <li>בונים את הגלגל עומד על הפינה התחתונה, בין שתי החצובות: שני ריבועים (קלפים) עם איקס, אחד ליד כל מגדל.</li>
       <li>מעבירים את הציר (${RIG.slots.find(q => q.axle).length.toFixed(1)} מ׳) דרך מרכז האיקסים, וכופתים כל איקס אל הציר.</li>
       <li>מחברים את שני הריבועים בארבע סנדות פינה, כל אחת בשקע שבין שתי הצלעות שמחוץ לפינה.</li>
-      <li>שישה צופים מרימים את הגלגל ${WHEEL_DROP.toFixed(2)} מ׳, עד שהציר נח במזלגות שבראשי המגדלים. הציר מסתובב שם יחד עם הגלגל.</li></ol>`);
+      <li>שישה צופים מרימים את הגלגל ${WHEEL_DROP.toFixed(2)} מ׳, עד שהציר נח בראשי שתי החצובות. הציר מסתובב שם יחד עם הגלגל.</li></ol>`);
   } else if (tab === 'seat') {
     const c = SM.sheet.userData.canvas, img = document.createElement('canvas'); img.width = c.width; img.height = c.height;
     img.getContext('2d').drawImage(c, 0, 0);
@@ -4037,7 +4129,7 @@ function drawLashings() {
     g.visible = !fadedOut();
     const n = G.sim ? visNormal() : [0, 1, 0], h = (layerOff(slotById(j.a)) - layerOff(slotById(j.b))) / 2;
     if (j.all) { // one lashing round several poles lying side by side
-      const up = triOn() && G.tri.up > 0, d = up ? [0, 1, 0] : poleDir(j.a);
+      const up = triShape() && G.tri.up > 0, d = up ? [0, 1, 0] : poleDir(j.a);
       placeParallelLashing(g, add3(p, [1, 0, 0], -0.07), add3(p, [1, 0, 0], 0.07), d);
       g.children.forEach(c => c.scale.set(up ? 2.3 : 3.6, up ? 2.3 : 1.2, 1));
     } else
@@ -4182,6 +4274,13 @@ function drawInspector(push) {
   if (triOn()) return triInspector(push);
   const c = G.check;
   if (!c?.running || G.falling || G.replay) { inspector.clear(); buckets.forEach(b => { b.visible = false; }); return; }
+  if (LV.wheel) {
+    buckets.forEach(b => { b.visible = false; });
+    if (c.t >= WRIDE.side[0] && c.t < WRIDE.side[1]) inspector.set([WSEAT_C[0] + 0.5, 0, WSEAT_C[1] - 1.3], 0, 0.35, 1.2);
+    else if (push) { const d = new THREE.Vector3(push[0], 0, push[2]).normalize(); inspector.set([-d.x * 0.9, 0, -d.z * 0.9], Math.atan2(d.x, d.z), 0.35, 2.4); }
+    else inspector.set([2.6, 0, -2.6], Math.atan2(-2.6, 2.6), 0, 0.2);
+    return;
+  }
   const cs = G.cube?.sim && cubeStage(G.stage) ? G.cube.sim : null;
   const ks = cs ? cs.klafim : [G.sim];
   const tops = ks.map(k => k.topCentre());
@@ -4227,7 +4326,8 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   const cs = G.cube?.sim && cubeStage(G.stage) ? G.cube.sim : null;
   const ts = triOn() ? G.tri.sim : null;
-  const sim = cs || ts || G.sim;
+  const ws = LV.wheel && G.wheel?.sim && (G.check || G.falling) ? G.wheel.sim : null;
+  const sim = cs || ts || ws || G.sim;
   let push = null;
   if (sim) {
     // the stability check plays faster than real time; physics still steps in small pieces,
@@ -4243,15 +4343,17 @@ function frame(now) {
         if (G.ki !== kiAt) break; // free build: the inspection moved on to the next structure
         const load = G.check?.loading ? (ts ? TRI_TUNING.load : TUNING.loadForce) : 0;
         // the joined structure stands still while it is built: it is tested only in the check (Omer)
-        if (ts) { if (G.check?.running || G.falling) ts.step(h, { push, load }); }
+        if (ws) { if (G.check?.running || G.falling) stepWheel(h, push); }
+        else if (ts) { if (G.check?.running || G.falling) ts.step(h, { push, load }); }
         else if (cs) {
           if (LV.carousel && G.seat.sim && (G.check?.running || G.falling)) stepCarousel(h);
           if (LV.wheel && G.wheel.sim && (G.check?.running || G.falling)) stepWheel(h);
           if (G.check?.running || G.falling) cs.step(h, { push, load });
         } else sim.step(h, { wobble, push, load, lean: balanceLean() });
-        if (!ts) record(h);
+        if (!ts && !ws) record(h);
         // beyond a single klaf, the structure is tested only in the check at the end (Omer)
-        if (ts) { if (G.check?.running) watchTripod(); } else if (cs) { if (G.check?.running) { watchCube(h); if (LV.carousel) watchCarousel(); if (LV.wheel) watchWheel(); } } else watchSim(h);
+        if (ws) { if (G.check?.running) watchWheel(); }
+        else if (ts) { if (G.check?.running) watchTripod(); } else if (cs) { if (G.check?.running) { watchCube(h); if (LV.carousel) watchCarousel(); if (LV.wheel) watchWheel(); } } else watchSim(h);
         if (G.falling) break;
       }
     }
@@ -4264,7 +4366,7 @@ function frame(now) {
   const cur = G.ki;
   eachKlaf((k, i) => {
     // the drawing lies on the ground while its klaf is being built, then fades
-    const showPlan = !LV.free && !LV.tripod && i === cur && G.stage === 'build' && !stageDone('build');
+    const showPlan = !LV.free && !LV.tripod && !LV.wheel && i === cur && G.stage === 'build' && !stageDone('build');
     const op = blueprint.material.opacity + (showPlan ? 1 : -1) * dt / 0.5;
     blueprint.material.opacity = Math.max(0, Math.min(1, op));
     blueprint.visible = blueprint.material.opacity > 0.01;

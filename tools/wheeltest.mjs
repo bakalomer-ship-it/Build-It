@@ -1,76 +1,46 @@
 // Headless check of the giant wheel (station 5): node tools/wheeltest.mjs [raise|frame|ride]
-import { KlafSim } from '../src/klafSim.js';
-import { CubeSim } from '../src/cubeSim.js';
-import { GUYS, STAKE_JOINTS, setPlan } from '../src/level1.js';
-import { TOWER_PLANS, WJOIN, WHEEL, GOND, SEAT_ROPES, WheelSim, WH, WH_TUNING, AXLE_Y, forkS } from '../src/wheel.js';
+import { World } from '../src/physics.js';
+import { TripodSim, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, standing } from '../src/tripod.js';
+import { TRI90, WHEEL, GOND, SEAT_ROPES, WheelSim, WH, WH_TUNING, AXLE_Y } from '../src/wheel.js';
 import { LEVELS } from '../src/levels.js';
 
 const LV = LEVELS.find(l => l.wheel);
 const arg = process.argv[2] || 'all';
 let bad = 0;
 const expect = (name, got, want) => { if (got !== want) bad++; console.log(`${got === want ? 'ok  ' : 'BAD '} ${name}`); };
-function klafBuild(plan, { skip = [] } = {}) {
-  const poles = {}; for (const s of plan.slots) poles[s.id] = { length: s.length };
-  const joints = {}; for (const j of plan.joints) if (!skip.includes(j.id)) joints[j.id] = j.correct;
-  const all = o => Object.fromEntries(GUYS.map(g => [g.id, o]));
-  return { poles, joints, stakes: { BL: 4, BR: 4 }, guyTop: all(true), anchors: all(3), guyTies: {}, stakeJoints: {}, guyOff: {} };
-}
 
-// ---- raising each A-frame tower with its 6-person crew ----
-function raise(name, cfg, b) {
-  setPlan(cfg.plan.slots, cfg.plan.joints);
-  const sim = new KlafSim(b, cfg);
-  const dt = 1 / 60; let t = 0, tg = 0, fell = null, up = 0;
-  while (t < 30) {
-    if (tg < 90) { tg += 12 * dt; sim.pullTo(tg); }
-    sim.step(dt, { wobble: true }); t += dt;
-    if (sim.baseSlid() > 0.4) { fell = 'slid'; break; }
-    if (sim.rack() > 0.42) { fell = 'racked'; break; }
-    if (sim.angle() > 122) { fell = 'over'; break; }
-    if (Math.abs(sim.angle() - 90) < 8) { up += dt; if (up > 2) break; } else up = 0;
-  }
-  console.log(`   ${name}: angle ${sim.angle().toFixed(1)} rack ${sim.rack().toFixed(2)} top ${sim.topCentre().map(v => v.toFixed(2)).join(',')} t ${t.toFixed(1)} ${fell || ''}`);
-  return !fell && up > 2;
-}
-if (arg === 'all' || arg === 'raise') {
-  expect('front tower raises', raise('front', LV.klafim[0], klafBuild(TOWER_PLANS[0])), true);
-  expect('back tower raises', raise('back', LV.klafim[1], klafBuild(TOWER_PLANS[1])), true);
-  expect('a tower without its fork lashing folds', raise('no fork', LV.klafim[0], klafBuild(TOWER_PLANS[0], { skip: ['Jf'] })), false);
-}
-
-// ---- the frame: both towers, the feet joined, inner guy lines down, the wheel's weight on the forks ----
-function frame(name, { skipJoin = false, load = 0, axle = true } = {}) {
-  setPlan(TOWER_PLANS[0].slots, TOWER_PLANS[0].joints);
-  const ks = LV.klafim.map(cfg => {
-    const b = klafBuild(cfg.plan);
-    for (const g of GUYS) b.guyTies[g.id] = 'guy';
-    for (const s of STAKE_JOINTS) b.stakeJoints[s.id] = 'parallel';
-    for (const g of GUYS) if (Math.sign(g.side) === cfg.inner) b.guyOff[g.id] = true;
-    return { cfg, build: b };
+// ---- the two 90° tripods, the axle across their heads, the wheel's weight and the pushes ----
+function feetOf(cfg) { return cfg.tri.planFeet([cfg.centre[0], cfg.z0 + cfg.centre[1]], cfg.out); }
+function frame(name, { load = 0, braces = true, stakes = true, axle = true, pushN = 140 } = {}) {
+  const W = new World(); W.mu = 0; W.iterations = 3;
+  const sims = LV.klafim.map(cfg => {
+    const sp = cfg.tri, b = {}, j = {}, st = {}, sj = {};
+    if (braces) for (const q of BRACES) b[q.id] = { length: sp.braceLengths[q.id] };
+    if (braces) for (const q of BRACE_JOINTS) j[q.id] = 'square';
+    if (stakes) for (const q of TRI_STAKES) st[q.id] = TRI_STAKE_HITS;
+    if (stakes) for (const q of TRI_STAKE_JOINTS) sj[q.id] = 'parallel';
+    return new TripodSim({ feet: feetOf(cfg), lens: sp.legLengths, braces: b, joints: j, stakes: st, stakeJoints: sj, spec: sp, world: W });
   });
-  const poles = {}, joints = {};
-  if (!skipJoin) { for (const s of WJOIN.slots) poles[s.id] = { length: s.length }; for (const j of WJOIN.joints) joints[j.id] = j.correct; }
-  const sim = new CubeSim(ks, WJOIN, { poles, joints });
-  const forks = sim.klafim.map(k => k.findParticle('legR', forkS(k.slotById('legR'))));
-  if (axle) sim.world.add('rigid', forks[0], forks[1], { tag: 'axle' });
-  const y0 = sim.pos(forks[0])[1];
-  sim.letGo();
-  const P = 140, pushes = [[1.5, 3, [P, 0, 0]], [3.5, 5, [0, 0, P]], [5.5, 7, [0, 0, -P]], [7.5, 9, [-P, 0, 0]]];
-  let t = 0, fail = null, sway = 0, sag = 0;
+  const st0 = standing(feetOf(LV.klafim[0]), TRI90.legLengths, TRI90);
+  if (axle) W.add('rigid', sims[0].legs[1].head, sims[1].legs[1].head, { tag: 'axle' });
+  const pushes = [[1.5, 3, [pushN, 0, 0]], [3.5, 5, [-pushN, 0, 0]], [5.5, 7, [0, 0, pushN]], [7.5, 9, [0, 0, -pushN]]];
+  let t = 0, fail = null, sunk = 0, slid = 0;
   const dt = 1 / 60;
-  while (t < 12) {
+  while (t < 11) {
     let p = null; for (const [a, b, f] of pushes) if (t > a && t < b) p = f;
-    for (const f of forks) sim.world.applyForce(f, [0, -load / 2, 0]);
-    sim.step(dt, { push: p }); t += dt;
-    sway = Math.max(sway, sim.sway()); sag = Math.max(sag, y0 - sim.pos(forks[0])[1]);
-    if (sim.rack() > 0.42 || sim.lowestTop() < 0.7 * WJOIN.height || sim.sway() > 0.4 || sim.baseSlid() > 0.35) { fail = 'collapsed at ' + t.toFixed(1); break; }
+    sims.forEach((s, i) => s.forces({ push: p && i === 0 ? p : null, load: load / 2 }));
+    W.step(dt, 30); t += dt;
+    sunk = Math.max(...sims.map(s => s.sunk())); slid = Math.max(...sims.map(s => s.slid()));
+    if (slid > 0.35 || sims.some(s => s.sunk() > 0.25 * s.h0)) { fail = 'collapsed at ' + t.toFixed(1); break; }
   }
-  console.log(`   ${name}: sway ${sway.toFixed(3)} fork sag ${sag.toFixed(3)} rack ${sim.rack().toFixed(3)} ${fail || ''}`);
-  return !fail && sag < 0.2;
+  console.log(`   ${name}: apex ${st0.apex.map(v => v.toFixed(2)).join(',')} sunk ${sunk.toFixed(3)} slid ${slid.toFixed(3)} ${fail || ''}`);
+  return !fail;
 }
 if (arg === 'all' || arg === 'frame') {
-  expect('frame stands', frame('full'), true);
-  expect('frame carries the wheel, seat and riders', frame('full + load', { load: 3000 }), true);
+  expect('the plan stands the head over the upright leg', Math.abs(standing(feetOf(LV.klafim[0]), TRI90.legLengths, TRI90).apex[2]) < 0.01, true);
+  expect('two tripods with the axle stand', frame('full'), true);
+  expect('they carry the wheel, seat and riders', frame('full + load', { load: 3000 }), true);
+  expect('no braces and no stakes: the feet slide', frame('bare', { load: 3000, braces: false, stakes: false }), false);
 }
 
 // ---- the ride: two riders get on, the crew turns it a full turn, the מדריך pushes the seat ----
