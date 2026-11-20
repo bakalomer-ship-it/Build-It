@@ -267,8 +267,10 @@ export function drawBlueprint(g, opts = {}) {
   g.strokeStyle = '#555'; g.fillStyle = '#444'; g.lineWidth = 2; g.font = '500 24px Rubik, Arial'; g.direction = 'rtl';
   // measured from the plan itself: leg to leg, the legs' height, the bottom pole's height
   const legs = SLOTS.filter(q => q.id.startsWith('leg'));
-  const half = legs.length ? Math.max(...legs.map(q => Math.abs(q.centre[0]))) : 1.0;
-  const high = legs.length ? Math.max(...legs.map(q => q.centre[1] + q.length / 2)) : 2.0;
+  // (leaning legs, as in an A, are measured at their ends)
+  const ends = legs.flatMap(q => [slotPoint(q, -q.length / 2), slotPoint(q, q.length / 2)]);
+  const half = legs.length ? Math.max(...ends.map(p => Math.abs(p[0]))) : 1.0;
+  const high = legs.length ? Math.max(...ends.map(p => p[1])) : 2.0;
   const botV = SLOTS.find(q => q.id === 'botH')?.centre[1] ?? 0.3, midV = SLOTS.find(q => q.id === 'midH')?.centre[1];
   const fmt = v => `${(Math.round(v * 10) / 10).toFixed(1)} מ׳`;
   const dimY = by(high + 0.32);

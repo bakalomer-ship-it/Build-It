@@ -93,6 +93,15 @@ export const LEVEL = {
   kgPerMetre: 4,  // 8 cm pole: π·4²·0.8·100/1000 ≈ 4 kg per metre
 };
 
+// ---------- legs that lean (the giant wheel's A-frame towers) ----------
+// A leg's dir points up from its foot. For an upright leg all of these reduce to
+// the old centre[0] / centre[1] ± length/2.
+export const legS = (slot, v) => (v - slot.centre[1]) / (slot.dir[1] || 1);      // distance along the leg from its centre, at height v
+export const legU = (slot, v) => slot.centre[0] + slot.dir[0] * legS(slot, v);    // where the leg is across the klaf at height v
+export const legFootU = (slot, len = slot.length) => slot.centre[0] - slot.dir[0] * len / 2;
+export const legTopU = (slot, len = slot.length) => slot.centre[0] + slot.dir[0] * len / 2;
+export const legTopV = (slot, len = slot.length) => slot.centre[1] + Math.abs(slot.dir[1]) * len / 2;
+
 // ---------- swapping the plan (free build) ----------
 // Everything reads the klaf's plan from SLOTS / JOINTS / LEG_STAKES above. Free
 // build puts the player's own klaf into the same arrays (in place, so every
@@ -103,10 +112,10 @@ export function setPlan(slots, joints) {
   JOINTS.length = 0; JOINTS.push(...joints);
   for (const st of LEG_STAKES) {
     const leg = slots.find(s => s.id === st.leg);
-    if (leg) st.u = leg.centre[0] + Math.sign(leg.centre[0] || (st.leg === 'legR' ? 1 : -1)) * 0.09;
+    if (leg) { const u = legFootU(leg); st.u = u + Math.sign(u || (st.leg === 'legR' ? 1 : -1)) * 0.09; }
   }
   const legs = slots.filter(s => s.id.startsWith('leg'));
-  if (legs.length) LEVEL.height = Math.max(...legs.map(s => s.centre[1] + s.length / 2));
+  if (legs.length) LEVEL.height = Math.max(...legs.map(s => legTopV(s)));
 }
 export function resetPlan() {
   SLOTS.length = 0; SLOTS.push(...STD.slots);

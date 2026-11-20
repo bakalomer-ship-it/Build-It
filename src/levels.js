@@ -5,6 +5,7 @@ import { SIZES } from './blueprints.js';
 import { fitAllowance } from './allowance.js';
 import { LEVEL as KLAF } from './level1.js';
 import { GATE_PLAN, BACK_PLAN, JOIN, CAR, CAR_LEG_V } from './carousel.js';
+import { TOWER_PLANS, WJOIN, WH, WHEEL_LEG_V } from './wheel.js';
 
 const K = SIZES.klaf, C = SIZES.cube;
 const r = KLAF.poleRadius;
@@ -153,6 +154,15 @@ export const LEVELS = [
         anchorX: { front: 1.05, back: 1.05 }, inner: -1, extraLegV: CAR_LEG_V, backGripCap: CAR.backGripCap },
     ],
     cube: JOIN,
+  },
+  {
+    // גלגל ענק: two A-frame towers, a wheel turning on the axle in their forks, one seat (Omer, 2026-11-20; see wheel.js)
+    number: 5, name: 'גלגל ענק', tutorial: false, targetTimeSec: 45 * 60, wheel: true, camScale: 1.2,
+    stockExtra: [4.0, 3.0, 2.0, 1.2], ropeSpare: 4, crew: 6,
+    // the inner guy lines (between the towers) come down before the wheel goes up; the outer ones stay
+    klafim: [0, 1].map(i => ({ ...SOLO, he: i ? 'מגדל אחורי' : 'מגדל קדמי', short: i ? 'ב׳' : 'א׳', plan: TOWER_PLANS[i], z0: i * WH.apart,
+      frontDist: WH.guyDistance, backDist: WH.guyDistance, pullDist: WH.guyDistance + 1.4, anchorX: { front: 1.05, back: 1.05 }, inner: i ? -1 : 1, extraLegV: WHEEL_LEG_V })),
+    cube: WJOIN,
   },
 ];
 // Free build, tripod (Omer 2026-11-19): the tripod station with no drawing to

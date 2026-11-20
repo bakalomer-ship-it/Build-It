@@ -4,7 +4,7 @@
 import { World } from './physics.js';
 import { LASH_ALLOW } from './blueprints.js';
 import { KlafSim, TUNING, slotById } from './klafSim.js';
-import { LEVEL, GUYS } from './level1.js';
+import { LEVEL, GUYS, legS } from './level1.js';
 
 const r = LEVEL.poleRadius;
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -84,7 +84,7 @@ export class CubeSim {
   legParticle(j) {
     const k = this.klafim[j.klaf];
     const leg = k.poleParticles[j.leg]; if (!leg) return null;
-    return k.findParticle(j.leg, j.v - k.slotById(j.leg).centre[1]);
+    return k.findParticle(j.leg, legS(k.slotById(j.leg), j.v));
   }
   addJoint(j) {
     if (this.jointCons[j.id] || !cubeJointReachable(j, this.cube, this.build.poles)) return false;

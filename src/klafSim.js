@@ -2,7 +2,7 @@
 // physics world, and runs the raise, anchoring and push test on it.
 import { World } from './physics.js';
 import { LASH_ALLOW } from './blueprints.js';
-import { SLOTS, JOINTS, LEVEL, GUYS, GUY_DIST, LEG_STAKES, STAKE_JOINTS } from './level1.js';
+import { SLOTS, JOINTS, LEVEL, GUYS, GUY_DIST, LEG_STAKES, STAKE_JOINTS, legS, legU, legFootU, legTopU, legTopV } from './level1.js';
 
 // How a klaf sits on the plaza (see levels.js). Level 1: one klaf at z = 0.
 // Where a guy line's stake stands (Omer, 2026-11-15): every guy line leaves the klaf
@@ -10,7 +10,9 @@ import { SLOTS, JOINTS, LEVEL, GUYS, GUY_DIST, LEG_STAKES, STAKE_JOINTS } from '
 // leg, so the line also rises at about 45° to the top of the leg.
 export function guyAnchor(cfg, g) {
   // (a free-build klaf may not have its legs yet: then where a 2×2 klaf's leg would be)
-  const u = (cfg.plan ? cfg.plan.slots.find(q => q.id === g.leg) : slotById(g.leg))?.centre[0] ?? (g.leg === 'legR' ? 0.9 : -0.9), d = g.side > 0 ? cfg.backDist : cfg.frontDist, s = Math.SQRT1_2;
+  // (from the top of the leg, where the line is tied: a leaning leg's top is not above its foot)
+  const leg = cfg.plan ? cfg.plan.slots.find(q => q.id === g.leg) : slotById(g.leg);
+  const u = leg ? legTopU(leg) : (g.leg === 'legR' ? 0.9 : -0.9), d = g.side > 0 ? cfg.backDist : cfg.frontDist, s = Math.SQRT1_2;
   return [u + Math.sign(u) * d * s, 0, cfg.z0 + g.side * d * s];
 }
 export const SOLO_CFG = { z0: 0, frontDist: GUY_DIST, backDist: GUY_DIST, pullDist: GUY_DIST + 1.4, anchorX: { front: 1.05, back: 1.05 }, inner: 0 };
@@ -92,10 +94,10 @@ export class KlafSim {
         if (Math.abs(s) <= half - 0.04) ss.add(round(s));
       }
       if (slot.id.startsWith('leg')) {
-        for (const sj of STAKE_JOINTS) if (sj.leg === slot.id) { const s = sj.v - slot.centre[1]; if (Math.abs(s) <= half) ss.add(round(s)); }
+        for (const sj of STAKE_JOINTS) if (sj.leg === slot.id) { const s = legS(slot, sj.v); if (Math.abs(s) <= half) ss.add(round(s)); }
         // points where the cube's side poles are lashed on (only in the cube's
         // shared world; extra points on a lone klaf would only soften its legs)
-        for (const v of world ? cfg.extraLegV || [] : []) { const s = v - slot.centre[1]; if (Math.abs(s) <= half - 0.04) ss.add(round(s)); }
+        for (const v of world ? cfg.extraLegV || [] : []) { const s = legS(slot, v); if (Math.abs(s) <= half - 0.04) ss.add(round(s)); }
       }
       if (slot.id === 'topH' || slot.load || slot.id.startsWith('diag')) ss.add(0);
       const list = [...ss].sort((x, y) => x - y);
@@ -234,7 +236,7 @@ export class KlafSim {
     const W = this.world;
     const parts = this.poleParticles[g.leg]; if (!parts) return false;
     const top = parts[parts.length - 1].id;
-    const u = this.slotById(g.leg).centre[0];
+    const u = legTopU(this.slotById(g.leg), this.build.poles[g.leg].length);
     let con;
     if (g.side > 0) {
       // back guy line: holders pay it out and stop the klaf at upright
@@ -273,7 +275,7 @@ export class KlafSim {
     return Math.abs(cand[0].s - s0) > 0.6 ? null : cand[0].id;
   }
   // how high the top of a leg stands (legs can differ in a free-build klaf)
-  legH(leg) { const s = this.slotById(leg), p = this.build.poles[leg]; return s && p ? s.centre[1] + p.length / 2 : LEVEL.height; }
+  legH(leg) { const s = this.slotById(leg), p = this.build.poles[leg]; return s && p ? legTopV(s, p.length) : LEVEL.height; }
   // the pole the inspection hangs its load from: the top horizontal (in free build, the pole marked `load`)
   topParticle() {
     const t = this.poleParticles[this.slots.find(s => s.load)?.id || 'topH'];
@@ -297,12 +299,13 @@ export class KlafSim {
     const t = this.topCentre();
     return Math.atan2(t[1] - r, t[2] - this.z0) * 180 / Math.PI;
   }
-  // sideways lean of the legs (racking), metres at the top
+  // sideways lean of the legs (racking), metres at the top, beyond the lean the drawing gives them
   rack() {
     let m = 0;
     for (const leg of ['legL', 'legR']) {
       const p = this.poleParticles[leg]; if (!p) continue;
-      m = Math.max(m, Math.abs(this.pos(p[p.length - 1].id)[0] - this.pos(p[0].id)[0]));
+      const sl = this.slotById(leg), planned = (p[p.length - 1].s - p[0].s) * sl.dir[0];
+      m = Math.max(m, Math.abs(this.pos(p[p.length - 1].id)[0] - this.pos(p[0].id)[0] - planned));
     }
     return m;
   }
@@ -359,8 +362,10 @@ export class KlafSim {
     const leg = this.poleParticles[sj.leg]; if (!leg) return;
     const stake = LEG_STAKES.find(s => s.leg === sj.leg);
     if ((this.build.stakes[stake.id] || 0) < 1) return;
-    const pid = this.findParticle(sj.leg, sj.v - this.slotById(sj.leg).centre[1]); if (pid == null) return;
-    const sp = this.world.addParticle([stake.u, sj.v + r, this.z0], 0);
+    const sl = this.slotById(sj.leg);
+    const pid = this.findParticle(sj.leg, legS(sl, sj.v)); if (pid == null) return;
+    // a leaning leg is lashed to its stake where it is at that height
+    const sp = this.world.addParticle([stake.u + legU(sl, sj.v) - legFootU(sl), sj.v + r, this.z0], 0);
     this.stakeCons[sj.id] = this.world.add('rigid', pid, sp, { rest: 0.09, compliance: 2e-4, tag: sj.id });
   }
 

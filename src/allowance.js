@@ -16,13 +16,14 @@ export function fitAllowance(slots, joints, extra = []) {
     if (!pts.length) continue;
     const t = pts.map(p => dot(p.map((v, i) => v - s.centre[i]), s.dir));
     const lo = Math.min(...t), hi = Math.max(...t), half = s.length / 2;
-    const vertical = Math.abs(s.dir[1]) > 0.99;
+    // (a leaning leg stands on the ground too: the giant wheel's A-frame towers)
+    const standing = Math.abs(s.dir[1]) > 0.5;
     const footY = s.centre[1] - Math.abs(s.dir[1]) * half;
-    if (vertical && footY < 0.05) {
+    if (standing && footY < 0.05) {
       // stands on the ground: only the top end needs room above its highest lashing
-      const top = Math.max(lo, hi) * Math.sign(s.dir[1]);
+      const sg = Math.sign(s.dir[1]), top = Math.max(lo * sg, hi * sg);
       const need = up10(half + top + LASH_ALLOW);
-      if (need > s.length + 1e-6) { const grow = need - s.length; s.length = need; s.centre = s.centre.map((v, i) => i === 1 ? v + grow / 2 : v); }
+      if (need > s.length + 1e-6) { const grow = need - s.length; s.length = need; s.centre = s.centre.map((v, i) => v + s.dir[i] * sg * grow / 2); }
       continue;
     }
     const need = up10(2 * Math.max(Math.abs(lo), Math.abs(hi)) + 2 * LASH_ALLOW);

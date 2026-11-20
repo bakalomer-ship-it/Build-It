@@ -54,6 +54,29 @@ export const SIZES = {
     stakeJointHeight: 0.3,  // each leg is lashed to its stake here
   },
 
+  // ---- giant wheel (גלגל ענק), station 5 (Omer's model photo, 2026-11-20) ----
+  // Two A-frame tower klafim stand across the axle, facing each other. Their legs
+  // lean in and cross at the fork, where the axle lies and turns. The wheel is two
+  // square klafim stood on a corner (diamonds), lashed to the axle at their X's
+  // centre and joined by four corner poles. One seat hangs from the bottom corner pole.
+  wheel: {
+    apart: 3.4,             // tower klaf to tower klaf (two towers lying on the ground must not overlap)
+    footHalf: 1.2,          // feet 2.4 m apart
+    forkHeight: 2.8,        // where the legs cross (the fork lashing)
+    legLength: 3.4,         // about 35 cm above the fork: the fork the axle lies in
+    bottomHeight: 0.3,      // rungs (no X: an A is a triangle). Nothing above 1.3 m, so the axle passes on its way up
+    rungHeight: 1.3,
+    sideHeight: 0.4,        // the one pole each side that joins the towers' feet (the seat swings through the side faces)
+    guyDistance: 3.0,
+    axleAbove: 0.15,        // the axle lies this far above the fork lashing
+    axleOver: 0.4,          // and reaches this far past each tower
+    radius: 1.5,            // axle to each corner of a square (2.1 m sides)
+    inset: 0.35,            // each square stands this far in from its tower
+    cornerOut: 0.13,        // the corner poles lie in the V outside each corner
+    diagIn: 0.25,           // the X's ends are lashed this far from the corners
+    lowAxle: 1.7,           // the wheel is built standing on its bottom corner, the axle this high
+    seat: { hang: 0.8, width: 0.6, length: 1.2, diagIn: 0.15 },
+  },
   // ---- carousel (קרוסלה מחנאית) on a 5×5 cube (station 4, Omer 2026-11-18) ----
   // A cube 5 m wide, deep and high. Every face but the gate has a horizontal at
   // 2.5 m with an X above it and an X below it. The gate (the front klaf) has the
