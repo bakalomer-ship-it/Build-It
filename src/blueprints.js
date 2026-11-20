@@ -12,10 +12,10 @@ export const SIZES = {
   // ---- klaf 2×2 (levels 1 and 2) ----
   klaf: {
     legSpacing: 1.8,        // centre to centre of the two legs
-    legLength: 2.0,
+    legLength: 2.1,         // 15 cm above the top lashing (מרחק כפיתה)
     bottomHeight: 0.3,      // bottom horizontal, 30 cm above the ground (Omer)
     topHeight: 1.9,         // top horizontal
-    horizontalLength: 2.0,
+    horizontalLength: 2.1,  // 1.8 between the legs + 15 cm past each (מרחק כפיתה)
     diagLow: 0.45,          // where each diagonal meets a leg, low end
     diagHigh: 1.75,         // ... high end
     diagLength: 2.6,
@@ -30,12 +30,12 @@ export const SIZES = {
     depth: 1.8,             // distance between the two klafim, so the cube is as deep as it is wide
     sideBottomHeight: 0.38, // side horizontals, lashed just above / below the klaf horizontals
     sideTopHeight: 1.82,
-    sideHorizontalLength: 2.0,
+    sideHorizontalLength: 2.1,
     sideDiagLow: 0.62,      // spatial X (איקס מרחבי) on each side, low and high ends on the legs
     sideDiagHigh: 1.68,
     sideDiagLength: 2.4,
-    topDiagLength: 2.6,     // the flat X in the top of each cube (diagonal about 2.4 m)
-    linkDiagLength: 2.4,    // the flat X where two cubes meet, across the shared klaf (about 2.3 m)
+    topDiagLength: 2.7,     // the flat X in the top of each cube (diagonal about 2.4 m)
+    linkDiagLength: 2.6,    // the flat X where two cubes meet, across the shared klaf (about 2.3 m)
     innerGuyDistance: 0.75, // inner guy lines are staked inside the cube and come down once it is braced
   },
 
@@ -71,7 +71,7 @@ export const SIZES = {
     horizontalLength: 5.4,
     lowX: [0.5, 2.3],       // where the lower X meets the legs
     highX: [2.75, 4.55],    // ... the upper X
-    diagLength: 5.6,
+    diagLength: 5.7,
     gateBottomLength: 2.9,  // the gate's bottom pole, under the left half only
     postLength: 2.6,        // the door post, from the ground to just above the 2.5 m horizontal
     gateDiagLength: 3.4,    // the X in the gate's lower left half
@@ -87,7 +87,7 @@ export const SIZES = {
     seat: {
       height: 0.5,          // the seat hangs this high above the ground
       radius: 1.5,          // centre to each corner of the octagon (about 3 m across)
-      sideLength: 1.4,      // eight poles, each a little longer than a side (1.15 m)
+      sideLength: 1.5,      // eight poles, each a little longer than a side (1.15 m)
       plusLength: 3.2,      // the four poles of the # inside
       plusGap: 0.12,        // each pair of the # stands this far either side of the mast
       mastLength: 5.4,
@@ -96,3 +96,9 @@ export const SIZES = {
     },
   },
 };
+
+// מרחק כפיתה (Omer, 2026-11-20): a lashing needs room on the pole. Every pole
+// reaches at least this far past its last lashing at each end, so a pole drawn
+// 2 m between lashings is at least 2.3 m long. A lashing closer to a pole's end
+// than this cannot be tied.
+export const LASH_ALLOW = 0.15;

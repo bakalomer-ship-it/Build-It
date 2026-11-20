@@ -8,6 +8,8 @@
 // Coordinates are the klaf's own plane: u across (+u on the left as the pullers
 // see it), v up from the foot line.
 
+import { LASH_ALLOW } from './blueprints.js';
+
 // the grid the klaf is designed on
 export const GRID = { uMax: 2.2, vMin: -0.3, vMax: 3.5, step: 0.1 };
 
@@ -98,7 +100,8 @@ export function crossings(slots) {
     if (Math.abs(det) < 0.08) continue; // (nearly) parallel poles don't cross
     const du = B.centre[0] - A.centre[0], dv = B.centre[1] - A.centre[1];
     const sa = (du * B.dir[1] - dv * B.dir[0]) / det, sb = (du * A.dir[1] - dv * A.dir[0]) / det;
-    if (Math.abs(sa) > A.length / 2 - 0.04 || Math.abs(sb) > B.length / 2 - 0.04) continue;
+    // מרחק כפיתה: a crossing nearer a pole's end than LASH_ALLOW cannot be lashed
+    if (Math.abs(sa) > A.length / 2 - LASH_ALLOW + 0.005 || Math.abs(sb) > B.length / 2 - LASH_ALLOW + 0.005) continue;
     // legs first, so a joint reads "leg × pole" like the levels' joints
     const [a, b] = B.id.startsWith('leg') && !A.id.startsWith('leg') ? [B, A] : [A, B];
     out.push({

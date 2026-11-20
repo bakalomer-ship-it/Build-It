@@ -2,6 +2,7 @@
 // plan in level1.js) plus, for the cube, the side poles that join them.
 // Sizes come from blueprints.js.
 import { SIZES } from './blueprints.js';
+import { fitAllowance } from './allowance.js';
 import { LEVEL as KLAF } from './level1.js';
 import { GATE_PLAN, BACK_PLAN, JOIN, CAR, CAR_LEG_V } from './carousel.js';
 
@@ -105,6 +106,7 @@ function makeCube(bays) {
     add(topX(b, bays));
     if (b < bays - 1) add(linkX(b));
   }
+  fitAllowance(slots, joints); // מרחק כפיתה
   return { depth: D, bays, span: bays * D, slots, joints };
 }
 // heights on each leg where a side pole is lashed (the legs need a point there)
@@ -143,11 +145,12 @@ export const LEVELS = [
     // קרוסלה מחנאית on a 5×5×5 cube (Omer, 2026-11-18; see carousel.js)
     number: 4, name: 'קרוסלה 5×5', tutorial: false, targetTimeSec: 45 * 60, carousel: true, camScale: 2.1,
     stockExtra: [6.0, 4.0, 3.0, 2.0, 1.2], ropeSpare: 4, crew: 6,
+    // every guy line, front or back, leaves at 45° and reaches a stake as far out as the front ones (Omer, 11-20)
     klafim: [
-      { ...SOLO, he: 'קלף השער', short: 'א׳', plan: GATE_PLAN, frontDist: CAR.guyDistance, backDist: CAR.innerGuyDistance, pullDist: CAR.guyDistance + 1.4,
-        anchorX: { front: 1.05, back: 0.65 }, inner: 1, extraLegV: CAR_LEG_V, backGripCap: CAR.backGripCap },
-      { ...SOLO, he: 'קלף אחורי', short: 'ב׳', plan: BACK_PLAN, z0: CAR.width, frontDist: CAR.innerGuyDistance, backDist: CAR.guyDistance, pullDist: 2.2,
-        anchorX: { front: 0.65, back: 1.05 }, inner: -1, extraLegV: CAR_LEG_V, backGripCap: CAR.backGripCap },
+      { ...SOLO, he: 'קלף השער', short: 'א׳', plan: GATE_PLAN, frontDist: CAR.guyDistance, backDist: CAR.guyDistance, pullDist: CAR.guyDistance + 1.4,
+        anchorX: { front: 1.05, back: 1.05 }, inner: 1, extraLegV: CAR_LEG_V, backGripCap: CAR.backGripCap },
+      { ...SOLO, he: 'קלף אחורי', short: 'ב׳', plan: BACK_PLAN, z0: CAR.width, frontDist: CAR.guyDistance, backDist: CAR.guyDistance, pullDist: CAR.guyDistance + 1.4,
+        anchorX: { front: 1.05, back: 1.05 }, inner: -1, extraLegV: CAR_LEG_V, backGripCap: CAR.backGripCap },
     ],
     cube: JOIN,
   },

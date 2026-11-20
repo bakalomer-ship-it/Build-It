@@ -6,7 +6,7 @@
 // level1.js), so placing them and tying the lashing work as for a klaf. Once it
 // stands, the tripod is described by where its three feet are: the head is
 // wherever three legs of those lengths meet.
-import { SIZES } from './blueprints.js';
+import { SIZES, LASH_ALLOW } from './blueprints.js';
 import { World } from './physics.js';
 import { LEVEL } from './level1.js';
 
@@ -79,7 +79,7 @@ export function standing(feet, lens) {
 // does a brace of this length reach both of its legs?
 export function braceReaches(st, brace, length) {
   const [a, b] = brace.legs.map(i => st.legs[i].brace);
-  return length >= len3(sub(a, b)) + 0.1;
+  return length >= len3(sub(a, b)) + 2 * LASH_ALLOW; // מרחק כפיתה at both ends
 }
 // how close the standing tripod is to the drawing: its height and the three distances between the feet
 export function fitsPlan(st) {

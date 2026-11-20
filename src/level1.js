@@ -18,7 +18,8 @@ export const LASHING_ORDER = ['square', 'cross', 'parallel', 'tripod'];
 // On a guy line the picker also offers the guy-line lashing.
 export const GUY_LASHING_ORDER = ['guy', 'square', 'cross', 'parallel', 'tripod'];
 
-import { SIZES } from './blueprints.js';
+import { SIZES, LASH_ALLOW } from './blueprints.js';
+import { fitAllowance } from './allowance.js';
 const K = SIZES.klaf;
 const LEG_U = K.legSpacing / 2;
 const BOTTOM_V = K.bottomHeight;  // bottom horizontal 30 cm above the ground (Omer)
@@ -53,6 +54,9 @@ export const JOINTS = [
   { id: 'J9', a: 'diagA', b: 'diagB', at: [0, diagCentreV], correct: 'cross' },
 ];
 
+// מרחק כפיתה: poles long enough to lash (the legs grow to 2.1 m: 15 cm above the top lashing)
+fitAllowance(SLOTS, JOINTS);
+
 // Leg-to-stake lashings, two per leg (מקבילות), tied after the raise.
 export const STAKE_JOINTS = [
   { id: 'S1', leg: 'legL', v: K.stakeJointHeights[0], correct: 'parallel' },
@@ -82,7 +86,7 @@ export const LEVEL = {
   number: 1,
   tutorial: true,   // lashing guidance shows only in the first structure's tutorial
   legU: LEG_U,
-  height: K.legLength,
+  height: SLOTS.find(s => s.id === 'legR').length,
   targetTimeSec: 6 * 60,
   threeStarScore: 90,
   poleRadius: 0.045,

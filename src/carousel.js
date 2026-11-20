@@ -15,6 +15,7 @@
 import { SIZES } from './blueprints.js';
 import { LEVEL } from './level1.js';
 import { World } from './physics.js';
+import { fitAllowance } from './allowance.js';
 
 export const CAR = SIZES.carousel;
 const r = LEVEL.poleRadius;
@@ -75,6 +76,8 @@ function klafPlan(gate) {
 }
 export const GATE_PLAN = klafPlan(true);
 export const BACK_PLAN = klafPlan(false);
+// מרחק כפיתה; the legs also carry the side lashings at the cube's heights
+for (const P of [GATE_PLAN, BACK_PLAN]) fitAllowance(P.slots, P.joints, ['legR', 'legL'].flatMap(id => [CAR.sideTop, CAR.sideHighX[1]].map(v => [id, [P.slots.find(q => q.id === id).centre[0], v]])));
 // the Xs in each klaf, for the explanations
 export const KLAF_XS = { gate: [['diagC', 'diagD', 'האיקס העליון'], ['diagA', 'diagB', 'האיקס בחצי השמאלי התחתון']], back: [['diagC', 'diagD', 'האיקס העליון'], ['diagA', 'diagB', 'האיקס התחתון']] };
 
@@ -142,6 +145,7 @@ function makeJoin() {
     sheetTitle: 'שרטוט מבט על · הגג, בגובה 5 מ׳', topSheetGap: 4.3 };
 }
 export const JOIN = makeJoin();
+fitAllowance(JOIN.slots, JOIN.joints);
 export const CAR_LEG_V = [CAR.sideBottom, CAR.sideMid, CAR.sideTop, ...CAR.sideLowX, ...CAR.sideHighX];
 // the point under the roof X's centre, where the mast hangs
 export const PIVOT = [0, r + CAR.sideTop + 2 * r, D / 2];
@@ -184,6 +188,7 @@ function seatPlan() {
   return { slots, joints };
 }
 export const SEAT = seatPlan();
+fitAllowance(SEAT.slots, SEAT.joints);
 // the mast, standing through the #'s middle square, and its two lashings to the lengthwise pair
 export const MAST = { id: 'S.mast', he: 'התורן', length: ST.mastLength };
 export const MAST_JOINTS = [

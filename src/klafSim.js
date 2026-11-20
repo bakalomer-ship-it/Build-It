@@ -1,6 +1,7 @@
 // Turns the player's build (poles, lashings, stakes, guy lines) into a
 // physics world, and runs the raise, anchoring and push test on it.
 import { World } from './physics.js';
+import { LASH_ALLOW } from './blueprints.js';
 import { SLOTS, JOINTS, LEVEL, GUYS, GUY_DIST, LEG_STAKES, STAKE_JOINTS } from './level1.js';
 
 // How a klaf sits on the plaza (see levels.js). Level 1: one klaf at z = 0.
@@ -50,7 +51,7 @@ export function jointReachable(joint, poles, slots = SLOTS) {
   for (const sid of [joint.a, joint.b]) {
     const p = poles[sid]; if (!p) return false;
     const s = slotParam(slots.find(q => q.id === sid), joint.at);
-    if (Math.abs(s) > p.length / 2 - 0.04) return false;
+    if (Math.abs(s) > p.length / 2 - LASH_ALLOW + 0.005) return false;
   }
   return true;
 }

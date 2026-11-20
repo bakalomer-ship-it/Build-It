@@ -1004,9 +1004,9 @@ function moveFreeKlaf(d) {
 }
 function freeHint(nPoles, nJ) {
   const b = G.build;
-  if (G.armed) return '<b>ציירו את הסנדה על הרשת:</b> גררו מהמקום שבו היא מתחילה עד המקום שבו היא נגמרת. האורך נקבע לפי הגרירה';
+  if (G.armed) return '<b>ציירו את הסנדה על הרשת:</b> גררו מהמקום שבו היא מתחילה עד המקום שבו היא נגמרת. האורך נקבע לפי הגרירה. <b>מרחק כפיתה:</b> הסנדה ממשיכה 15 ס״מ אחרי כל מפגש, אחרת אי אפשר לכפות שם';
   if (!b.poles.legL || !b.poles.legR) return 'הקישו על <b>סנדה</b> וציירו רגל: גררו מ<b>קו הרגליים</b> ישר למעלה. לקלף שתי רגליים, אחת מכל צד של קו האמצע';
-  if (nPoles === 2) return 'יש רגליים. הוסיפו <b>רוחבים ואלכסונים</b>: לוקחים סנדה ומציירים אותה על הרשת';
+  if (nPoles === 2) return 'יש רגליים. הוסיפו <b>רוחבים ואלכסונים</b>: לוקחים סנדה ומציירים אותה על הרשת, 15 ס״מ מעבר לכל רגל (מרחק כפיתה)';
   if (nJ < JOINTS.length) return `סנדות ${nPoles} · כפיתות ${nJ}/${JOINTS.length} · הקישו על <b>טבעת</b> במפגש סנדות כדי לכפות`;
   return `סנדות ${nPoles} · כפיתות ${nJ}/${JOINTS.length} · הכול כפות: <b>הקישו על הקלף</b> כדי להתחיל להרים אותו`;
 }
@@ -1872,7 +1872,7 @@ function updateLengthPanel() {
   $('lp-value').style.color = LV.free ? '' : Math.abs(d) < 0.05 ? '#9be37f' : d < 0 ? '#ff9a85' : '';
   document.querySelector('.lp-plan').hidden = !!LV.free;
   $('lp-remove').textContent = LV.free ? 'הסרת הסנדה' : 'החזרה לערימה';
-  $('lp-fit').textContent = LV.free ? 'החליקו למעלה או למטה כדי לשנות את האורך' : Math.abs(d) < 0.05 ? 'בדיוק כמו בשרטוט' : d < 0 ? 'קצרה מדי: לא תגיע לכל הכפיתות' : 'ארוכה מהשרטוט: תעבוד, אבל בפחות נקודות';
+  $('lp-fit').textContent = LV.free ? 'החליקו למעלה או למטה כדי לשנות את האורך' : Math.abs(d) < 0.05 ? 'בדיוק כמו בשרטוט' : d < 0 ? 'קצרה מדי: צריך 15 ס״מ מעבר לכל כפיתה (מרחק כפיתה)' : 'ארוכה מהשרטוט: תעבוד, אבל בפחות נקודות';
 }
 function changeLength(steps) {
   const sid = G.selected; if (!sid || !steps) return;
@@ -2494,10 +2494,16 @@ function explainCube(kind) {
   if (missH.length) return { rule: 'שני הקלפים מחוברים בחיבור תחתון ועליון בכל צד', detail: `חסרות ${missH.length} סנדות חיבור, והקלפים זזו זה מול זה.`, focus: { cubeGhosts: [] } };
   return { rule: 'הקובייה לא עמדה בבדיקה', detail: 'בדקו בשרטוטי הצדדים שכל הכפיתות כפותות.', focus };
 }
-function xComplete() {
+// the joints that hold a diagonal to the rest of the klaf (not its crossing with the other diagonal)
+const diagJoints = d => JOINTS.filter(j => (j.a === d || j.b === d) && !(slotById(j.a === d ? j.b : j.a)?.id || '').startsWith('diag'));
+function diagOk(d) {
   const b = G.build;
-  const has = (d, j1, j2) => b.poles[d] && b.joints[j1] && b.joints[j2] && jointReachable(JOINTS.find(j => j.id === j1), b.poles) && jointReachable(JOINTS.find(j => j.id === j2), b.poles);
-  return { A: has('diagA', 'J5', 'J6'), B: has('diagB', 'J7', 'J8') };
+  return !!b.poles[d] && diagJoints(d).every(j => b.joints[j.id] && jointReachable(j, b.poles));
+}
+// A: every diagonal of the A family (diagA, and diagC on klafim with two X's); B likewise
+function xComplete() {
+  const fam = ds => ds.filter(d => slotById(d)).every(diagOk);
+  return { A: fam(['diagA', 'diagC']), B: fam(['diagB', 'diagD']) };
 }
 function explain(kind) {
   const e = explainRule(kind);
@@ -2519,13 +2525,14 @@ function explainRule(kind) {
     let detail;
     if (!x.A && !x.B) detail = `אין בקלף איקס. מלבן של סנדות עם כפיתות בפינות בלבד מתעקם למקבילית, והקלף נפל ${dir}.`;
     else {
-      const miss = slotById(x.A ? 'diagB' : 'diagA').he.match(/\((.*)\)/)[1];
-      detail = `חסר האלכסון שהולך מ${miss}, או שאחד הקצוות שלו לא כפות לרגל, והקלף נפל ${dir}. אלכסון לבד מחזיק רק בכיוון אחד: כשמושכים אותו הוא נמתח ומחזיק, כשדוחפים אותו הוא מתכופף.`;
+      const d = ['diagA', 'diagB', 'diagC', 'diagD'].find(q => slotById(q) && !diagOk(q)), he = slotById(d).he, m = he.match(/\((.*)\)/);
+      detail = `${m ? `חסר האלכסון שהולך מ${m[1]}` : `חסר האלכסון "${he}"`}, או שאחד הקצוות שלו לא כפות, והקלף נפל ${dir}. אלכסון לבד מחזיק רק בכיוון אחד: כשמושכים אותו הוא נמתח ומחזיק, כשדוחפים אותו הוא מתכופף.`;
     }
     // what the slow-motion replay points at: the half-tied diagonal, or a red ghost where a diagonal is missing
     const focus = { poles: [], ghosts: [], joints: [] };
-    for (const [d, ok, js] of [['diagA', x.A, ['J5', 'J6']], ['diagB', x.B, ['J7', 'J8']]]) {
-      if (ok) continue;
+    for (const d of ['diagA', 'diagB', 'diagC', 'diagD']) {
+      if (!slotById(d) || diagOk(d)) continue;
+      const js = diagJoints(d).map(j => j.id);
       if (!b.poles[d]) focus.ghosts.push(js);
       else { focus.poles.push(d); focus.joints.push(...js.filter(id => !b.joints[id])); }
     }
