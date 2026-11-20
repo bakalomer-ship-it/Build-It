@@ -36,7 +36,13 @@ export const TRI_STAKE_HITS = 4;
 
 // How far along a leg, from its foot, the lashing sits. A pole lies centred on
 // its line, so a shorter pole has less leg below the lashing.
-export const legS = len => LASH_V - (TRI.legLength - len) / 2;
+export const legS = len => TRI_JOINTS[0].at[1] - (TRI.legLength - len) / 2;
+// Free tripod: legs of any length lie centred on their lines, so the lashing
+// moves down to sit 25 cm below the shortest leg's top (the levels keep the drawing's place).
+export function setLashFor(lens) {
+  const shortest = lens?.length ? Math.min(...lens) : TRI.legLength;
+  TRI_JOINTS[0].at[1] = lens?.length ? TRI.legLength / 2 + shortest / 2 - TRI.lashFromTop : LASH_V;
+}
 
 // where the feet stand when the bundle has just been stood up: a small triangle
 export function startFeet(c, radius = 0.4) {

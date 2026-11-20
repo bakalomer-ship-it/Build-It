@@ -36,7 +36,7 @@ export const SIZES = {
     sideDiagLength: 2.4,
     topDiagLength: 2.7,     // the flat X in the top of each cube (diagonal about 2.4 m)
     linkDiagLength: 2.6,    // the flat X where two cubes meet, across the shared klaf (about 2.3 m)
-    innerGuyDistance: 0.75, // inner guy lines are staked inside the cube and come down once it is braced
+    // inner guy lines reach as far out as the outer ones (Omer, 11-20), and come down once the cube is braced
   },
 
   // ---- tripod (חצובה) 4 m high (station 3) ----
@@ -81,7 +81,6 @@ export const SIZES = {
     sideDiagLength: 5.5,
     topDiagLength: 7.2,     // the roof X, corner to corner (often two poles joined in real life)
     guyDistance: 5.0,       // guy stakes one klaf-height out (45°)
-    innerGuyDistance: 1.5,
     backGripCap: 1100,      // N the back guy holders hold a 5 m klaf with (it is three times as heavy as a 2×2)
     stakeJointHeights: [0.15, 0.55],
     seat: {
@@ -90,6 +89,8 @@ export const SIZES = {
       sideLength: 1.5,      // eight poles, each a little longer than a side (1.15 m)
       plusLength: 3.2,      // the four poles of the # inside
       plusGap: 0.12,        // each pair of the # stands this far either side of the mast
+      xGap: 0.12,           // the doubled X: each pair this far either side of the centre
+      xLength: 3.2,         // its poles, from one diagonal side of the octagon to the opposite one
       mastLength: 5.4,
       mastFoot: 0.2,        // the mast's foot, above the ground
       ropeHeight: 4.0,      // the hanging ropes leave the mast here

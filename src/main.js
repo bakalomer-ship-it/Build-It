@@ -15,7 +15,7 @@ import { CubeSim, cubeSlotPoint, cubeSlotParam, cubeJointReachable } from './cub
 import { LEVELS, FREE_TRIPOD } from './levels.js';
 import { loadSketch } from './sketch.js';
 import { CAR, SEAT, SEAT_C, MAST, MAST_JOINTS, HANG_ROPES, PIVOT, CarouselSim, CAR_TUNING, mastReaches, mastTopY, seatY, cornerAt, KLAF_XS } from './carousel.js';
-import { TRI, TRI_SLOTS, TRI_JOINTS, LEG_IDS, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, TRI_TUNING, TripodSim, startFeet, planFeet, standing, braceReaches, fitsPlan } from './tripod.js';
+import { TRI, TRI_SLOTS, TRI_JOINTS, LEG_IDS, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, TRI_TUNING, TripodSim, startFeet, planFeet, standing, braceReaches, fitsPlan, setLashFor } from './tripod.js';
 import {
   R, makeRenderer, makeWorld, makeBlueprintMesh, drawBlueprint, BP, makePoleMesh, placeCylinder, makeSideSheet, drawSideSheet, makeTopSheet, drawTopSheet, POLE_LOOK,
   makeLashing, placeLashing, placeParallelLashing, RopeViz, makeStake, makeDriver, makeFreeGrid, makeTripodSheet, drawTripodFolder,
@@ -1426,7 +1426,8 @@ function cornerPos(k) {
   const c = cornerAt(k), sid = `S.o${k + 1}`;
   return add3(seatPoint(sid, [c[0], LEVEL.poleRadius, c[1]]), seatOff(seatSlot(sid)), 1);
 }
-function mastRopePos() { const ss = G.seat.sim; return ss?.mast ? ss.pos(ss.mast.rope) : [SEAT_C[0], CAR.seat.ropeHeight, SEAT_C[1]]; }
+// the hanging ropes are tied at the centre of the roof X (Omer, 11-20)
+function mastRopePos() { return roofCentre(); }
 // the roof X's centre, where the ring hangs (it moves with the frame in the check)
 function roofCentre() {
   const cs = G.cube?.sim, q = cs?.findParticle('C.xAT', 0);
@@ -1435,7 +1436,7 @@ function roofCentre() {
 const seatPolesIn = () => SEAT.slots.every(s => G.seat.build.poles[s.id]);
 function seatReachable(j) { return cubeJointReachable(j, SEAT, G.seat.build.poles); }
 function liftSeat() {
-  if (!seatPolesIn()) return infoCard('קודם בונים את כל המושב', 'שמונה סנדות למתומן וארבע ל־# שבתוכו, כולן במקומן על השרטוט. רק אז מרימים אותו.');
+  if (!seatPolesIn()) return infoCard('קודם בונים את כל המושב', 'שמונה סנדות למתומן, ארבע ל־# שבתוכו וארבע לאיקס הכפול, כולן במקומן על השרטוט. רק אז מרימים אותו.');
   startClock(); G.seat.lifting = true; refreshAll();
 }
 // back to building the seat: it comes down, and the mast with everything on it comes off
@@ -2333,7 +2334,8 @@ function statusText(nPoles, nJ) {
   return '';
 }
 function refreshHint() { if (performance.now() > flashUntil) $('hint-text').innerHTML = hintText(); }
-function refreshAll() { refreshChips(); refreshActions(); refreshHint(); renderPile(); renderCrew(); }
+function refreshAll() {
+  if (LV.tripod) setLashFor(LV.sandbox ? LEG_IDS.filter(id => G.build?.poles[id]).map(id => G.build.poles[id].length) : null); refreshChips(); refreshActions(); refreshHint(); renderPile(); renderCrew(); }
 
 // ---------------- clock ----------------
 function startClock() { if (!G.startedAt) G.startedAt = performance.now(); }
@@ -2795,7 +2797,7 @@ function makeDisplay(L) {
     for (const sl of SEAT.slots) { const h = sl.length / 2, o = (sl.layer || 0) * GAP; pole([sl.centre[0] - sl.dir[0] * h, sl.centre[1] + y + o, sl.centre[2] - sl.dir[2] * h], [sl.centre[0] + sl.dir[0] * h, sl.centre[1] + y + o, sl.centre[2] + sl.dir[2] * h]); }
     pole([SEAT_C[0], CAR.seat.mastFoot, SEAT_C[1]], [SEAT_C[0], mastTopY(MAST.length), SEAT_C[1]]);
     const rm = new THREE.MeshStandardMaterial({ color: 0xd8b878, roughness: 1 });
-    for (let k = 0; k < 8; k++) { const c = cornerAt(k), rr = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 1, 5), rm); placeCylinder(rr, [SEAT_C[0], CAR.seat.ropeHeight, SEAT_C[1]], [c[0], LEVEL.poleRadius + y, c[1]]); g.add(rr); }
+    for (let k = 0; k < 8; k++) { const c = cornerAt(k), rr = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 1, 5), rm); placeCylinder(rr, [SEAT_C[0], PIVOT[1], SEAT_C[1]], [c[0], LEVEL.poleRadius + y, c[1]]); g.add(rr); }
   }
   SLOTS.length = 0; SLOTS.push(...keep.slots); JOINTS.length = 0; JOINTS.push(...keep.joints);
   LEG_STAKES.forEach((q, i) => { q.u = keep.u[i]; }); LEVEL.height = keep.h;
@@ -3089,6 +3091,7 @@ function poleTable() {
       ['אלכסונים לאיקס הגג, מפינה לפינה', 2, m(C.topDiagLength)],
       ['צלעות המתומן במושב', 8, m(S.sideLength)],
       ['סנדות ה־# במושב', 4, m(S.plusLength)],
+      ['האיקס הכפול במושב (זוג בכל כיוון, מחובר ל־#)', 4, m(SEAT.slots.find(q => q.xd).length)],
       ['התורן', 1, m(S.mastLength)],
       ['בז״נטים לרגליים', 4, m(1.0)], ['בז״נטים ליתרים', 8, m(0.6)],
     ];
@@ -3150,11 +3153,11 @@ function openFolder(tab = LV.sketch ? 'sk0' : LV.carousel ? 'klaf0' : 'drawing')
     img.getContext('2d').drawImage(c, 0, 0);
     body.appendChild(img);
     body.insertAdjacentHTML('beforeend', `<ol>
-      <li>בונים את המושב שוכב על השרטוט שבאמצע הקובייה: מתומן של 8 סנדות, ובתוכו # של 4 סנדות.</li>
+      <li>בונים את המושב שוכב על השרטוט שבאמצע הקובייה: מתומן של 8 סנדות, ובתוכו # של 4 סנדות ואיקס כפול של 4 סנדות שכפות ל־#.</li>
       <li>שישה צופים מרימים את המושב ל־${Math.round(CAR.seat.height * 100)} ס״מ.</li>
       <li>מעבירים את התורן (${MAST.length.toFixed(1)} מ׳) דרך הריבוע שבאמצע ה־#, ותולים אותו בטבעת חבל מאמצע איקס הגג, כך שיוכל להסתובב.</li>
       <li>כופתים את התורן לשתי סנדות האורך של ה־#.</li>
-      <li>קושרים 8 חבלי תלייה מהתורן, בגובה ${CAR.seat.ropeHeight.toFixed(1)} מ׳, אל כל פינה של המתומן.</li>
+      <li>קושרים 8 חבלי תלייה ממרכז איקס הגג אל כל פינה של המתומן.</li>
       <li>מסדר: המדריך דוחף את המסגרת, כל היתרים יורדים, שמונה צופים עולים, מסובבים את הקרוסלה, והמדריך דוחף את המושב הצידה.</li></ol>`);
   } else if (tab === 'sideR' || tab === 'sideL') {
     const c = document.createElement('canvas');

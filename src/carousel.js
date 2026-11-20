@@ -185,6 +185,35 @@ function seatPlan() {
     const x = b.endsWith('1') ? c[0] - g : c[0] + g, z = a.endsWith('1') ? c[1] - g : c[1] + g;
     joints.push({ id: `S.m${++n}`, a, b, at: at(x, z), correct: 'square' });
   }
+  // the doubled X (Omer, 11-20: a full סולמית): a pair of poles each way at 45°, a gap either
+  // side of the centre like the #, from the middle of one diagonal side of the octagon to the
+  // opposite one. Each is lashed to its two octagon sides, to the four # poles it crosses, and to
+  // the two poles of the other pair.
+  const dq = ST.xGap, ends = RF - 0.05;
+  const xd = [];
+  for (const [ang, he, sides] of [[45, 'אלכסון ימני', ['S.o1', 'S.o5']], [135, 'אלכסון שמאלי', ['S.o3', 'S.o7']]]) {
+    const a = ang * Math.PI / 180, u = [Math.cos(a), Math.sin(a)], nrm = [-u[1], u[0]];
+    [-1, 1].forEach((sg, i) => {
+      const o = [c[0] + nrm[0] * dq * sg, c[1] + nrm[1] * dq * sg], half = Math.sqrt(ends * ends - dq * dq);
+      const id = `S.d${ang === 45 ? 'A' : 'B'}${i + 1}`;
+      pole(id, `${he} ${i + 1}`, [o[0] - u[0] * half, o[1] - u[1] * half], [o[0] + u[0] * half, o[1] + u[1] * half], ST.xLength, ang === 45 ? 4 : 5, { xd: ang });
+      xd.push({ id, o, u, sides });
+    });
+  }
+  // where two lines in the seat's plane cross: line p + t·u with q + s·v
+  const meet = (p, u, q, v) => { const den = u[0] * v[1] - u[1] * v[0], t = ((q[0] - p[0]) * v[1] - (q[1] - p[1]) * v[0]) / den; return [p[0] + u[0] * t, p[1] + u[1] * t]; };
+  const plusLines = [['S.pL1', [c[0] - g, c[1]], [0, 1]], ['S.pL2', [c[0] + g, c[1]], [0, 1]], ['S.pW1', [c[0], c[1] - g], [1, 0]], ['S.pW2', [c[0], c[1] + g], [1, 0]]];
+  n = 0;
+  for (const d of xd) {
+    for (const sid of d.sides) {
+      const side = slots.find(q => q.id === sid), m = meet(d.o, d.u, [side.centre[0], side.centre[2]], [side.dir[0], side.dir[2]]);
+      joints.push({ id: `S.y${++n}`, a: d.id, b: sid, at: at(m[0], m[1]), correct: 'square' });
+    }
+    for (const [sid, p0, v] of plusLines) { const m = meet(d.o, d.u, p0, v); joints.push({ id: `S.y${++n}`, a: d.id, b: sid, at: at(m[0], m[1]), correct: 'cross' }); }
+  }
+  for (const a of xd.filter(d => d.id.startsWith('S.dA'))) for (const b of xd.filter(d => d.id.startsWith('S.dB'))) {
+    const m = meet(a.o, a.u, b.o, b.u); joints.push({ id: `S.y${++n}`, a: a.id, b: b.id, at: at(m[0], m[1]), correct: 'square' });
+  }
   return { slots, joints };
 }
 export const SEAT = seatPlan();
@@ -195,7 +224,7 @@ export const MAST_JOINTS = [
   { id: 'S.k1', b: 'S.pL1', he: 'התורן × סנדת אורך ימנית', correct: 'square' },
   { id: 'S.k2', b: 'S.pL2', he: 'התורן × סנדת אורך שמאלית', correct: 'square' },
 ];
-// the eight hanging ropes, from the mast to each corner, and the rope ring the mast hangs on
+// the eight hanging ropes, from the centre of the roof X to each corner (Omer, 11-20), and the rope ring the mast hangs on
 export const HANG_ROPES = [...Array(8).keys()].map(k => ({ id: `S.r${k + 1}`, corner: k }));
 export const seatY = () => r + ST.height;
 // can the mast hang from the roof? its top must reach above the ring
@@ -269,7 +298,7 @@ export class CarouselSim {
       for (const hr of HANG_ROPES) {
         if (!hang.ropes[hr.id]) continue;
         const c = cornerAt(hr.corner), q = this.near(`S.o${hr.corner + 1}`, [c[0], 0, c[1]]) ?? this.near(`S.o${((hr.corner + 7) % 8) + 1}`, [c[0], 0, c[1]]);
-        if (q != null) this.ropes[hr.id] = W.add('rope', this.mast.rope, q, { tag: hr.id });
+        if (q != null) this.ropes[hr.id] = W.add('rope', this.pivot, q, { tag: hr.id });
       }
     }
     this.y0 = y0;

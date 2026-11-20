@@ -112,7 +112,7 @@ function makeCube(bays) {
 // heights on each leg where a side pole is lashed (the legs need a point there)
 const legV = bays => [C.sideBottomHeight, C.sideTopHeight, C.sideDiagLow, C.sideDiagHigh].flatMap(v => [...Array(bays).keys()].map(b => v + b * BAY_DV));
 const CUBE_LEG_V = legV(1), BASE_LEG_V = legV(2);
-const IN = C.innerGuyDistance;
+// every guy line, front or back, reaches a stake one klaf-height out at 45° (Omer, 11-20)
 
 export const LEVELS = [
   {
@@ -127,9 +127,9 @@ export const LEVELS = [
     number: 2, name: 'בסיס מתקן 2×4', tutorial: false, targetTimeSec: 26 * 60,
     stockExtra: [3.0, 2.2, 1.6], ropeSpare: 3, crew: 6,
     klafim: [
-      { ...SOLO, he: 'קלף קדמי', short: 'א׳', backDist: IN, anchorX: { front: 1.05, back: 0.65 }, inner: 1, extraLegV: BASE_LEG_V },
-      { ...SOLO, he: 'קלף אמצעי', short: 'ב׳', z0: D, frontDist: IN, backDist: IN, pullDist: 1.3, anchorX: { front: 0.65, back: 0.65 }, inner: 'both', extraLegV: BASE_LEG_V },
-      { ...SOLO, he: 'קלף אחורי', short: 'ג׳', z0: 2 * D, frontDist: IN, pullDist: 1.3, anchorX: { front: 0.65, back: 1.05 }, inner: -1, extraLegV: BASE_LEG_V },
+      { ...SOLO, he: 'קלף קדמי', short: 'א׳', inner: 1, extraLegV: BASE_LEG_V },
+      { ...SOLO, he: 'קלף אמצעי', short: 'ב׳', z0: D, inner: 'both', extraLegV: BASE_LEG_V },
+      { ...SOLO, he: 'קלף אחורי', short: 'ג׳', z0: 2 * D, inner: -1, extraLegV: BASE_LEG_V },
     ],
     cube: makeCube(2),
   },
@@ -169,8 +169,8 @@ export const CUBE_LEVEL = {
     number: 0, name: 'קובייה 2×2', tutorial: false, targetTimeSec: 16 * 60,
     stockExtra: [3.0, 2.2, 1.6], ropeSpare: 2, crew: 6, // a proper klaf raise takes 6 (Omer)
     klafim: [
-      { ...SOLO, he: 'קלף קדמי', short: 'א׳', backDist: IN, anchorX: { front: 1.05, back: 0.65 }, inner: 1, extraLegV: CUBE_LEG_V },
-      { ...SOLO, he: 'קלף אחורי', short: 'ב׳', z0: D, frontDist: C.innerGuyDistance, pullDist: 1.3, anchorX: { front: 0.65, back: 1.05 }, inner: -1, extraLegV: CUBE_LEG_V },
+      { ...SOLO, he: 'קלף קדמי', short: 'א׳', inner: 1, extraLegV: CUBE_LEG_V },
+      { ...SOLO, he: 'קלף אחורי', short: 'ב׳', z0: D, inner: -1, extraLegV: CUBE_LEG_V },
     ],
     cube: makeCube(1),
   };

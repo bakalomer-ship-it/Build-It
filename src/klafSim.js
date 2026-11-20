@@ -48,7 +48,8 @@ export function slotParam(slot, pt) {
 
 // Can this joint be tied with the poles as placed?
 export function jointReachable(joint, poles, slots = SLOTS) {
-  for (const sid of [joint.a, joint.b]) {
+  // a lashing round several poles (the tripod's) needs room on every one of them
+  for (const sid of joint.all || [joint.a, joint.b]) {
     const p = poles[sid]; if (!p) return false;
     const s = slotParam(slots.find(q => q.id === sid), joint.at);
     if (Math.abs(s) > p.length / 2 - LASH_ALLOW + 0.005) return false;
