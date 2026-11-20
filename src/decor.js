@@ -346,41 +346,6 @@ function totem(tick, tribe) {
   return g;
 }
 
-// Rewards for a streak of days (rewards.js): these open by the best streak, not by stars
-function lanterns(tick) {
-  const g = new THREE.Group();
-  stick(g, [-1.4, 0, 0], [-1.4, 2.1, 0]); stick(g, [1.4, 0, 0], [1.4, 2.1, 0]);
-  const glow = [];
-  for (let i = 0; i < 6; i++) {
-    const t = (i + 0.5) / 6, x = -1.4 + 2.8 * t, y = 2.0 - 0.45 * 4 * t * (1 - t);
-    const l = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), new THREE.MeshStandardMaterial({ color: [0xf2b632, 0xe2593f, 0xf4f1e6][i % 3], emissive: 0xffa040, emissiveIntensity: 0.6, roughness: 0.6 }));
-    l.position.set(x, y - 0.14, 0); g.add(l); glow.push(l);
-  }
-  for (let i = 0; i < 12; i++) { const t0 = i / 12, t1 = (i + 1) / 12; stick(g, [-1.4 + 2.8 * t0, 2.0 - 1.8 * t0 * (1 - t0), 0], [-1.4 + 2.8 * t1, 2.0 - 1.8 * t1 * (1 - t1), 0], 0.008, rope); }
-  tick.push(t => glow.forEach((l, i) => { l.material.emissiveIntensity = 0.45 + 0.25 * Math.sin(t * 3 + i); }));
-  return g;
-}
-function hammock(tick) {
-  const g = new THREE.Group();
-  for (const x of [-1.3, 1.3]) { stick(g, [x, 0, -0.35], [x, 1.5, 0]); stick(g, [x, 0, 0.35], [x, 1.5, 0]); knot(g, [x, 1.4, 0]); }
-  const cloth = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 1.9, 14, 1, true, Math.PI * 0.6, Math.PI * 0.8), new THREE.MeshStandardMaterial({ color: 0x2f63b0, roughness: 0.9, side: THREE.DoubleSide }));
-  cloth.rotation.z = Math.PI / 2; cloth.position.y = 1.05; g.add(cloth);
-  for (const s of [-1, 1]) stick(g, [s * 0.95, 0.95, 0], [s * 1.3, 1.38, 0], 0.012, rope);
-  tick.push(t => { cloth.rotation.x = 0.12 * Math.sin(t * 1.4); });
-  return g;
-}
-function bell(tick) {
-  const g = new THREE.Group();
-  stick(g, [-0.6, 0, 0], [0, 2.1, 0]); stick(g, [0.6, 0, 0], [0, 2.1, 0]); stick(g, [-0.45, 1.6, 0], [0.45, 1.6, 0]);
-  knot(g, [0, 2.0, 0]); knot(g, [-0.32, 1.6, 0], 0.05); knot(g, [0.32, 1.6, 0], 0.05);
-  const b = new THREE.Group(); b.position.set(0, 1.58, 0); g.add(b);
-  const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.22, 0.3, 16, 1, true), new THREE.MeshStandardMaterial({ color: 0xc9962f, metalness: 0.6, roughness: 0.35, side: THREE.DoubleSide }));
-  cup.position.y = -0.25; b.add(cup);
-  stick(b, [0, 0, 0], [0, -0.12, 0], 0.01, rope);
-  tick.push(t => { b.rotation.z = 0.18 * Math.sin(t * 2.2); });
-  return g;
-}
-
 // The catalogue. stars: the star total that opens it. r: about how much ground it takes.
 // many: it can be put on the plaza more than once.
 export const ITEMS = [
@@ -401,10 +366,6 @@ export const ITEMS = [
   { id: 'tower', he: 'מגדל תצפית', stars: 7, r: 1.9, make: tower },
   { id: 'totem', he: 'עמוד שבט', stars: 8, r: 0.9, make: totem, tribe: true },
   { id: 'bigtent', he: 'אוהל גדול', stars: 9, r: 3.0, make: (t, tr) => tent(t, tr, true), tribe: true },
-  // opened by a streak of days in a row (rewards.js), not by stars
-  { id: 'lanterns', he: 'שרשרת פנסים', streak: 2, r: 1.7, make: lanterns, many: true },
-  { id: 'hammock', he: 'ערסל', streak: 4, r: 1.6, make: hammock },
-  { id: 'bell', he: 'פעמון המחנה', streak: 6, r: 1.0, make: bell },
 ];
 const item = id => ITEMS.find(q => q.id === id);
 
@@ -473,12 +434,12 @@ export function makeDecor(ctx) {
   }
   let active = false, sel = null, drag = null;
   const stars = () => ctx.stars();
-  const open = it => ctx.allOpen || (it.streak ? (ctx.streak?.() || 0) >= it.streak : stars() >= it.stars);
+  const open = it => ctx.allOpen || stars() >= it.stars;
   function renderList() {
     $('dc-stars').textContent = `★ ${stars()}` + (ctx.allOpen ? ' · גרסת בדיקה: הכול פתוח' : '');
     $('dc-list').innerHTML = ITEMS.map(it => {
       const on = data.placed.some(p => p.id === it.id), ok = open(it);
-      const state = !ok ? `<span class="dc-lock">${it.streak ? `🔥 ${it.streak}` : `★ ${it.stars}`}</span>` : on && !it.many ? '<span class="dc-on">על המגרש</span>' : '<span class="dc-add">+</span>';
+      const state = !ok ? `<span class="dc-lock">★ ${it.stars}</span>` : on && !it.many ? '<span class="dc-on">על המגרש</span>' : '<span class="dc-add">+</span>';
       return `<button type="button" class="dc-item${ok ? '' : ' locked'}${on && !it.many ? ' placed' : ''}" data-id="${it.id}"><span class="dc-nm">${it.he}</span>${state}</button>`;
     }).join('');
   }
@@ -495,7 +456,7 @@ export function makeDecor(ctx) {
     hint('גררו כדי להזיז. אי אפשר להניח על <b>שטח הבנייה</b> המסומן באדום');
   }
   function add(it) {
-    if (!open(it)) return hint(it.streak ? `<b>${it.he}</b> נפתח ברצף של ${it.streak} ימים: בכל יום מסיימים מבנה או אתגר` : `<b>${it.he}</b> נפתח כשיש לכם ${it.stars} כוכבים. כוכבים מקבלים במבנים של המגרש שלי`);
+    if (!open(it)) return hint(`<b>${it.he}</b> נפתח כשיש לכם ${it.stars} כוכבים. כוכבים מקבלים במבנים של המגרש שלי`);
     const have = data.placed.find(p => p.id === it.id);
     if (have && !it.many) { select(have.uid); return; }
     // the free spot nearest to where the camera looks

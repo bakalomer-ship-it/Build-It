@@ -379,14 +379,6 @@ export function placeCylinder(mesh, a, b) {
 
 // ---------- lashing coils ----------
 const ropeMat = new THREE.MeshStandardMaterial({ color: 0xd8b878, roughness: 0.95 });
-// rope colour is a reward (rewards.js): lashing coils and every rope on the plaza follow it
-const ropeMats = [];
-let ropeHex = null;
-export function setRopeColor(hex) {
-  ropeHex = hex;
-  ropeMat.color.setHex(hex ?? 0xd8b878);
-  for (const m of ropeMats) m.color.setHex(hex ?? m.userData.base);
-}
 // snug on the pole: the rope's inner edge just touches the drawn wood
 const coilGeo = new THREE.TorusGeometry(R * POLE_LOOK + 0.011, 0.014, 6, 18);
 const Z = new THREE.Vector3(0, 0, 1);
@@ -422,8 +414,7 @@ export function placeParallelLashing(g, a, b, dir) {
 // ---------- ropes ----------
 export class RopeViz {
   constructor(scene, radius = 0.011, color = 0xd2b06c, n = 10) {
-    this.mat = new THREE.MeshStandardMaterial({ color: ropeHex ?? color, roughness: 0.95 });
-    this.mat.userData.base = color; ropeMats.push(this.mat);
+    this.mat = new THREE.MeshStandardMaterial({ color, roughness: 0.95 });
     this.geo = new THREE.CylinderGeometry(radius, radius, 1, 6, 1);
     this.segs = [];
     for (let i = 0; i < n; i++) { const m = new THREE.Mesh(this.geo, this.mat); m.castShadow = true; scene.add(m); this.segs.push(m); }
@@ -486,16 +477,9 @@ const scarfColors = [0x2f7fe0, 0xe0473a, 0x2fae5f, 0x8a52d0];
 // Small, stocky scouts with big heads and green caps (Omer's reference images),
 // about 1.4 m tall: roughly two thirds of a 2 m klaf leg.
 const cap = new THREE.MeshStandardMaterial({ color: 0x3f7d2c, roughness: 0.85 });
-// the crew's look is a reward too: cap colour and scarf colours
-const scarfMats = [];
-export function setCrewLook({ cap: c = 0x3f7d2c, scarf = null } = {}) {
-  cap.color.setHex(c);
-  for (const m of scarfMats) m.color.setHex(scarf ?? scarfColors[m.userData.i % scarfColors.length]);
-}
 export function makePerson(i = 0, { noCap = false } = {}) {
   const g = new THREE.Group();
   const scarf = new THREE.MeshStandardMaterial({ color: scarfColors[i % scarfColors.length] });
-  if (!noCap) { scarf.userData.i = i; scarfMats.push(scarf); }
   const legGeo = new THREE.CapsuleGeometry(0.085, 0.42, 4, 8);
   // legs hang from hip pivots so they can swing while walking
   const lL = new THREE.Group(); lL.position.set(-0.1, 0.62, 0);
