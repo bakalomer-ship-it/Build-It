@@ -328,6 +328,18 @@ export class KlafSim {
     }
   }
 
+  // the pullers lose the balance and let the klaf back down a little (raise skill bar)
+  slip(deg) {
+    const lines = this.pullLines();
+    if (!lines.length) return;
+    this.target = Math.max(0, Math.min(this.target, this.angle()) - deg);
+    for (const con of lines) {
+      const top = this.pos(con.i), h = this.pos(con.j);
+      const p = this.kw(top[0], this.legH(con.leg), this.target);
+      con.rest = Math.max(con.rest, Math.hypot(p[0] - h[0], p[1] - h[1], p[2] - h[2]) + 0.02);
+    }
+  }
+
   // fix the guy line to its stake (the special guy-line-to-stake lashing)
   tieGuy(gid) {
     const g = GUYS.find(q => q.id === gid);
@@ -388,6 +400,12 @@ export class KlafSim {
         const fl = Math.hypot(...f), cap = 420;
         if (fl > cap) for (let k = 0; k < 3; k++) f[k] *= cap / fl;
         W.applyForce(id, f);
+      }
+    }
+    // the raise's balance (raise skill bar): the klaf leans to one side when the pull is jerky
+    if (extra.lean && !this.lettingGo) {
+      for (const leg of ['legL', 'legR']) {
+        const p = this.poleParticles[leg]; if (p) W.applyForce(p[p.length - 1].id, [extra.lean / 2, 0, 0]);
       }
     }
     if (extra.push) {

@@ -46,6 +46,29 @@ export const sfx = {
     g.gain.linearRampToValueAtTime(0.0001, t + dur + 0.02);
     o.connect(bp).connect(g).connect(c.destination); o.start(t); o.stop(t + dur + 0.05);
   },
+  // the rope pulled tight round the poles: a quick zip that rises, then a dull knock.
+  // combo: lashings tied one after another play a little higher each time
+  cinch(combo = 0) {
+    const c = ac(); if (!c) return;
+    const up = Math.pow(1.06, Math.min(combo, 8));
+    noise(0.09, 3200 * up, 0.1, 'bandpass');
+    tone(240 * up, 0.12, 0.08, 'triangle', 1.9);
+    setTimeout(() => { tone(130 * up, 0.09, 0.22, 'sine', 0.7); noise(0.05, 900, 0.18); }, 120);
+  },
+  // a klaf settling upright: a soft wooden knock and the ground taking it
+  land() { tone(75, 0.3, 0.45, 'sine', 0.55); noise(0.25, 420, 0.35); setTimeout(() => tone(180, 0.1, 0.08, 'triangle', 0.8), 60); },
+  // the balance bar warning while raising
+  wobble(level = 0.5) { tone(320 + level * 220, 0.08, 0.04 + level * 0.05, 'square', 0.85); },
+  // a star lighting up at the inspection: each one a step higher
+  star(i = 0) { const f = [523, 659, 784, 1047][Math.min(i, 3)]; tone(f, 0.22, 0.13, 'triangle'); setTimeout(() => tone(f * 2, 0.25, 0.06, 'sine'), 60); },
+  // scouts cheering: a few quick rising whoops over a crowd hiss
+  cheer() {
+    noise(0.9, 1600, 0.06, 'bandpass');
+    for (let k = 0; k < 5; k++) setTimeout(() => tone(380 + Math.random() * 260, 0.22, 0.05, 'sawtooth', 1.5), k * 90 + Math.random() * 60);
+  },
+  fanfare() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, i === 3 ? 0.45 : 0.14, 0.12, 'triangle'), i * 110)); },
+  // a wrong call in a challenge
+  buzzer() { tone(140, 0.25, 0.15, 'square', 0.8); },
   crash() { noise(0.5, 500, 0.5); tone(70, 0.6, 0.4, 'sine', 0.5); setTimeout(() => noise(0.3, 900, 0.3), 250); },
 };
 

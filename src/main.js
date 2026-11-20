@@ -23,6 +23,8 @@ import {
 } from './scene.js';
 import { sfx, buzz } from './sound.js';
 import { makeDecor } from './decor.js';
+import { makeFun } from './fun.js';
+import { makeBalance, BALANCE } from './balance.js';
 import { Actor, makeCrew, freeActors, CREW } from './crew.js';
 
 const $ = id => document.getElementById(id);
@@ -119,6 +121,8 @@ const canvas = $('scene');
 const renderer = makeRenderer(canvas);
 const scene = new THREE.Scene();
 makeWorld(scene);
+// sounds, shakes, sparkles and confetti (fun.js): only shows what happened, never changes it
+const fun = makeFun(scene);
 const camera = new THREE.PerspectiveCamera(22, 1, 0.2, 400) // narrow lens: almost isometric, like the reference;
 const controls = new OrbitControls(camera, canvas);
 // the plaza's decoration, earned with stars (see decor.js); made once the home screen code is ready
@@ -837,7 +841,7 @@ function onTarget(t, x, y) {
       G.seat.ropes[t.id] = true; sfx.lash(); buzz(12);
       break;
     }
-    case 'tstake': G.tri.stakes[t.id] = (G.tri.stakes[t.id] || 0) + 1; sfx.hammer(); buzz(15); break;
+    case 'tstake': G.tri.stakes[t.id] = (G.tri.stakes[t.id] || 0) + 1; sfx.hammer(); buzz(15); fun.shake(0.015, 0.12); fun.dust(t.pos, 4, 0.35); break;
     case 'foot': flashHint('<b>גררו את הרגל</b> על הקרקע כדי להזיז אותה'); break;
     case 'guyOff': {
       // an inner guy line comes down: untie it from its stake
@@ -1288,7 +1292,7 @@ function drawTripod(dt) {
     const z = z0();
     TRI_CREW.forEach((k, n) => { const side = n % 2 ? 1 : -1, v = [1.6, 2.9, 4.0][n >> 1]; people[k].set([side * 0.6, 0, z + v], side * -Math.PI / 2, 0.3, 0.7 + t.up * 1.6); });
     if (t.up > 0 || TRI_CREW.every(k => people[k].arrived())) t.up += dt / 1.4;
-    if (t.up >= 1) { t.up = 1; t.raising = false; sfx.ok(); setCameraMode('triView'); refreshAll(); }
+    if (t.up >= 1) { t.up = 1; t.raising = false; sfx.ok(); fun.landed(triApex()); setCameraMode('triView'); refreshAll(); }
   } else if (up && !G.check && !G.falling) {
     st.legs.forEach((L, i) => {
       const n = norm2(L.foot[0] - st.apex[0], L.foot[2] - st.apex[2]);
@@ -1316,7 +1320,7 @@ function watchTripod() {
   const kind = ts.slid() > 0.35 ? 'slid' : ts.sunk() > 0.25 * ts.h0 ? 'down' : null;
   if (!kind) return;
   G.falling = { kind, t: 0, tri: true, explain: explainTri(kind) };
-  sfx.crash(); buzz([60, 40, 90]);
+  sfx.crash(); buzz([60, 40, 90]); fun.collapse(G.sim?.topCentre?.() || [0, 0, z0()]);
   closePicker(); refreshAll();
 }
 function explainTri(kind) {
@@ -1578,7 +1582,7 @@ function watchCarousel() {
   else if (ss.mastTilt() > 20) kind = 'tilt';
   if (!kind) return;
   G.falling = { kind, t: 0, carousel: true, explain: explainCarousel(kind) };
-  sfx.crash(); buzz([60, 40, 90]);
+  sfx.crash(); buzz([60, 40, 90]); fun.collapse(G.sim?.topCentre?.() || [0, 0, z0()]);
   closePicker(); refreshAll();
 }
 function explainCarousel(kind) {
@@ -1711,6 +1715,7 @@ function chooseLashing(type) {
     }
     G.tying = { id: t.id, t: 0 };
     sfx.lash();
+    if (!(t.kind === 'lashed' || t.kind === 'stakeLashed' || t.kind === 'clashed' || t.kind === 'blashed' || t.kind === 'tsjd' || t.kind === 'slashed' || t.kind === 'mlashed')) { const pos = t.pos; setTimeout(() => fun.lashed(pos), 280); }
     refreshAll();
   };
   // changing the type of a lashing already tied needs no close-up
@@ -2075,12 +2080,51 @@ $('crew-list').addEventListener('click', e => { const r = e.target.closest('.cre
     ropeOff += dy;
     $('rp-rope').style.backgroundPosition = `0 ${ropeOff}px`;
     G.sim.pullTo(G.sim.target + dy * 0.16);
+    lastPull = performance.now(); if (G.sim.angle() > 10) balanceFor().stroke(dy);
     const now = performance.now();
     if (now - lastCreak > 180 + Math.random() * 120) { lastCreak = now; sfx.creak(Math.min(1, dy / 12)); }
   });
   pad.addEventListener('pointerup', () => { on = false; });
   pad.addEventListener('pointercancel', () => { on = false; });
 }
+
+// ---------------- the raise's balance (a skill moment, fun.js) ----------------
+// A jerky pull makes the klaf lean; the two buttons steady it. The lean is a real
+// sideways push on the klaf: a klaf built without its X racks under it.
+let bal = null, lastPull = 0, balSign = 1;
+const balUI = Object.assign(document.createElement('div'), { id: 'balance', hidden: true,
+  innerHTML: '<button type="button" class="bal-btn" data-s="-1" aria-label="ליישר שמאלה">◀</button><div class="bal-bar"><div class="bal-zone"></div><div class="bal-dot" id="bal-dot"></div></div><button type="button" class="bal-btn" data-s="1" aria-label="ליישר ימינה">▶</button><div class="bal-label">שומרים על הקלף ישר</div>' });
+$('app').appendChild(balUI);
+function balanceFor() { if (!bal || bal.k !== G.ki || bal.lv !== LV || bal.g !== G) bal = Object.assign(makeBalance(!!LV.tutorial), { k: G.ki, lv: LV, g: G }); return bal; }
+const balanceOn = () => G.stage === 'raise' && !!G.sim && !G.raisedOnce && !G.falling && !G.check;
+function balanceHide() { bal = null; balUI.hidden = true; }
+balUI.addEventListener('pointerdown', e => {
+  const b = e.target.closest('.bal-btn'); if (!b || !balanceOn()) return;
+  e.preventDefault();
+  const B = balanceFor(), before = B.saves;
+  B.steer(+b.dataset.s * balSign);
+  b.classList.remove('hit'); void b.offsetWidth; b.classList.add('hit');
+  sfx.tick();
+  if (B.saves > before) fun.bubble(G.sim.topCentre(), 'הצלה!', 'good');
+});
+function balanceTick(dt, t) {
+  const on = balanceOn() && G.sim.angle() > 10;
+  balUI.hidden = !on;
+  if (!on) return;
+  const B = balanceFor();
+  // which way on the screen the klaf's own sideways is (the camera is turned)
+  const top = G.sim.topCentre(), a = toScreen(top), b = toScreen(add3(top, [1, 0, 0], 1));
+  if (a && b) balSign = b[0] >= a[0] ? 1 : -1;
+  const r = B.tick(dt, performance.now() - lastPull < 450, t);
+  $('bal-dot').style.left = `${50 + B.lean * balSign * 46}%`;
+  balUI.classList.toggle('warn', Math.abs(B.lean) > 0.7);
+  if (r === 'slip') {
+    G.sim.slip(BALANCE.slip);
+    fun.shake(0.05, 0.3); sfx.thud();
+    flashHint('<b>הקלף נטה הצידה</b> והמושכים הורידו אותו מעט. מושכים לאט ובקצב קבוע, ומיישרים בכפתורים ◀ ▶');
+  }
+}
+const balanceLean = () => (balanceOn() && bal && G.sim.angle() > 15 ? bal.force() : 0);
 
 // ---------------- crew jobs: carrying poles, driving stakes ----------------
 const jobs = [];
@@ -2133,7 +2177,7 @@ function updateDrive(job, dt) {
       job.t = 0; job.queued--;
       const store = job.kind === 'leg' ? G.build.stakes : G.build.anchors;
       store[job.id] = (store[job.id] || 0) + 1;
-      sfx.hammer(); buzz(15);
+      sfx.hammer(); buzz(15); fun.shake(0.015, 0.12); fun.dust([(a1.pos.x + a2.pos.x) / 2, 0, (a1.pos.z + a2.pos.z) / 2], 4, 0.35);
       if (job.kind === 'leg' && store[job.id] >= LEG_STAKE_HITS && G.sim && G.sim.angle() < 8) startSim(); // feet now rest against the stakes
       refreshAll();
     }
@@ -2444,7 +2488,7 @@ const topMissing = b => !b.poles.topH || !b.joints.J3 || !b.joints.J4;
 function watchSim(dt) {
   const sim = G.sim; if (!sim || G.falling) return;
   const ang = sim.angle(), top = sim.topCentre();
-  if (ang > 82 && ang < 98) { G.uprightFor += dt; if (G.uprightFor > 0.6 && !G.raisedOnce) { G.raisedOnce = true; sfx.ok(); if (G.stage === 'raise') setTimeout(() => G.stage === 'raise' && !G.falling && goStage('anchor'), 500); refreshAll(); } }
+  if (ang > 82 && ang < 98) { G.uprightFor += dt; if (G.uprightFor > 0.6 && !G.raisedOnce) { G.raisedOnce = true; sfx.ok(); fun.landed(top); balanceHide(); if (G.stage === 'raise') setTimeout(() => G.stage === 'raise' && !G.falling && goStage('anchor'), 500); refreshAll(); } }
   else G.uprightFor = 0;
   let kind = null;
   if (sim.baseSlid() > 0.35) kind = 'slid';
@@ -2455,7 +2499,7 @@ function watchSim(dt) {
   if (kind) {
     G.falling = { kind, t: 0, explain: explain(kind) };
     sim.flat = false;
-    sfx.crash(); buzz([60, 40, 90]);
+    sfx.crash(); buzz([60, 40, 90]); fun.collapse(G.sim?.topCentre?.() || [0, 0, z0()]);
     closePicker(); refreshAll();
   }
 }
@@ -2469,7 +2513,7 @@ function watchCube(dt) {
   else if (cs.lowestTop() < 0.7 * (LV.cube.height ?? 2.0)) kind = 'down';
   if (kind) {
     G.falling = { kind, t: 0, cube: true, explain: explainCube(kind) };
-    sfx.crash(); buzz([60, 40, 90]);
+    sfx.crash(); buzz([60, 40, 90]); fun.collapse(G.sim?.topCentre?.() || [0, 0, z0()]);
     closePicker(); refreshAll();
   }
 }
@@ -2633,10 +2677,13 @@ function finish() {
   }
   if (LV.free) return finishFree();
   if (LV.sandbox) return finishFreeTri();
-  G.endedAt = performance.now();
+  G.endedAt = G.endedAt || performance.now();
   pushArrow.visible = false;
   const s = G.result = score();
   saveStars(LV.number, s.stars);
+  // the scouts use the structure first, and the stars light up as they do (Omer's מסדר idea)
+  if (!G.paraded) { G.paraded = true; return celebrate(s, finish); }
+  if (s.stars >= 2) onWin?.(s);
   sfx.ok();
   const stars = [1, 2, 3].map(i => `<span class="${i <= s.stars ? 'on' : ''}">★</span>`).join('');
   const nMissing = s.total - s.tied;
@@ -2676,11 +2723,93 @@ function finish() {
   refreshAll();
 }
 function reopenForFixes() {
-  closeModal(); G.check = null; G.result = null; G.endedAt = null;
+  closeModal(); G.check = null; G.result = null; G.endedAt = null; G.paraded = false;
   if (LV.tripod) { G.tri.sim = null; goStage('brace'); }
   else if (LV.carousel) { G.cube.sim = null; G.seat.sim = null; goStage('hang'); }
   else if (LV.cube) { G.cube.sim = null; goStage('cube'); } else goStage('anchor');
 }
+// ---------------- the festive מסדר ----------------
+// After the inspection the scouts actually use what they built: one climbs it (on a
+// base he stands right on top), the rest cheer. The stars light up with what happens:
+// ★ it stood every push, ★★ every lashing in the drawing is there so a scout may climb,
+// ★★★ every lashing is the right type. Missing lashings: the מדריך stops the climb.
+// A tap skips it. Short on purpose: animations must be fast (Omer).
+let parade = null;
+let onWin = null; // challenges and rewards listen here
+function paradeCentre() {
+  if (LV.tripod) return triApex() || [0, 4, z0()];
+  if (LV.carousel) return [SEAT_C[0], 2.5, SEAT_C[1]];
+  const cs = G.cube?.sim;
+  if (cs) { const t = cs.klafim.map(k => k.topCentre()); return [0, 1, 2].map(i => t.reduce((a, q) => a + q[i], 0) / t.length); }
+  return G.sim ? G.sim.topCentre() : [0, 2, z0()];
+}
+function celebrate(s, done) {
+  const c = paradeCentre();
+  const cam = new THREE.Vector3(camera.position.x - c[0], 0, camera.position.z - c[2]).normalize();
+  const side = new THREE.Vector3(-cam.z, 0, cam.x);
+  const big = LV.carousel ? 3.4 : LV.cube || LV.tripod ? 2.6 : 1.9;
+  const free = crew.filter(a => !a.busy && !a.want?.sit && !a.want?.lock);
+  const climber = LV.carousel ? null : free.shift() || null;
+  const cheer = free.slice(0, 4);
+  // where the climber goes: up a leg of a klaf, onto the top of a base, or hanging from a tripod
+  let base, topY;
+  if (LV.tripod) { base = [c[0] + cam.x * 0.3, 0, c[2] + cam.z * 0.3]; topY = 0.35; }
+  else if (LV.cube && !LV.carousel) { base = [c[0], 0, c[2]]; topY = Math.max(0.5, c[1] + 0.02); }
+  else { const lt = G.sim && legTop('legL'); base = lt ? [lt[0] + cam.x * 0.28, 0, lt[2] + cam.z * 0.28] : [c[0], 0, c[2]]; topY = Math.min(1.1, Math.max(0.4, (lt?.[1] ?? 2) - 1.0)); }
+  parade = { t: 0, s, done, c, cam, side, big, climber, cheer, base, topY, lit: 0, ok: s.stars >= 2 };
+  fun.starsShow();
+  controls.enabled = true;
+}
+function endParade() {
+  if (!parade) return;
+  const p = parade; parade = null;
+  for (const a of [p.climber, ...p.cheer]) a?.clear();
+  fun.starsHide();
+  p.done();
+}
+function stepParade(dt) {
+  const p = parade; if (!p) return;
+  p.t += dt;
+  const t = p.t, s = p.s;
+  const face = Math.atan2(-p.cam.x, -p.cam.z);
+  // cheering scouts: in an arc between the structure and the camera, jumping once things go well
+  p.cheer.forEach((a, i) => {
+    const off = (i - (p.cheer.length - 1) / 2) * 0.9;
+    const pos = [p.c[0] + p.cam.x * (p.big + 0.6) + p.side.x * off, 0, p.c[2] + p.cam.z * (p.big + 0.6) + p.side.z * off];
+    const happy = p.ok && t > 2.2;
+    if (happy && a.arrived()) pos[1] = Math.abs(Math.sin(t * 8 + i * 1.3)) * 0.22;
+    a.set(pos, face, happy ? -0.1 : 0.05, happy ? Math.PI * 0.92 : 0.3);
+  });
+  // the climber
+  const a = p.climber;
+  if (a) {
+    const at = Math.hypot(a.pos.x - p.base[0], a.pos.z - p.base[2]) < 0.05;
+    let y = 0;
+    if (at && t > 0.5) {
+      const go = p.ok ? 1 : 0.18; // missing lashings: the מדריך stops him almost at once
+      y = p.topY * go * Math.min(1, (t - 0.5) / 1.4);
+    }
+    const climbing = at && t > 0.5 && t < 1.9;
+    const wave = p.ok && t >= 1.9 ? 0.25 * Math.sin(t * 10) : 0;
+    a.set([p.base[0], y, p.base[2]], LV.cube && !LV.carousel && p.ok && t > 1.9 ? face : face + Math.PI, climbing ? 0.25 : 0, (climbing ? Math.PI * (0.8 + 0.15 * Math.sin(t * 14)) : p.ok && t >= 1.9 ? Math.PI * 0.95 : 0.4) + wave);
+  }
+  // the stars, one by one
+  const light = (i, label) => { if (p.lit > i) return; p.lit = i + 1; fun.starOn(i, label); };
+  if (t > 0.4) {
+    if (p.ok) light(0, LV.carousel ? 'הקרוסלה עמדה והסתובבה עם הרוכבים' : 'המבנה עמד בכל הדחיפות');
+    else if (!p.bad) { p.bad = true; fun.starLabel('<b>המדריך עוצר:</b> חסרות כפיתות שבשרטוט, לא עולים על המבנה', true); sfx.buzzer(); }
+  }
+  if (p.ok && t > 1.9) light(1, LV.carousel ? 'כל הכפיתות במקום: אפשר לעלות' : LV.tripod ? 'צופה נתלה על החצובה: כל הכפיתות במקום' : LV.cube ? 'צופה עומד על המבנה: כל הכפיתות במקום' : 'צופה טיפס על הקלף: כל הכפיתות במקום');
+  if (p.ok && t > 2.2 && !p.cheered) { p.cheered = true; sfx.cheer(); }
+  if (p.ok && t > 2.6) {
+    if (s.stars === 3) { if (p.lit < 3) { light(2, 'כל כפיתה מהסוג הנכון!'); fun.confetti(); sfx.fanfare(); } }
+    else if (!p.noThird) { p.noThird = true; fun.starLabel('יש כפיתות מסוג לא נכון: אין כוכב שלישי'); fun.confetti(30); }
+  }
+  if (t > (p.ok ? 3.9 : 2.6)) endParade();
+}
+// a tap skips the festive inspection
+$('app').addEventListener('pointerdown', () => { if (parade && parade.t > 0.3) endParade(); }, true);
+
 // where a lashing is, as the structure file names it: the drawing sheet and the height band
 function sheetOf(j) {
   if (LV.tripod) return j.tri === 'head' ? 'שרטוט החצובה, בראש' : j.tri === 'stake' ? 'שרטוט החצובה, ליד הקרקע (רגל לבז״נט)' : 'שרטוט החצובה, בחיזוקים';
@@ -3299,6 +3428,11 @@ function drawLashings() {
 function coilProgress(g, id) {
   const n = G.tying && G.tying.id === id ? Math.ceil(Math.min(1, G.tying.t / 0.32) * g.children.length) : g.children.length;
   g.children.forEach((c, i) => { c.visible = i < n; });
+  // the coils go on loose and are pulled tight
+  if (G.tying && G.tying.id === id) {
+    const k = Math.min(1, Math.max(0, (G.tying.t - 0.2) / 0.3)), f = 1 + 0.45 * (1 - k * k * (3 - 2 * k));
+    g.children.forEach(c => { c.scale.x *= f; c.scale.y *= f; });
+  }
 }
 // A guy stake leans away from the klaf along its line (out at 45°), and the line is
 // fixed (קיבוע) just below its top
@@ -3477,7 +3611,7 @@ function frame(now) {
         else if (cs) {
           if (LV.carousel && G.seat.sim && (G.check?.running || G.falling)) stepCarousel(h);
           if (G.check?.running || G.falling) cs.step(h, { push, load });
-        } else sim.step(h, { wobble, push, load });
+        } else sim.step(h, { wobble, push, load, lean: balanceLean() });
         if (!ts) record(h);
         // beyond a single klaf, the structure is tested only in the check at the end (Omer)
         if (ts) { if (G.check?.running) watchTripod(); } else if (cs) { if (G.check?.running) { watchCube(h); if (LV.carousel) watchCarousel(); } } else watchSim(h);
@@ -3514,11 +3648,14 @@ function frame(now) {
   hintTimer += dt;
   if (hintTimer > 0.25) { hintTimer = 0; refreshHint(); $('timer').textContent = fmt(elapsed()); $('tray-count').textContent = G.stage === 'seat' ? `${SEAT.slots.filter(s => G.seat.build.poles[s.id]).length}/${SEAT.slots.length} במושב` : G.stage === 'hang' ? (mastOn() ? 'התורן במקום' : 'חסר תורן') : G.stage === 'cube' ? `${LV.cube.slots.filter(s => G.cube.build.poles[s.id]).length}/${LV.cube.slots.length} בקובייה` : `${SLOTS.filter(s => G.build.poles[s.id]).length}/${SLOTS.length || 6} על השרטוט`; }
   decor?.tick(now / 1000); placeRaiseIcon();
+  fun.tick(dt, camera, toScreen); balanceTick(dt, now / 1000); stepParade(dt);
+  fun.preRender(camera);
   renderer.render(scene, camera);
+  fun.postRender(camera);
   requestAnimationFrame(frame);
 }
 restart();
 requestAnimationFrame(frame);
 
 // debug hook for automated tests
-window.__game = { get state() { return G; }, triGuide, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, score: () => score(), SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
+window.__game = { get state() { return G; }, fun, balanceFor, finish, celebrate, get parade() { return parade; }, triGuide, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, score: () => score(), SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
