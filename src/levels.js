@@ -194,7 +194,7 @@ export const CUBE_LEVEL = {
 const C4 = SIZES.cube4;
 const C4K = { frontDist: C4.guyDistance, backDist: C4.guyDistance, pullDist: C4.guyDistance + 1.4, anchorX: { front: 1.05, back: 1.05 }, extraLegV: CUBE4.CAR_LEG_V, backGripCap: C4.backGripCap };
 export const CUBE4_LEVEL = {
-  number: 0, name: 'קובייה 4×4', tutorial: false, targetTimeSec: 20 * 60, frame: true, camScale: 1.75,
+  number: 0, name: 'קובייה 4×4', tutorial: false, targetTimeSec: 20 * 60, frame: true, camScale: 1.75, bp: [5.6, 2.0],
   stockExtra: [4.0, 2.0], ropeSpare: 4, crew: 6,
   klafim: [
     { ...SOLO, ...C4K, he: 'קלף קדמי', short: 'א׳', plan: CUBE4.BACK_PLAN, inner: 1 },
@@ -202,3 +202,6 @@ export const CUBE4_LEVEL = {
   ],
   cube: CUBE4.JOIN,
 };
+
+// The carousel's frame alone, without the seat (a "find the missing connections" challenge)
+export const CARFRAME_LEVEL = { ...LEVELS[3], number: 0, carousel: false, frame: true, name: 'מסגרת קרוסלה 5×5', bp: [6.8, 2.45] };
