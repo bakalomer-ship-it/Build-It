@@ -41,7 +41,7 @@ export const MEDAL_HE = ['זהב', 'כסף', 'ארד'];
 export const MEDAL_ICON = ['🥇', '🥈', '🥉'];
 
 const KEY = 'buildit.challenges';
-function load() { try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && d.best) return d; } catch { /* none yet */ } return { best: {}, daily: {} }; }
+function load() { try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && d.best) return { stars: {}, ...d }; } catch { /* none yet */ } return { best: {}, daily: {}, stars: {} }; }
 let mem = load();
 function save() { try { localStorage.setItem(KEY, JSON.stringify(mem)); } catch { /* private mode: lasts this visit */ } }
 export const keyOf = ch => `${ch.kind}${ch.level}`;
@@ -54,3 +54,7 @@ export function recordChallenge(ch, sec) {
   save();
   return better;
 }
+// stars per challenge (Omer 11-21: challenges give stars like the levels); the best is kept
+export const starsOfChallenge = ch => mem.stars[keyOf(ch)] || 0;
+export function recordStars(ch, n) { const k = keyOf(ch); if ((mem.stars[k] || 0) < n) { mem.stars[k] = n; save(); } }
+export const challengeStars = () => Object.values(mem.stars).reduce((a, n) => a + n, 0);

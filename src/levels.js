@@ -119,14 +119,14 @@ export const LEVELS = [
   {
     number: 1, name: 'קלף 2×2', tutorial: true, targetTimeSec: 6 * 60,
     // the pile: the plan's poles plus these extra lengths; the crew for the raise
-    stockExtra: [3.0, 1.6], ropeSpare: 2, crew: 6, // a proper klaf raise takes 6 (Omer)
+    stockExtra: [3.0, 2.6, 2.0, 1.6, 1.2], ropeSpare: 2, crew: 6, // 5 spare poles in every level (Omer 11-21); a klaf raise takes 6
     klafim: [{ ...SOLO, he: 'הקלף' }],
     cube: null,
   },
   {
     // בסיס מתקן: two cubes in a row, three klafim, the middle one shared
     number: 2, name: 'בסיס מתקן 2×4', tutorial: false, targetTimeSec: 26 * 60,
-    stockExtra: [3.0, 2.2, 1.6], ropeSpare: 3, crew: 6,
+    stockExtra: [3.0, 2.6, 2.2, 1.6, 1.2], ropeSpare: 3, crew: 6,
     klafim: [
       { ...SOLO, he: 'קלף קדמי', short: 'א׳', inner: 1, extraLegV: BASE_LEG_V },
       { ...SOLO, he: 'קלף אמצעי', short: 'ב׳', z0: D, inner: 'both', extraLegV: BASE_LEG_V },
@@ -137,7 +137,7 @@ export const LEVELS = [
   {
     // חצובה: three legs lashed at the top, stood up and spread (see tripod.js)
     number: 3, name: 'חצובה 4 מ׳', tutorial: false, targetTimeSec: 10 * 60, tripod: true,
-    stockExtra: [5.0, 4.0, 3.0, 2.0, 2.0], ropeSpare: 2, crew: 6,
+    stockExtra: [5.0, 4.0, 3.0, 2.0, 1.5], ropeSpare: 2, crew: 6,
     // where it is built: the legs lie from z0 towards +z, and it stands over `centre`
     klafim: [{ ...SOLO, he: 'חצובה' }], centre: [0, 0.7],
     cube: null,
@@ -158,7 +158,7 @@ export const LEVELS = [
   {
     // גלגל ענק: two 90° tripods, a wheel turning on the axle across their heads, one seat (Omer, 2026-11-20; see wheel.js)
     number: 5, name: 'גלגל ענק', tutorial: false, targetTimeSec: 45 * 60, wheel: true, camScale: 1.2,
-    stockExtra: [4.0, 3.0, 2.0, 1.2], ropeSpare: 4, crew: 6,
+    stockExtra: [4.0, 3.0, 2.5, 2.0, 1.2], ropeSpare: 4, crew: 6,
     // each tripod's legs lie from z0 towards +z, tops together; it stands with its upright
     // leg's foot at `centre` (from z0), its leaning legs out, away from the wheel (`out`)
     klafim: [
