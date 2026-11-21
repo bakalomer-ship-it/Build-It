@@ -92,7 +92,9 @@ export function standing(feet, lens, spec = TRI_SPEC) {
     return { foot, dir, s: s[i], top: along(foot, dir, lens[i]), brace: along(foot, dir, sb), sb, stake: along(foot, dir, TRI.stakeJointHeight / Math.max(0.2, dir[1])) };
   });
   const d = (a, b) => Math.hypot(feet[a][0] - feet[b][0], feet[a][1] - feet[b][1]);
-  return { apex, legs, apart: [d(0, 1), d(1, 2), d(2, 0)], height: apex[1] - r };
+  // a fourth leg standing side by side with one of the three (the giant wheel's second upright leg)
+  const tw = spec.twin, twin = tw ? { ...legs[tw.of], foot: along(legs[tw.of].foot, tw.offset, 1), top: along(legs[tw.of].top, tw.offset, 1) } : null;
+  return { apex, legs, twin, apart: [d(0, 1), d(1, 2), d(2, 0)], height: apex[1] - r };
 }
 // does a brace of this length reach both of its legs?
 export function braceReaches(st, brace, length) {
@@ -118,7 +120,8 @@ export const TRI_TUNING = {
 // to its stake stays put, and any other foot is held only by the sand.
 export class TripodSim {
   // world: a world shared with other structures (the giant wheel's two tripods)
-  constructor({ feet, lens, braces, joints, stakes, stakeJoints, spec = TRI_SPEC, world = null }) {
+  // guys: the fixed guy lines, each { leg, anchor: [x, y, z] } (Omer, 11-21: a tripod is raised on יתרים like a klaf)
+  constructor({ feet, lens, braces, joints, stakes, stakeJoints, spec = TRI_SPEC, world = null, guys = [] }) {
     const st = standing(feet, lens, spec);
     const W = this.world = world || new World();
     if (!world) { W.mu = 0; W.iterations = 3; }
@@ -144,6 +147,7 @@ export class TripodSim {
       if (tied) W.add('weld', L.foot, hold, { compliance: 1e-6 });
       else this.holds.push(W.add('slide', L.foot, hold, { cap: TRI_TUNING.footHold, origin: [...p] }));
     });
+    this.guys = guys.map(g => W.add('rope', this.legs[g.leg].head, W.addParticle(g.anchor, 0), { tag: 'guy' }));
   }
   pos(id) { return this.world.p[id].x; }
   apex() { const P = this.legs.map(L => this.pos(L.head)); return [0, 1, 2].map(k => (P[0][k] + P[1][k] + P[2][k]) / 3); }

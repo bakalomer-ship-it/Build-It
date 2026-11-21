@@ -216,12 +216,15 @@ freeGrid.userData.z = freeGrid.position.z;
 scene.add(freeGrid);
 // the tripod's legs and braces, its stakes, and the sheet its legs are laid on
 for (const m of KM) {
-  for (const id of [...LEG_IDS, ...BRACES.map(b => b.id)]) {
+  for (const id of [...LEG_IDS, 't4', ...BRACES.map(b => b.id)]) {
     const a = makePoleMesh(0.5), b = makePoleMesh(0);
     b.material = a.material; scene.add(a, b); a.visible = b.visible = false;
     m.poles[id] = [a, b];
   }
   m.triStakes = TRI_STAKES.map(() => { const s = makeStake(TRI.stakeLength); s.visible = false; scene.add(s); return s; });
+  // the tripod's guy lines, one on each leg, and their stakes (רבזים)
+  m.triGuyRopes = [0, 1, 2, 3].map(() => { const r = new RopeViz(scene); r.show(false); return r; });
+  m.triAnchors = [0, 1, 2, 3].map(() => { const s = makeStake(ANCHOR_LEN); s.visible = false; scene.add(s); return s; });
 }
 const triSheets = [makeTripodSheet({ slots: TRI_SLOTS, lashV: TRI_JOINTS[0].at[1], legLength: TRI.legLength }), makeTripodSheet({ slots: TRI90.slots, lashV: TRI90.lashV, legLength: Math.max(...TRI90.legLengths) })];
 triSheets.forEach(m => scene.add(m));
@@ -476,7 +479,7 @@ function stageDone(key) {
   if (id === 'wlift') return !!G.wheel && G.wheel.lift >= 1;
   if (id === 'gond') return !!G.wheel && rigDone('seat') && G.wheel.seatLift >= 1 && SEAT_ROPES.every(h => G.wheel.ropes[h.id]);
   if (id === 'unguy') return !!G.cube && G.klafim.every((k, i) => GUYS.every(g => !innerSide(k.cfg, g) || k.build.guyOff[g.id]));
-  if (id === 'spread') return !!G.tri && G.tri.up >= 1 && feetOnPlan();
+  if (id === 'spread') return !!G.tri && G.tri.up >= 1 && feetOnPlan() && triGuysFixed();
   if (id === 'brace') return !!G.tri && G.tri.up >= 1 && BRACES.every(q => G.tri.braces[q.id]) && BRACE_JOINTS.every(q => G.tri.joints[q.id])
     && TRI_STAKES.every(q => (G.tri.stakes[q.id] || 0) >= TRI_STAKE_HITS) && TRI_STAKE_JOINTS.every(q => G.tri.stakeJoints[q.id]);
   const b = G.build;
@@ -515,6 +518,7 @@ function goStage(key) {
     } else {
       if (!stageDone(st.k != null ? STAGES.find(s => s.id === 'build' && s.k === st.k).key : 'build')) { infoCard('קודם כופתים את החצובה על הקרקע', 'מניחים שלוש רגליים זו לצד זו וכופתים אותן יחד ליד הראש. רק אז אפשר להקים.'); return; }
       if (id !== 'spread' && G.tri.up < 1) { infoCard('קודם מקימים את החצובה', 'חיזוקים ובז״נטים מוסיפים לחצובה שכבר עומדת, כשהרגליים שלה במקומן.'); return; }
+      if (id !== 'spread' && feetOnPlan() && !triGuysFixed()) { infoCard('קודם מקבעים את היתרים', 'כל יתר נכפת לרבז שלו בקיבוע, כמו בקלף. הקישו על כל רבז.'); return; }
       if (id !== 'spread' && !feetOnPlan()) { infoCard('קודם מעמידים את הרגליים במקומן', `בשרטוט יש ${apartText()}. גוררים כל רגל אל העיגול שלה על הקרקע.`); return; }
       selectPole(null); G.tri.sim = null;
     }
@@ -779,7 +783,7 @@ function collectTargets() {
     const s = markerSprite(k++);
     s.visible = true;
     s.position.set(...t.pos);
-    s.material.map = t.kind === 'stake' || t.kind === 'anchor' || t.kind === 'tstake' ? markerTex.stake : t.kind === 'foot' ? markerTex.foot : t.kind === 'guyOff' ? markerTex.off : (t.kind === 'guyTop' || t.kind === 'guyTie' || t.kind === 'pivot' || t.kind === 'hrope' || t.kind === 'wrope') ? markerTex.guy : markerTex.lash;
+    s.material.map = t.kind === 'stake' || t.kind === 'anchor' || t.kind === 'tstake' || t.kind === 'tanchor' ? markerTex.stake : t.kind === 'foot' ? markerTex.foot : t.kind === 'guyOff' ? markerTex.off : (t.kind === 'guyTop' || t.kind === 'guyTie' || t.kind === 'tguyTop' || t.kind === 'tguyTie' || t.kind === 'pivot' || t.kind === 'hrope' || t.kind === 'wrope') ? markerTex.guy : markerTex.lash;
     const pulse = 1 + 0.12 * Math.sin(performance.now() / 260);
     const base = 0.05;
     s.scale.setScalar(base * pulse);
@@ -916,6 +920,9 @@ function onTarget(t, x, y) {
       G.seat.ropes[t.id] = true; sfx.lash(); buzz(12);
       break;
     }
+    case 'tguyTop': G.tri.guys.top[t.id] = true; sfx.lash(); buzz(12); break;
+    case 'tanchor': G.tri.guys.hits[t.id] = (G.tri.guys.hits[t.id] || 0) + 1; sfx.hammer(); buzz(15); fun.shake(0.015, 0.12); fun.dust(t.pos, 4, 0.35); break;
+    case 'tguyTie': return openPicker(t, x, y);
     case 'tstake': G.tri.stakes[t.id] = (G.tri.stakes[t.id] || 0) + 1; sfx.hammer(); buzz(15); fun.shake(0.015, 0.12); fun.dust(t.pos, 4, 0.35); break;
     case 'foot': flashHint('<b>גררו את הרגל</b> על הקרקע כדי להזיז אותה'); break;
     case 'guyOff': {
@@ -1217,7 +1224,7 @@ function finishFree() {
 // the moment it is stood up, the tripod is drawn from where its feet stand.
 function triCentre() { const c = LV.free ? null : (K()?.cfg.centre || LV.centre); return [c?.[0] ?? 0, z0() + (c?.[1] ?? 0.7)]; }
 const triLens = () => LEG_IDS.map((id, i) => G.build.poles[id]?.length ?? triSpec().slots[i].length);
-function freshTri() { return { up: 0, raising: false, feet: null, braces: {}, joints: {}, stakes: {}, stakeJoints: {}, sim: null }; }
+function freshTri() { return { up: 0, raising: false, feet: null, braces: {}, joints: {}, stakes: {}, stakeJoints: {}, sim: null, guys: { top: {}, hits: {}, fix: {} } }; }
 let triCache = null;
 function triState() {
   const t = G.tri; if (!t?.feet) return null;
@@ -1232,9 +1239,12 @@ function headOffset(i, st = triState()) {
   return [n[0] * 0.06, 0, n[2] * 0.06];
 }
 function triLegSegs(sid) {
-  const i = LEG_IDS.indexOf(sid), t = G.tri, st = triState();
+  let i = LEG_IDS.indexOf(sid), tw = null;
+  const t = G.tri, st = triState(), sp = triSpec();
+  // the giant wheel's second upright leg stands beside the first
+  if (i < 0 && sp.twin?.id === sid) { i = sp.twin.of; tw = sp.twin.offset; }
   if (i < 0 || !st || !G.build.poles[sid]) return null;
-  const o = headOffset(i, st);
+  const o = tw ? add3(headOffset(i, st), tw, 1) : headOffset(i, st);
   if (t.sim) { const [a, b] = t.sim.legEnds(i); return [[add3(a, o, 1), add3(b, o, 1)]]; }
   const stand = [add3(st.legs[i].foot, o, 1), add3(st.legs[i].top, o, 1)];
   if (t.up >= 1) return [stand];
@@ -1249,6 +1259,12 @@ function triApex() {
   const t = G.tri;
   if (t.sim) return t.sim.apex();
   if (t.up >= 1) return triState().apex;
+  if (!triState()) {
+    // still lying on the ground: the lashing point on the middle leg
+    const slot = slotById('t2'); if (!slot || !G.build.poles.t2) return null;
+    const p = slotPoint(slot, (triSpec().lashV - slot.centre[1]) / (slot.dir[1] || 1));
+    return add3(kw(p[0], p[1]), [0, 1, 0], layerOff(slot) + 0.08);
+  }
   const seg = triLegSegs('t2'); if (!seg) return null;
   const [a, b] = seg[0], len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
   return add3(a, [(b[0] - a[0]) / len, (b[1] - a[1]) / len, (b[2] - a[2]) / len], len - triSpec().lashFromTop);
@@ -1298,6 +1314,7 @@ function pickBrace(x, y) {
 }
 function collectTriTargets(T) {
   const t = G.tri, st = triState();
+  if (G.stage === 'spread' && !t.raising) collectTriGuyTargets(T);
   if (!st || t.up < 1) return;
   if (G.stage === 'spread') st.legs.forEach((L, i) => { if (!footFixed(i)) T.push({ kind: 'foot', id: 'F' + i, pos: [L.foot[0], 0.12, L.foot[2]], show: true }); });
   if (G.stage !== 'brace') return;
@@ -1349,9 +1366,95 @@ canvas.addEventListener('pointercancel', endFootDrag);
 
 function raiseTripod() {
   const t = G.tri; if (t.up > 0 || t.raising) return;
+  if (!triGuysReady()) return infoCard('קודם יתרים ורבזים', 'מקימים חצובה כמו קלף: לכל רגל קושרים יתר במקום של כפיתת החצובה, ולכל יתר דופקים רבז. היתרים הקדמיים מושכים, והאחוריים מייצבים.');
   startClock();
   t.feet = startFeet(triCentre()); t.raising = true;
   refreshAll();
+}
+// ---- a tripod's guy lines (Omer, 2026-11-21) ----
+// A tripod is raised like a klaf: a יתר is tied on each leg where the tripod lashing
+// goes, each to its own רבז. The front lines (on the side away from where the tops
+// lie) pull it up; the rear ones steady it. Once it stands each is fixed (קיבוע).
+const triGuyLegs = () => triSpec().twin ? [0, 1, 2, 3] : [0, 1, 2];
+const TG = i => 'TG' + (i + 1);
+function triLegName(i) {
+  const sp = triSpec(), id = i === 3 ? sp.twin?.id : LEG_IDS[i];
+  return (sp.slots.find(q => q.id === id) || TRI_SLOTS[i])?.he || 'רגל';
+}
+// the tripod as drawn, standing on its feet in the drawing
+function triPlanStanding() {
+  const sp = triSpec(), lens = sp.legLengths || LEG_IDS.map((id, i) => sp.slots[i].length);
+  return standing(triPlanFeet(), lens, sp) || standing(triPlanFeet(), [TRI.legLength, TRI.legLength, TRI.legLength]);
+}
+// where guy line i reaches the ground: out from the head, as far as the head is high (45°)
+function triGuyAnchor(i) {
+  const st = triPlanStanding(), a = st.apex, h = a[1];
+  let d = i <= 2 ? [st.legs[i].foot[0] - a[0], st.legs[i].foot[2] - a[2]] : [0, 0];
+  // an upright leg has its foot under the head: its line goes out to the side
+  if (Math.hypot(d[0], d[1]) < 0.3) d = [i === 3 ? 1 : -1, -(K()?.cfg.out || 0) * 0.15];
+  const l = Math.hypot(d[0], d[1]);
+  return [a[0] + d[0] / l * h, 0, a[2] + d[1] / l * h];
+}
+// the front lines are on the side away from the tops lying on the ground (−z)
+const triGuyFront = i => triGuyAnchor(i)[2] < triPlanStanding().apex[2] - 0.05;
+const triGuysReady = () => triGuyLegs().every(i => G.tri.guys.top[TG(i)] && (G.tri.guys.hits[TG(i)] || 0) >= ANCHOR_HITS);
+const triGuysFixed = () => !!G.tri && triGuyLegs().every(i => G.tri.guys.fix[TG(i)]);
+const triSimGuys = () => triGuyLegs().filter(i => G.tri.guys.fix[TG(i)]).map(i => ({ leg: i === 3 ? triSpec().twin.of : i, anchor: triGuyAnchor(i) }));
+// where a guy line is tied on its leg (at the tripod lashing), wherever the tripod is now
+function triGuyTop(i) {
+  const p = triApex(); if (!p) return null;
+  return add3(p, [(i === 3 ? 0.07 : (i - 1) * 0.14), 0.04, 0], 1);
+}
+function triAnchorTop(i) {
+  const a = triGuyAnchor(i), hits = G.tri.guys.hits[TG(i)] || 0, h = triApex() || [a[0], 3, a[2]];
+  const n = norm2(a[0] - h[0], a[2] - h[2]), s = Math.sin(STAKE_LEAN), c = Math.cos(STAKE_LEAN);
+  return add3([a[0], -0.25 * Math.min(hits, ANCHOR_HITS) / ANCHOR_HITS, a[2]], [n[0] * s, c, n[2] * s], ANCHOR_LEN - 0.06);
+}
+function collectTriGuyTargets(T) {
+  const t = G.tri, g = t.guys;
+  if (!LEG_IDS.every(id => G.build.poles[id]) || !G.build.joints.TJ) return;
+  for (const i of triGuyLegs()) {
+    const id = TG(i);
+    if (t.up <= 0 && !g.top[id]) { const p = triGuyTop(i); if (p) T.push({ kind: 'tguyTop', id, pos: p, show: true }); continue; }
+    if ((g.hits[id] || 0) < ANCHOR_HITS) { const a = triGuyAnchor(i); T.push({ kind: 'tanchor', id, pos: [a[0], 0.12, a[2]], show: true }); continue; }
+    if (t.up >= 1 && g.top[id] && !g.fix[id] && feetOnPlan()) { const a = triGuyAnchor(i); T.push({ kind: 'tguyTie', id, pos: [a[0], 0.4, a[2]], show: true }); }
+  }
+}
+// the guy lines and their stakes, for the tripod being drawn
+function drawTriGuys() {
+  const t = G.tri, g = t.guys, m = KM[G.ki];
+  const gone = fadedOut();
+  [0, 1, 2, 3].forEach(i => {
+    const rv = m.triGuyRopes[i], sk = m.triAnchors[i], id = TG(i), on = triGuyLegs().includes(i);
+    const hits = on ? g.hits[id] || 0 : 0;
+    sk.visible = hits > 0;
+    if (hits > 0) {
+      const a = triGuyAnchor(i), h = triApex() || [a[0], 3, a[2]], n = norm2(a[0] - h[0], a[2] - h[2]);
+      sk.position.set(a[0], -0.25 * Math.min(hits, ANCHOR_HITS) / ANCHOR_HITS, a[2]);
+      sk.quaternion.setFromUnitVectors(UPV3, new THREE.Vector3(n[0] * Math.sin(STAKE_LEAN), Math.cos(STAKE_LEAN), n[2] * Math.sin(STAKE_LEAN)));
+    }
+    const fixG = lashMesh(id);
+    if (!on || !g.top[id] || gone) { rv.show(false); fixG.visible = false; return; }
+    const top = triGuyTop(i); if (!top) { rv.show(false); fixG.visible = false; return; }
+    const a = triGuyAnchor(i);
+    // a line not yet on its stake lies slack on the ground towards it; a tight one runs to the stake
+    const end = hits > 0 ? triAnchorTop(i) : add3([top[0], 0.03, top[2]], norm2(a[0] - top[0], a[2] - top[2]), 1.2);
+    rv.set(top, end, t.up >= 1 || t.raising ? 0.04 : 0.4);
+    fixG.visible = !!g.fix[id];
+    if (g.fix[id]) { const e = triAnchorTop(i); placeParallelLashing(fixG, add3(e, [0, -0.05, 0], 1), add3(e, [0, 0.05, 0], 1), [0, 1, 0]); coilProgress(fixG, id); }
+  });
+}
+// the raise: two scouts on each front line pull, one holds each rear line, the rest lift the head
+function triRaiseCrew() {
+  const t = G.tri, list = [...TRI_CREW];
+  const h = triApex() || [0, 1, z0()];
+  for (const i of triGuyLegs()) {
+    const a = triGuyAnchor(i), n = norm2(a[0] - h[0], a[2] - h[2]), yaw = Math.atan2(n[0], n[2]);
+    const spots = triGuyFront(i) ? [1.3, 0.7] : [0.5];
+    for (const back of spots) { const k = list.shift(); if (!k) break; people[k].set([a[0] - n[0] * back, 0, a[2] - n[2] * back], yaw, triGuyFront(i) ? -0.35 : -0.1, 0.8); }
+  }
+  // whoever is left lifts the head from below
+  list.forEach((k, n) => people[k].set([h[0] + (n ? 0.5 : -0.5), 0, h[2] + 0.6], Math.PI, 0.3, 0.7 + t.up * 1.6));
 }
 function layTripod() { G.tri = freshTri(); triCache = null; G.check = null; G.result = null; }
 // six scouts, two to a leg
@@ -1402,11 +1505,11 @@ function drawTripod(dt, current = true) {
     placeParallelLashing(g, p, [x, p[1], z], [0, 1, 0]);
     g.visible = !fadedOut(); coilProgress(g, TRI_STAKE_JOINTS[i].id);
   });
+  drawTriGuys();
   // the crew: they stand the bundle up, then hold the legs until the inspection
   if (!current) return;
   if (t.raising) {
-    const z = z0();
-    TRI_CREW.forEach((k, n) => { const side = n % 2 ? 1 : -1, v = [1.6, 2.9, 4.0][n >> 1]; people[k].set([side * 0.6, 0, z + v], side * -Math.PI / 2, 0.3, 0.7 + t.up * 1.6); });
+    triRaiseCrew();
     if (t.up > 0 || TRI_CREW.every(k => people[k].arrived())) t.up += dt / 1.4;
     if (t.up >= 1) { t.up = 1; t.raising = false; sfx.ok(); fun.landed(triApex()); setCameraMode('triView'); refreshAll(); }
   } else if (up && !G.check && !G.falling) {
@@ -1456,6 +1559,7 @@ function scoreTripod() {
     [{ id: 'TJ', correct: 'tripod', tri: 'head', uid: 'TJ' }, b.joints.TJ],
     ...BRACE_JOINTS.map(j => [{ ...j, tri: 'brace', uid: j.id }, braceOn(j.brace) ? t.joints[j.id] : null]),
     ...TRI_STAKE_JOINTS.map(j => [{ ...j, tri: 'stake', uid: j.id }, (t.stakes[j.stake] || 0) >= TRI_STAKE_HITS ? t.stakeJoints[j.id] : null]),
+    ...triGuyLegs().map(i => [{ id: TG(i), correct: 'guy', tri: 'guy', uid: TG(i) }, (t.guys.hits[TG(i)] || 0) >= ANCHOR_HITS ? t.guys.fix[TG(i)] : null]),
   ];
   const total = all.length, tied = all.filter(([, v]) => v).length, correct = all.filter(([j, v]) => v === j.correct).length;
   const nPoles = 6;
@@ -1480,9 +1584,14 @@ function triStatus(nPoles, nJ) {
     case 'build': return `רגליים ${nPoles}/3 · כפיתה סביב שלוש הרגליים ${nJ}/1` + (LV.free ? (G.armed ? ' · <b>הקישו על קו בשרטוט</b> כדי להניח את הרגל' : nPoles === 3 && nJ ? ' · הכול כפות: <b>הקישו על החצובה</b> כדי להקים אותה' : ' · בחרו אורך בערימה') : '');
     case 'spread': {
       if (t.raising) return 'הצוות מקים את החצובה…';
-      if (t.up < 1) return 'שישה צופים מקימים את החצובה, שניים לכל רגל';
+      if (t.up < 1) {
+        const L = triGuyLegs(), g = t.guys, top = L.filter(i => g.top[TG(i)]).length, hit = L.filter(i => (g.hits[TG(i)] || 0) >= ANCHOR_HITS).length;
+        if (top < L.length || hit < L.length) return `יתרים על הרגליים ${top}/${L.length} · רבזים ${hit}/${L.length} · קושרים יתר לכל רגל במקום של כפיתת החצובה, ודופקים לו רבז`;
+        return 'היתרים הקדמיים מושכים והאחוריים מייצבים: מקימים את החצובה';
+      }
       const st = triState();
       if (triLoose()) return `גובה הראש <b>${st.height.toFixed(1)} מ׳</b> · בין הרגליים <b>${st.apart.map(d => d.toFixed(1)).join(' / ')}</b> מ׳ · גוררים כל רגל לאן שרוצים`;
+      if (feetOnPlan() && !triGuysFixed()) return `הרגליים במקומן. קיבוע היתרים ${triGuyLegs().filter(i => t.guys.fix[TG(i)]).length}/${triGuyLegs().length}: הקישו על כל רבז`;
       if (feetOnPlan()) return `הרגליים במקומן: <b>${apartText()}</b>, הראש בגובה <b>${st.height.toFixed(1)} מ׳</b>`;
       return `בין הרגליים <b>${st.apart.map(d => d.toFixed(1)).join(' / ')}</b> מ׳, צריך <b>${triSpec().apart.map(d => d.toFixed(1)).join(' / ')}</b> · גוררים כל רגל אל העיגול שלה`;
     }
@@ -1901,7 +2010,7 @@ function startWheelSim() {
   TW.mu = 0; TW.iterations = 3;
   eachKlaf(k => {
     const t = k.tri;
-    t.sim = new TripodSim({ feet: t.feet, lens: triLens(), braces: t.braces, joints: t.joints, stakes: t.stakes, stakeJoints: t.stakeJoints, spec: triSpec(), world: TW });
+    t.sim = new TripodSim({ feet: t.feet, lens: triLens(), braces: t.braces, joints: t.joints, stakes: t.stakes, stakeJoints: t.stakeJoints, spec: triSpec(), world: TW, guys: triSimGuys() });
   });
   W.triWorld = TW;
   const heads = G.klafim.map(k => k.tri.sim.legs[1].head);
@@ -2083,6 +2192,7 @@ function jointLabel(t) {
   if (t.kind === 'mjoint' || t.kind === 'mlashed') return MAST_JOINTS.find(q => q.id === t.id).he;
   if (t.kind === 'tsj' || t.kind === 'tsjd') return `${TRI_SLOTS[TRI_STAKE_JOINTS.find(q => q.id === t.id).leg].he} אל הבז״נט`;
   if (t.kind === 'guyTie') return GUYS.find(g => g.id === t.id).he + ' אל הבז״נט';
+  if (t.kind === 'tguyTie') return `היתר של ה${triLegName(+t.id.slice(2) - 1)} אל הרבז`;
   if (t.kind.startsWith('stake')) { const sj = STAKE_JOINTS.find(s => s.id === t.id); return `${slotById(sj.leg).he} אל הבז״נט`; }
   const j = JOINTS.find(q => q.id === t.id);
   const name = id => slotById(id).he.replace(/ \(.*\)/, '');
@@ -2095,7 +2205,7 @@ function correctFor(t) {
   if (t.kind === 'wjoint' || t.kind === 'wlashed') return rigJoint(t.id).correct;
   if (t.kind === 'mjoint' || t.kind === 'mlashed') return 'square';
   if (t.kind === 'tsj' || t.kind === 'tsjd') return 'parallel';
-  if (t.kind === 'guyTie') return 'guy';
+  if (t.kind === 'guyTie' || t.kind === 'tguyTie') return 'guy';
   if (t.kind.startsWith('stake')) return STAKE_JOINTS.find(s => s.id === t.id).correct;
   return JOINTS.find(j => j.id === t.id).correct;
 }
@@ -2103,10 +2213,10 @@ function openPicker(t, x, y) {
   picker.target = t;
   const el = picker.el;
   el.hidden = false;
-  const cur = t.kind === 'lashed' ? G.build.joints[t.id] : t.kind === 'stakeLashed' ? G.build.stakeJoints[t.id] : t.kind === 'clashed' ? G.cube.build.joints[t.id] : t.kind === 'blashed' ? G.tri.joints[t.id] : t.kind === 'tsjd' ? G.tri.stakeJoints[t.id] : t.kind === 'slashed' ? G.seat.build.joints[t.id] : t.kind === 'mlashed' ? G.seat.mastJoints[t.id] : t.kind === 'wlashed' ? G.wheel.build.joints[t.id] : null;
+  const cur = t.kind === 'lashed' ? G.build.joints[t.id] : t.kind === 'stakeLashed' ? G.build.stakeJoints[t.id] : t.kind === 'clashed' ? G.cube.build.joints[t.id] : t.kind === 'blashed' ? G.tri.joints[t.id] : t.kind === 'tsjd' ? G.tri.stakeJoints[t.id] : t.kind === 'slashed' ? G.seat.build.joints[t.id] : t.kind === 'mlashed' ? G.seat.mastJoints[t.id] : t.kind === 'wlashed' ? G.wheel.build.joints[t.id] : t.kind === 'tguyTie' ? G.tri.guys.fix[t.id] : null;
   $('picker-title').textContent = (cur ? 'החלפת כפיתה · ' : 'בחרו כפיתה · ') + jointLabel(t);
   const opts = $('picker-opts'); opts.innerHTML = '';
-  for (const id of t.kind === 'guyTie' ? GUY_LASHING_ORDER : LASHING_ORDER) {
+  for (const id of t.kind === 'guyTie' || t.kind === 'tguyTie' ? GUY_LASHING_ORDER : LASHING_ORDER) {
     const btn = document.createElement('button');
     btn.type = 'button'; btn.dataset.type = id; btn.className = id === cur ? 'cur' : '';
     btn.innerHTML = lashIcon[id] + `<span>${LASHINGS[id].he}</span>`;
@@ -2129,7 +2239,7 @@ function chooseLashing(type) {
   const t = picker.target; if (!t || closeup) return;
   const b = G.build;
   closePicker();
-  const fresh = t.kind === 'joint' || t.kind === 'cjoint' || t.kind === 'guyTie' || t.kind === 'stakeJoint' || t.kind === 'bjoint' || t.kind === 'tsj' || t.kind === 'sjoint' || t.kind === 'mjoint' || t.kind === 'wjoint';
+  const fresh = t.kind === 'joint' || t.kind === 'cjoint' || t.kind === 'guyTie' || t.kind === 'tguyTie' || t.kind === 'stakeJoint' || t.kind === 'bjoint' || t.kind === 'tsj' || t.kind === 'sjoint' || t.kind === 'mjoint' || t.kind === 'wjoint';
   if (fresh && ropeLeft() <= 0) return flashHint('<b>נגמרו החבלים.</b> אפשר להתיר כפיתה מיותרת כדי לקבל חבל בחזרה');
   const tie = () => {
     if (t.kind === 'joint' || t.kind === 'lashed') {
@@ -2148,6 +2258,8 @@ function chooseLashing(type) {
       G.wheel.build.joints[t.id] = type;
     } else if (t.kind === 'tsj' || t.kind === 'tsjd') {
       G.tri.stakeJoints[t.id] = type;
+    } else if (t.kind === 'tguyTie') {
+      G.tri.guys.fix[t.id] = type;
     } else if (t.kind === 'guyTie') {
       b.guyTies[t.id] = type;
       G.sim?.tieGuy(t.id);
@@ -2437,8 +2549,8 @@ const poleLeft = len => LV.free ? Infinity : (pileStock().find(([l]) => l === r1
 const countTrue = o => Object.values(o).filter(Boolean).length;
 function ropeTotal() {
   if (LV.free) return Infinity; // free build: rope as needed
-  if (LV.tripod) return TRI_JOINTS.length + BRACE_JOINTS.length + TRI_STAKE_JOINTS.length + (LV.ropeSpare ?? 2);
-  const klafJ = LV.klafim.reduce((a, k) => a + (k.kind === 'tripod' ? TRI_JOINTS.length + BRACE_JOINTS.length + TRI_STAKE_JOINTS.length : (k.plan?.joints ?? JOINTS).length + STAKE_JOINTS.length + GUYS.length), 0);
+  if (LV.tripod) return TRI_JOINTS.length + BRACE_JOINTS.length + TRI_STAKE_JOINTS.length + 3 + (LV.ropeSpare ?? 2);
+  const klafJ = LV.klafim.reduce((a, k) => a + (k.kind === 'tripod' ? TRI_JOINTS.length + BRACE_JOINTS.length + TRI_STAKE_JOINTS.length + (k.tri?.twin ? 4 : 3) : (k.plan?.joints ?? JOINTS).length + STAKE_JOINTS.length + GUYS.length), 0);
   const seatJ = LV.carousel ? SEAT.joints.length + MAST_JOINTS.length + HANG_ROPES.length + 1 : LV.wheel ? RIG.joints.length + SEAT_ROPES.length : 0;
   return klafJ + (LV.cube ? LV.cube.joints.length : 0) + seatJ + (LV.ropeSpare ?? 2);
 }
@@ -2446,7 +2558,7 @@ function ropeUsed() {
   let n = 0;
   for (const k of G.klafim) n += countTrue(k.build.joints) + countTrue(k.build.stakeJoints) + countTrue(k.build.guyTies);
   if (G.cube) n += countTrue(G.cube.build.joints);
-  for (const k of G.klafim) if (k.tri) n += countTrue(k.tri.joints) + countTrue(k.tri.stakeJoints);
+  for (const k of G.klafim) if (k.tri) n += countTrue(k.tri.joints) + countTrue(k.tri.stakeJoints) + countTrue(k.tri.guys.fix);
   if (G.seat) n += countTrue(G.seat.build.joints) + countTrue(G.seat.mastJoints) + countTrue(G.seat.ropes) + (G.seat.pivot ? 1 : 0);
   if (G.wheel) n += countTrue(G.wheel.build.joints) + countTrue(G.wheel.ropes);
   return n;
@@ -2751,7 +2863,7 @@ function refreshActions() {
   if (triOn()) {
     if (G.stage === 'build' && stageDone('build')) go(nextLabel());
     if (G.stage === 'spread' && G.tri.up <= 0 && !G.tri.raising) add('מקימים את החצובה', raiseTripod);
-    if (G.stage === 'spread' && G.tri.up >= 1 && feetOnPlan()) go('המשך לחיזוקים');
+    if (G.stage === 'spread' && G.tri.up >= 1 && feetOnPlan() && triGuysFixed()) go('המשך לחיזוקים');
     if (G.stage === 'brace') go(nextLabel());
     if (G.stage === 'check' && !G.check) add('קוראים למדריך למסדר', runCheck);
     return;
@@ -2877,7 +2989,7 @@ function startCheckFor() {
   if (triOn()) {
     const t = G.tri;
     rec.length = 0;
-    t.sim = new TripodSim({ feet: t.feet, lens: triLens(), braces: t.braces, joints: t.joints, stakes: t.stakes, stakeJoints: t.stakeJoints });
+    t.sim = new TripodSim({ feet: t.feet, lens: triLens(), braces: t.braces, joints: t.joints, stakes: t.stakes, stakeJoints: t.stakeJoints, spec: triSpec(), guys: triSimGuys() });
     G.check = { t: 0, running: true, label: 'כולם עוזבים…', pushes: TRI_PUSHES, load: [9, 11.5], end: 12.2 };
   } else {
     G.sim.letGo();
@@ -3137,8 +3249,9 @@ function score() {
       all.push([{ id: 'TJ', correct: 'tripod', tri: 'head', klaf: i, uid: `${i}:TJ` }, b.joints.TJ]);
       for (const j of BRACE_JOINTS) all.push([{ ...j, tri: 'brace', klaf: i, uid: `${i}:${j.id}` }, t.up >= 1 && braceOn(j.brace) ? t.joints[j.id] : null]);
       for (const j of TRI_STAKE_JOINTS) all.push([{ ...j, tri: 'stake', klaf: i, uid: `${i}:${j.id}` }, (t.stakes[j.stake] || 0) >= TRI_STAKE_HITS ? t.stakeJoints[j.id] : null]);
-      polesOk += LEG_IDS.filter((id, n) => b.poles[id] && Math.abs(b.poles[id].length - sp.slots[n].length) < 0.05).length + BRACES.filter(q => t.braces[q.id] && Math.abs(t.braces[q.id].length - sp.braceLengths[q.id]) < 0.05).length;
-      nPoles += 6;
+      for (const g of triGuyLegs()) all.push([{ id: TG(g), correct: 'guy', tri: 'guy', klaf: i, uid: `${i}:${TG(g)}` }, (t.guys.hits[TG(g)] || 0) >= ANCHOR_HITS ? t.guys.fix[TG(g)] : null]);
+      polesOk += sp.slots.filter(q => b.poles[q.id] && Math.abs(b.poles[q.id].length - q.length) < 0.05).length + BRACES.filter(q => t.braces[q.id] && Math.abs(t.braces[q.id].length - sp.braceLengths[q.id]) < 0.05).length;
+      nPoles += sp.slots.length + 3;
       return;
     }
     for (const j of JOINTS) all.push([{ ...j, klaf: i, uid: `${i}:${j.id}` }, b.joints[j.id]]);
@@ -3333,6 +3446,7 @@ $('app').addEventListener('pointerdown', () => { if (parade && parade.t > 0.3) e
 
 // where a lashing is, as the structure file names it: the drawing sheet and the height band
 function sheetOf(j) {
+  if (j.tri === 'guy') return 'מפת יתרים' + (LV.wheel ? ` (${LV.klafim[j.klaf].he})` : '');
   if (LV.wheel && j.tri) return `שרטוט החצובה (${LV.klafim[j.klaf].he}), ${j.tri === 'head' ? 'בראש' : j.tri === 'stake' ? 'ליד הקרקע (רגל לבז״נט)' : 'בחיזוקים'}`;
   if (LV.tripod) return j.tri === 'head' ? 'שרטוט החצובה, בראש' : j.tri === 'stake' ? 'שרטוט החצובה, ליד הקרקע (רגל לבז״נט)' : 'שרטוט החצובה, בחיזוקים';
   if (j.seat) return j.rope ? 'שרטוט המושב, חבלי התלייה' : j.mast ? 'שרטוט המושב, התורן' : 'שרטוט המושב';
@@ -3457,6 +3571,7 @@ function makeDisplay(L) {
     for (const cfg of L.klafim) {
       const sp = cfg.tri, st = standing(sp.planFeet([cfg.centre[0], cfg.z0 + cfg.centre[1]], cfg.out), sp.legLengths, sp);
       st.legs.forEach((q, i) => { const o = headOffset(i, st); pole(add3(q.foot, o, 1), add3(q.top, o, 1)); });
+      if (st.twin) { const o = add3(headOffset(sp.twin.of, st), sp.twin.offset, 1); pole(add3(st.legs[sp.twin.of].foot, o, 1), add3(st.legs[sp.twin.of].top, o, 1)); }
       for (const b of BRACES) { const [a, c] = braceEnds(b, sp.braceLengths[b.id], st); pole(a, c); }
     }
     // the wheel in its forks, and its seat hanging from the bottom corner pole
@@ -4399,4 +4514,4 @@ restart();
 requestAnimationFrame(frame);
 
 // debug hook for automated tests
-window.__game = { get state() { return G; }, fun, balanceFor, finish, celebrate, get parade() { return parade; }, triGuide, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, score: () => score(), standAll: () => G.klafim.forEach((k, i) => { useKlaf(i); for (const q of STAKE_JOINTS) k.build.stakeJoints[q.id] = 'parallel'; for (const q of GUYS) k.build.guyTies[q.id] = 'guy'; k.raisedOnce = true; k.sim = new KlafSim(k.build, k.cfg); k.sim.standUp(); }), WHEEL, GOND, RIG, SEAT_ROPES, liftWheel: () => liftWheel(), liftWheelSeat: () => liftWheelSeat(), SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
+window.__game = { get state() { return G; }, triApex: () => triApex(), triGuyTop: i => triGuyTop(i), triLegSegs: s => triLegSegs(s), fun, balanceFor, finish, celebrate, get parade() { return parade; }, triGuide, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, score: () => score(), standAll: () => G.klafim.forEach((k, i) => { useKlaf(i); for (const q of STAKE_JOINTS) k.build.stakeJoints[q.id] = 'parallel'; for (const q of GUYS) k.build.guyTies[q.id] = 'guy'; k.raisedOnce = true; k.sim = new KlafSim(k.build, k.cfg); k.sim.standUp(); }), WHEEL, GOND, RIG, SEAT_ROPES, liftWheel: () => liftWheel(), liftWheelSeat: () => liftWheelSeat(), SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };

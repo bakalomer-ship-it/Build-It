@@ -30,11 +30,14 @@ const D = WH.apart, F = WH.forkHeight;
 // lying side by side with their tops together: the upright leg (shorter) in the middle
 function tri90() {
   const Lu = WH.uprightLength, Ll = WH.leanLength, top = Math.max(Lu, Ll);
-  const leg = (i, he, L) => ({ id: 't' + (i + 1), he, centre: [(i - 1) * 0.14, top - L / 2], dir: [0, 1], length: L, layer: 0, kind: 'v' });
-  const slots = [leg(0, 'רגל נוטה ימנית', Ll), leg(1, 'הרגל הזקופה', Lu), leg(2, 'רגל נוטה שמאלית', Ll)];
+  // Omer (11-21): four legs, two upright side by side and two leaning; laid side by side,
+  // the uprights in the middle (t4 is the second upright: it stands beside t2)
+  const leg = (id, he, u, L) => ({ id, he, centre: [u, top - L / 2], dir: [0, 1], length: L, layer: 0, kind: 'v' });
+  const slots = [leg('t1', 'רגל נוטה ימנית', -0.21, Ll), leg('t2', 'רגל זקופה ימנית', -0.07, Lu), leg('t3', 'רגל נוטה שמאלית', 0.21, Ll), leg('t4', 'רגל זקופה שמאלית', 0.07, Lu)];
   const joints = [{ id: 'TJ', a: 't1', b: 't3', all: slots.map(q => q.id), at: [0, top - WH.lashFromTop], correct: 'tripod' }];
   const spec = {
     slots, joints, lashV: top - WH.lashFromTop, lashFromTop: WH.lashFromTop, height: F, ninety: true,
+    twin: { id: 't4', of: 1, offset: [2 * r + 0.02, 0, 0] },
     // c: where the upright leg stands; out: -1 for the front tripod, +1 for the back one
     planFeet: (c, out = -1) => [[c[0] + WH.footSide, c[1] + out * WH.footOut], [c[0], c[1]], [c[0] - WH.footSide, c[1] + out * WH.footOut]],
   };
