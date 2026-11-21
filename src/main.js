@@ -27,7 +27,7 @@ import { sfx, buzz } from './sound.js';
 import { makeDecor } from './decor.js';
 import { makeFun } from './fun.js';
 import { makeBalance, BALANCE } from './balance.js';
-import { SPEED, FIX, MISSING, cubeMedals, FIX_PENALTY, rng, medalOf, MEDAL_HE, MEDAL_ICON, bestOf, recordChallenge } from './challenges.js';
+import { SPEED, FIX, MISSING, cubeMedals, FIX_PENALTY, rng, medalOf, MEDAL_HE, MEDAL_ICON, bestOf, recordChallenge, starsOfChallenge, recordStars, challengeStars } from './challenges.js';
 import { Actor, makeCrew, freeActors, CREW } from './crew.js';
 
 const $ = id => document.getElementById(id);
@@ -3700,7 +3700,8 @@ function finish() {
   G.endedAt = G.endedAt || performance.now();
   pushArrow.visible = false;
   const s = G.result = score();
-  if (LV.number) saveStars(LV.number, s.stars); // the cube challenge is not a level
+  // a challenge's stars are its own (Omer 11-21), a level's are the level's
+  if (G.challenge) recordStars(G.challenge, s.stars); else if (LV.number) saveStars(LV.number, s.stars);
   // the scouts use the structure first, and the stars light up as they do (Omer's מסדר idea)
   if (!G.paraded) { G.paraded = true; return celebrate(s, finish); }
   const extra = s.stars >= 2 ? (onWin?.(s) || '') : G.challenge ? '<p class="ch-note">באתגר הזמן נספר רק כשכל הכפיתות שבשרטוט כפותות.</p>' : '';
@@ -4004,7 +4005,11 @@ let memStars = loadStars();
 const starsOf = n => Math.max(memStars[n] || 0, loadStars()[n] || 0);
 // test builds for Omer: every level is open, so he never has to start from the beginning
 const ALL_LEVELS_OPEN = true;
-const unlocked = n => ALL_LEVELS_OPEN || n === 1 || starsOf(n - 1) >= 1;
+// Omer (11-21): from the carousel (level 4) on, a level also needs 5 stars earned in the levels before it
+const MIN_STARS_FROM = 4, MIN_STARS = 5;
+const starsBefore = n => LEVELS.filter(l => l.number < n).reduce((a, l) => a + starsOf(l.number), 0);
+const unlocked = n => ALL_LEVELS_OPEN || n === 1 || (starsOf(n - 1) >= 1 && (n < MIN_STARS_FROM || starsBefore(n) >= MIN_STARS));
+const lockText = n => starsOf(n - 1) < 1 ? `נפתח בכוכב אחד בשלב ${n - 1}` : `נפתח ב־${MIN_STARS} כוכבים בשלבים הקודמים (יש ${starsBefore(n)})`;
 // structures that come after the playable ones, shown on the path as coming soon
 const COMING = [];
 const ICONS = {
@@ -4035,7 +4040,7 @@ function showLevels() {
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'lvl-card' + (open ? '' : ' locked');
     b.innerHTML = `<span class="num">${l.number}</span>${ICONS[l.number] || ICONS.soon}<span class="nm">${l.name}</span>
-      ${open ? `<span class="st">${starRow(starsOf(l.number))}</span>` : `<span class="lock">נפתח בכוכב אחד בשלב ${l.number - 1}</span>`}`;
+      ${open ? `<span class="st">${starRow(starsOf(l.number))}</span>` : `<span class="lock">${lockText(l.number)}</span>`}`;
     if (open) b.addEventListener('click', () => playLevel(l.number));
     path.appendChild(b);
   }
@@ -4086,7 +4091,7 @@ $('btn-home').addEventListener('click', () => { closeModal(); showHome(); });
 $('btn-level').addEventListener('click', () => { closeModal(); showLevels(); });
 try { decor = makeDecor({
   scene, camera, controls, canvas, allOpen: ALL_LEVELS_OPEN,
-  stars: () => LEVELS.reduce((a, l) => a + starsOf(l.number), 0),
+  stars: () => LEVELS.reduce((a, l) => a + starsOf(l.number), 0) + challengeStars(),
   onExit: () => { camMode = null; showHome(); },
 }); } catch (e) { reportError(e); }
 $('home-decor').addEventListener('click', () => {
@@ -4249,8 +4254,12 @@ function fixCheck() {
   G.endedAt = performance.now();
   const sec = elapsed(), med = medalOf(sec, FIX[LV.number].medals);
   const best = recordChallenge(ch, sec);
+  // stars: found it all at the first call 3, at the second 2, later 1
+  const stars = ch.calls === 1 ? 3 : ch.calls === 2 ? 2 : 1;
+  recordStars(ch, stars);
   sfx.fanfare(); fun.confetti(med === 0 ? 90 : 50);
   showModal(`<div class="eyebrow">תקנו את המחנה</div>
+    <div class="stars">${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}</div>
     <h2>${med >= 0 ? `${MEDAL_ICON[med]} מדליית ${MEDAL_HE[med]}` : 'המחנה תקין!'}</h2>
     <p>המחנה תקין, ב־<b>${fmt(sec)}</b>${ch.penalty ? ` (כולל ${ch.penalty} שניות על בדיקות מוקדמות)` : ''}.</p>
     ${best ? '<p class="ch-best">שיא חדש!</p>' : `<p>השיא שלכם: ${fmt(bestOf(ch))}</p>`}`,
@@ -4269,10 +4278,10 @@ onWin = s => {
 function challengeRow(ch, label, sub) {
   const best = bestOf(ch), m = best != null ? medalOf(best, ch.kind === 'cube' ? cubeMedals(ch) : (ch.kind === 'speed' ? SPEED : FIX)[ch.level].medals) : -1;
   return `<button type="button" class="ch-row" data-k="${ch.kind}" data-l="${ch.level}"><span class="ch-nm">${label}</span><span class="ch-sub">${sub}</span>
-    <span class="ch-best">${best != null ? `${m >= 0 ? MEDAL_ICON[m] : ''} ${fmt(best)}` : 'עוד לא'}</span></button>`;
+    <span class="ch-best">${starsOfChallenge(ch) ? `<span class="ch-stars">${'★'.repeat(starsOfChallenge(ch))}${'☆'.repeat(3 - starsOfChallenge(ch))}</span> ` : ''}${best != null ? `${m >= 0 ? MEDAL_ICON[m] : ''} ${fmt(best)}` : 'עוד לא'}</span></button>`;
 }
 function showChallenges() {
-  showModal(`<div class="eyebrow">אתגרים קצרים</div><h2>אתגרים</h2>
+  showModal(`<div class="eyebrow">אתגרים קצרים · כל אתגר נותן עד 3 כוכבים לקניית קישוטים</div><h2>אתגרים</h2>
     <div class="ch-grid">
       ${challengeRow({ kind: 'cube', level: 0 }, 'קובייה לא שלמה', 'משלימים ועוברים מסדר')}
       ${Object.entries(MISSING).map(([l, m]) => challengeRow({ kind: 'cube', level: +l }, m.he, m.sub)).join('')}

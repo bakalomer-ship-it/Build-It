@@ -1,8 +1,8 @@
 // Decorating the plaza (Omer, 2026-11-17). Scout things made the way scouts make
-// them, from poles and rope, which the player earns with stars and places on the
-// plaza by dragging. Stars are never spent: each item opens when the player's star
-// total reaches its number. The tribe's own flag (name, emblem, colours) flies on
-// the mast, and its name is on the gate and the totem.
+// them, from poles and rope, which the player buys with stars (Omer 11-21: stars are
+// spent, earned in the levels and the challenges) and places on the plaza by dragging.
+// The tribe's own flag (name, emblem, colours) flies on the mast, and its name is on
+// the gate and the totem.
 // Nothing may stand on the building ground or where finished structures are kept.
 import * as THREE from 'three';
 import { PLAZA } from './scene.js';
@@ -346,7 +346,7 @@ function totem(tick, tribe) {
   return g;
 }
 
-// The catalogue. stars: the star total that opens it. r: about how much ground it takes.
+// The catalogue. stars: its price in stars (Omer 11-21: bought with stars). r: about how much ground it takes.
 // many: it can be put on the plaza more than once.
 export const ITEMS = [
   { id: 'flag', he: 'דגל השבט', stars: 1, r: 2.3, make: mast, tribe: true },
@@ -389,7 +389,19 @@ function freeSpot(x, z, r, others) {
 
 // ---------------- the plaza's decoration: kept on this device ----------------
 const KEY = 'buildit.plaza';
-function load() { try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && Array.isArray(d.placed)) return { tribe: { ...DEFAULT_TRIBE, ...d.tribe }, placed: d.placed.filter(p => item(p.id)) }; } catch { /* no storage here */ } return { tribe: { ...DEFAULT_TRIBE }, placed: [] }; }
+// owned: how many of each item the player has bought; spent: stars spent on them (Omer 11-21:
+// items are bought with stars). Things already on the plaza from before count as owned.
+function load() {
+  try {
+    const d = JSON.parse(localStorage.getItem(KEY));
+    if (d && Array.isArray(d.placed)) {
+      const placed = d.placed.filter(p => item(p.id)), owned = { ...(d.owned || {}) };
+      if (!d.owned) for (const p of placed) owned[p.id] = (owned[p.id] || 0) + 1;
+      return { tribe: { ...DEFAULT_TRIBE, ...d.tribe }, placed, owned, spent: d.spent || 0 };
+    }
+  } catch { /* no storage here */ }
+  return { tribe: { ...DEFAULT_TRIBE }, placed: [], owned: {}, spent: 0 };
+}
 function save(d) { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch { /* private mode: lasts this visit */ } }
 
 // ctx: { scene, camera, controls, canvas, stars(), allOpen, onExit() }
@@ -432,15 +444,18 @@ export function makeDecor(ctx) {
     const lbl = new THREE.Mesh(new THREE.PlaneGeometry(5, 0.9), new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, map: textTexture(600, 108, (c, W, H) => { c.clearRect(0, 0, W, H); c.fillStyle = 'rgba(200,69,44,.9)'; c.font = '800 64px Rubik, Arial'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.direction = 'rtl'; c.fillText('שטח הבנייה', W / 2, H / 2); }) }));
     lbl.rotation.set(-Math.PI / 2, 0, Math.PI); lbl.position.set(0, 0.03, KEEP_CLEAR.build.z0 + 0.8); zone.add(lbl);
   }
-  let active = false, sel = null, drag = null;
-  const stars = () => ctx.stars();
-  const open = it => ctx.allOpen || stars() >= it.stars;
+  let active = false, sel = null, drag = null, buying = null;
+  // stars to spend: every star earned (levels and challenges) less what was spent on items
+  const stars = () => Math.max(0, ctx.stars() - data.spent);
+  const onPlaza = it => data.placed.filter(p => p.id === it.id).length;
+  const spare = it => (data.owned[it.id] || 0) - onPlaza(it); // bought and not on the plaza
   function renderList() {
-    $('dc-stars').textContent = `★ ${stars()}` + (ctx.allOpen ? ' · גרסת בדיקה: הכול פתוח' : '');
+    $('dc-stars').textContent = `★ ${stars()} לקנייה`;
     $('dc-list').innerHTML = ITEMS.map(it => {
-      const on = data.placed.some(p => p.id === it.id), ok = open(it);
-      const state = !ok ? `<span class="dc-lock">★ ${it.stars}</span>` : on && !it.many ? '<span class="dc-on">על המגרש</span>' : '<span class="dc-add">+</span>';
-      return `<button type="button" class="dc-item${ok ? '' : ' locked'}${on && !it.many ? ' placed' : ''}" data-id="${it.id}"><span class="dc-nm">${it.he}</span>${state}</button>`;
+      const on = onPlaza(it) > 0, has = spare(it) > 0, owned = (data.owned[it.id] || 0) > 0;
+      const canBuy = stars() >= it.stars;
+      const state = has ? `<span class="dc-add">+ ${spare(it) > 1 ? '×' + spare(it) : ''}</span>` : on && !it.many ? '<span class="dc-on">על המגרש</span>' : `<span class="dc-lock">★ ${it.stars}</span>`;
+      return `<button type="button" class="dc-item${has || owned && !it.many || canBuy ? '' : ' locked'}${on && !it.many ? ' placed' : ''}" data-id="${it.id}"><span class="dc-nm">${it.he}</span>${state}</button>`;
     }).join('');
   }
   function hint(t) { $('dc-hint').innerHTML = t; }
@@ -456,16 +471,22 @@ export function makeDecor(ctx) {
     hint('גררו כדי להזיז. אי אפשר להניח על <b>שטח הבנייה</b> המסומן באדום');
   }
   function add(it) {
-    if (!open(it)) return hint(`<b>${it.he}</b> נפתח כשיש לכם ${it.stars} כוכבים. כוכבים מקבלים במבנים של המגרש שלי`);
     const have = data.placed.find(p => p.id === it.id);
     if (have && !it.many) { select(have.uid); return; }
+    if (spare(it) <= 0) {
+      // buy it: stars are spent
+      if (stars() < it.stars) return hint(`<b>${it.he}</b> עולה ★ ${it.stars}, ויש לכם ★ ${stars()}. כוכבים מקבלים בשלבים של המגרש שלי ובאתגרים`);
+      if (!buying || buying !== it.id) { buying = it.id; return hint(`<b>לקנות ${it.he} ב־★ ${it.stars}?</b> הקישו שוב כדי לקנות`); }
+      buying = null;
+      data.spent += it.stars; data.owned[it.id] = (data.owned[it.id] || 0) + 1;
+    }
     // the free spot nearest to where the camera looks
     const t = controls.target; let best = null;
     for (let r = 0; r < 16 && !best; r += 0.8) for (let a = 0; a < 24 && !best; a++) {
       const x = Math.round((t.x + Math.cos(a / 24 * Math.PI * 2) * r) * 10) / 10, z = Math.round((t.z + Math.sin(a / 24 * Math.PI * 2) * r) * 10) / 10;
       if (freeSpot(x, z, it.r, data.placed)) best = { x, z };
     }
-    if (!best) return hint('<b>אין מקום פנוי למה שבחרתם.</b> הזיזו או הסירו פריטים אחרים');
+    if (!best) { save(data); renderList(); return hint('<b>אין מקום פנוי למה שבחרתם.</b> הזיזו או הסירו פריטים אחרים. מה שקניתם נשמר אצלכם'); }
     const p = { id: it.id, uid: ++uidN, x: best.x, z: best.z, yaw: 0 };
     data.placed.push(p); build(p); save(data); renderList(); select(p.uid);
     if (it.tribe && !data.tribe.name) editTribe();
