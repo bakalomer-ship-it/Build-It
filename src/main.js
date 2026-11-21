@@ -3515,6 +3515,7 @@ function showHome() {
   try { drawPlaza(); } catch (e) { reportError(e); }
   const total = LEVELS.reduce((a, l) => a + starsOf(l.number), 0);
   $('home-stars').textContent = total ? `★ ${total} / ${LEVELS.length * 3}` : 'מתחילים מהקלף הראשון';
+  $('home-bar').style.width = `${Math.round(100 * total / (LEVELS.length * 3))}%`;
   $('levels').hidden = true; $('home').hidden = false;
 }
 function showLevels() {
@@ -3727,11 +3728,7 @@ function showChallenges() {
     </div>`, [['סגירה', () => { closeModal(); showHome(); }]]);
   document.querySelectorAll('.ch-row').forEach(b => b.addEventListener('click', () => playChallenge({ kind: b.dataset.k, level: +b.dataset.l })));
 }
-{
-  const grid = document.querySelector('.home-soon');
-  const tile = (id, name, sub) => { const b = Object.assign(document.createElement('button'), { type: 'button', id, className: 'soon open hot', innerHTML: `<b>${name}</b><span>${sub}</span>` }); grid.prepend(b); return b; };
-  tile('home-challenges', 'אתגרים', 'אתגר היום ועוד').addEventListener('click', showChallenges);
-}
+$('home-challenges').addEventListener('click', showChallenges);
 // a direct link to a level (?level=2) skips the home screen
 if (new URLSearchParams(location.search).get('level')) $('home').hidden = true; else showHome();
 
