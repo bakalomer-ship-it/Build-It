@@ -568,3 +568,12 @@ h1, h2, .lvl-name, .hm-name, .ft-txt b, .tool, .lvl-card .nm, .tray-title, .rp-t
   .lvl-card { padding: 12px 8px 10px; }
   .lvl-card svg { width: 56px; height: 40px; }
 }
+
+/* free build: the handle that drags a whole structure over the plaza */
+#move-icon { position: fixed; z-index: 29; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 6px;
+  padding: 7px 13px 7px 10px; border-radius: 999px; border: 0; cursor: grab; touch-action: none; user-select: none;
+  background: rgba(46, 38, 26, .88); color: var(--cream, #f6ead0); font: 600 14px var(--display, Rubik), Arial, sans-serif;
+  box-shadow: 0 3px 0 rgba(0,0,0,.35), 0 6px 14px rgba(0,0,0,.25); }
+#move-icon[hidden] { display: none; }
+#move-icon .arrow { font-size: 20px; line-height: 1; }
+#move-icon:active { cursor: grabbing; }
