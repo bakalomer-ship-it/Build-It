@@ -9,7 +9,7 @@
 <title>בונים מחנאות</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Rubik:wght@400;500;700;800&display=swap">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 { "imports": { "three": "./lib/three.module.min.js", "three/addons/controls/OrbitControls.js": "./lib/OrbitControls.js" } }
@@ -98,26 +98,42 @@
   </div>
 
   <section id="home" class="screen" aria-label="מסך הבית">
-    <div class="home-title">
-      <div class="logo-knot" aria-hidden="true"></div>
-      <h1>בונים מחנאות</h1>
-      <p>כופתים סנדות, מרימים קלפים ובונים מבנים אמיתיים</p>
-    </div>
+    <header class="home-head">
+      <div class="logo-knot" aria-hidden="true"><svg viewBox="0 0 30 30" fill="none" stroke-linecap="round"><path d="M8 27L22 3M22 27L8 3" stroke="#fff7e6" stroke-width="3.4"/><path d="M11 13.5l8 3M11 16.5l8-3M10.5 15h9" stroke="#3b2311" stroke-width="2"/></svg></div>
+      <div><h1>בונים מחנאות</h1><p>כופתים סנדות, מרימים קלפים ובונים מבנים אמיתיים</p></div>
+    </header>
     <div class="home-grid">
       <button type="button" class="home-main" id="home-plaza">
-        <span class="hm-eyebrow">משחק</span>
-        <span class="hm-name">המגרש שלי</span>
-        <span class="hm-sub">בונים מבנה אחרי מבנה על הרחבה האישית</span>
-        <span class="hm-stars" id="home-stars"></span>
+        <span class="hm-art"><svg viewBox="0 0 300 120" aria-hidden="true">
+          <ellipse cx="150" cy="112" rx="160" ry="22" fill="#e2cfa4"/>
+          <g stroke="#e2cfa4" stroke-width="1.5" opacity=".9"><path d="M20 104h260M45 96h210" stroke-dasharray="3 7"/></g>
+          <g stroke-linecap="round">
+            <path d="M68 108L104 22M140 108L104 22M104 22v86" stroke="#7f522d" stroke-width="6"/>
+            <path d="M80 80h48" stroke="#9a683b" stroke-width="4.5"/>
+            <circle cx="104" cy="29" r="5" fill="#c65a28"/>
+            <path d="M166 108V30M232 108V30M158 38h82M158 96h82M166 96L232 38M166 38l66 58" stroke="#7f522d" stroke-width="6"/>
+            <g fill="#c65a28"><circle cx="166" cy="38" r="4.5"/><circle cx="232" cy="38" r="4.5"/><circle cx="166" cy="96" r="4.5"/><circle cx="232" cy="96" r="4.5"/><circle cx="199" cy="67" r="4.5"/></g>
+            <path d="M258 108V22" stroke="#553319" stroke-width="3.5"/>
+            <path d="M258 24h26l-6 9 6 9h-26z" fill="#5a6e32"/>
+          </g>
+        </svg></span>
+        <span class="hm-text">
+          <span class="hm-eyebrow">המשחק המרכזי</span>
+          <span class="hm-name">המגרש שלי</span>
+          <span class="hm-sub">בונים מבנה אחרי מבנה על הרחבה האישית</span>
+          <span class="hm-progress"><span class="hm-bar"><i id="home-bar"></i></span><span class="hm-stars" id="home-stars"></span></span>
+        </span>
+        <span class="hm-cta">לבנות ←</span>
       </button>
-      <div class="home-soon">
-        <button type="button" class="soon open" id="home-free"><b>בנייה חופשית</b><span>ארגז חול: מתכננים קלף משלכם</span></button>
-        <button type="button" class="soon open" id="home-sketch"><b>בנייה לפי שרטוט</b><span>מעלים PDF או תמונה</span></button>
-        <input type="file" id="sketch-file" accept="application/pdf,.pdf,image/*" hidden>
-        <button type="button" class="soon open" id="home-decor"><b>קישוט המגרש</b><span>פריטים בכוכבים</span></button>
-        <div class="soon"><b>ביקור במגרשים של חברים</b><span>בקרוב</span></div>
-        <div class="soon"><b>תחרויות</b><span>בקרוב</span></div>
-        <div class="soon"><b>בנייה בצוות</b><span>בקרוב</span></div>
+      <div class="home-side">
+        <div class="home-feats">
+        <button type="button" class="feat c-ember" id="home-challenges"><span class="ft-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 13.5V9.5M9.5 3h5M18.5 6.5l1.5-1.5"/></svg></span><span class="ft-txt"><b>אתגרים</b><small>נגד השעון ותיקון מחנה</small></span></button>
+        <button type="button" class="feat c-olive" id="home-free"><span class="ft-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 21V3M18 21V3M3.5 6h17M3.5 17.5h17M6 17.5L18 6"/></svg></span><span class="ft-txt"><b>בנייה חופשית</b><small>ארגז חול: מתכננים קלף משלכם</small></span></button>
+        <button type="button" class="feat c-blue" id="home-sketch"><span class="ft-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2.5h8.5L19 7v14.5H6z"/><path d="M14.5 2.5V7H19M9 12h7M9 16h4.5"/></svg></span><span class="ft-txt"><b>בנייה לפי שרטוט</b><small>מעלים PDF או תמונה</small></span></button>
+          <input type="file" id="sketch-file" accept="application/pdf,.pdf,image/*" hidden>
+        <button type="button" class="feat c-wood" id="home-decor"><span class="ft-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 21.5V3"/><path d="M6 4h11.5l-2.8 4 2.8 4H6"/></svg></span><span class="ft-txt"><b>קישוט המגרש</b><small>דגל השבט ופריטים בכוכבים</small></span></button>
+        </div>
+        <div class="home-soon"><span class="soon-lbl">בקרוב</span><span class="chipx"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 20L12 4l9.5 16z"/><path d="M12 4v16M9.5 20l2.5-5 2.5 5"/></svg>ביקור אצל חברים</span><span class="chipx"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5h8v5.5a4 4 0 0 1-8 0z"/><path d="M8 5.5H5a3 3 0 0 0 3 4.5M16 5.5h3a3 3 0 0 1-3 4.5M12 13v4M8.5 20.5h7"/></svg>תחרויות</span><span class="chipx"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8.5" cy="8" r="3"/><circle cx="16.5" cy="9" r="2.5"/><path d="M3 20c.5-4 2.6-6 5.5-6s5 2 5.5 6M14.5 14.2c3.3-.6 5.7 1.4 6.3 5.3"/></svg>בנייה בצוות</span></div>
       </div>
     </div>
   </section>

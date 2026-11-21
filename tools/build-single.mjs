@@ -20,7 +20,7 @@ const css = readFileSync(join(root, 'style.css'), 'utf8');
 const html = readFileSync(join(root, 'index.html'), 'utf8');
 const body = html.slice(html.indexOf('<!--GAME-BODY-START-->'), html.indexOf('<!--GAME-BODY-END-->'));
 const page = `<title>בונים מחנאות</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Rubik:wght@400;500;700;800&display=swap">
 <style>${css}</style>
 <div dir="rtl" lang="he">${body}</div>
 <script>${js}</script>
