@@ -16,7 +16,7 @@ import { LEVELS, CUBE_LEVEL, CUBE4_LEVEL } from './levels.js';
 import { loadSketch } from './sketch.js';
 import { CAR, SEAT, SEAT_C, MAST, MAST_JOINTS, HANG_ROPES, PIVOT, CarouselSim, CAR_TUNING, mastReaches, mastTopY, seatY, cornerAt, KLAF_XS } from './carousel.js';
 import { WH, WHEEL, GOND, RIG, SEAT_ROPES, WheelSim, WH_TUNING, AXLE_Y, WHEEL_DROP, SEAT_DROP, SEAT_C as WSEAT_C, SEAT_Y as WSEAT_Y, ropeTop, ropeFoot, rigReachable, WHEEL_Z, TRI90 } from './wheel.js';
-import { TRI, TRI_SLOTS, TRI_JOINTS, LEG_IDS, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, TRI_TUNING, TripodSim, startFeet, planFeet, standing, braceReaches, fitsPlan, setLashFor, TRI_SPEC } from './tripod.js';
+import { braceLeg, TRI, TRI_SLOTS, TRI_JOINTS, LEG_IDS, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, TRI_TUNING, TripodSim, startFeet, planFeet, standing, braceReaches, fitsPlan, setLashFor, TRI_SPEC } from './tripod.js';
 import { World } from './physics.js';
 import {
   R, makeRenderer, makeWorld, makeBlueprintMesh, drawBlueprint, BP, makePoleMesh, placeCylinder, makeSideSheet, drawSideSheet, makeTopSheet, drawTopSheet, POLE_LOOK,
@@ -153,7 +153,7 @@ const triSpec = () => K()?.cfg.tri || TRI_SPEC;
 const triPlanFeet = () => triSpec().planFeet(triCentre(), K()?.cfg.out);
 // the distances between the feet, in words
 function apartText(sp = triSpec()) {
-  if (sp.ninety) return `${sp.apart[0].toFixed(2)} מ׳ מהרגל הזקופה לכל רגל נוטה, ו־${sp.apart[2].toFixed(1)} מ׳ בין שתי הנוטות`;
+  if (sp.ninety) return `כפות הרגליים בריבוע של ${sp.square[1].toFixed(1)} מ׳`;
   return `${sp.apart[0].toFixed(1)} מ׳ בין כל שתי רגליים`;
 }
 // a klaf of free build (designed on the grid)
@@ -239,8 +239,8 @@ triSheets.forEach(m => curGroup.add(m));
 const triGuide = (() => {
   const g = new THREE.Group(); g.visible = false;
   const lineMat = new THREE.MeshBasicMaterial({ color: 0x2f63b0, transparent: true, opacity: 0.85, depthWrite: false });
-  g.userData.edges = [0, 1, 2].map(() => { const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.07), lineMat); m.rotation.x = -Math.PI / 2; g.add(m); return m; });
-  g.userData.rings = [0, 1, 2].map(() => {
+  g.userData.edges = [0, 1, 2, 3].map(() => { const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.07), lineMat); m.rotation.x = -Math.PI / 2; g.add(m); return m; });
+  g.userData.rings = [0, 1, 2, 3].map(() => {
     const m = new THREE.Mesh(new THREE.RingGeometry(0.26, 0.34, 40), new THREE.MeshBasicMaterial({ color: 0x2f63b0, transparent: true, opacity: 0.9, depthWrite: false }));
     m.rotation.x = -Math.PI / 2; g.add(m); return m;
   });
@@ -255,7 +255,7 @@ const triGuide = (() => {
     const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
     return (texs[text] = tex);
   };
-  g.userData.labels = [0, 1, 2].map(() => { const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: g.userData.texFor(`${TRI.footApart.toFixed(1)} מ׳`), depthTest: false })); m.scale.set(1.0, 0.38, 1); m.renderOrder = 5; g.add(m); return m; });
+  g.userData.labels = [0, 1, 2, 3].map(() => { const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: g.userData.texFor(`${TRI.footApart.toFixed(1)} מ׳`), depthTest: false })); m.scale.set(1.0, 0.38, 1); m.renderOrder = 5; g.add(m); return m; });
   g.renderOrder = 2;
   scene.add(g);
   return g;
@@ -265,16 +265,31 @@ function drawTriGuide() {
   triGuide.visible = on; if (!on) return;
   const spots = triPlanFeet(), feet = G.tri.feet, ok = feetOnPlan(), sp = triSpec();
   const { edges, rings, labels } = triGuide.userData, y = 0.03;
-  spots.forEach((p, i) => {
-    const q = spots[(i + 1) % 3], dx = q[0] - p[0], dz = q[1] - p[1], L = Math.hypot(dx, dz);
+  // a four-legged tripod: its square, right side, wheel side, left side, back (the fourth foot follows the others)
+  const sq = sp.square && spots.length === 3 ? [spots[0], spots[1], [2 * triCentre()[0] - spots[1][0], spots[1][1]], spots[2]] : null;
+  edges[3].visible = labels[3].visible = !!sq;
+  if (sq) sq.forEach((p, i) => {
+    const q = sq[(i + 1) % 4], dx = q[0] - p[0], dz = q[1] - p[1], L = Math.hypot(dx, dz);
     const e = edges[i]; e.position.set((p[0] + q[0]) / 2, y, (p[1] + q[1]) / 2); e.scale.x = L - 0.68; e.rotation.z = -Math.atan2(dz, dx);
-    const c = triCentre(), mx = (p[0] + q[0]) / 2, mz = (p[1] + q[1]) / 2, o = norm2(mx - c[0], mz - c[1]);
+    const mx = (p[0] + q[0]) / 2, mz = (p[1] + q[1]) / 2, c = [(sq[0][0] + sq[2][0]) / 2, (sq[0][1] + sq[2][1]) / 2], o = norm2(mx - c[0], mz - c[1]);
     labels[i].position.set(mx + o[0] * 0.35, 0.2, mz + o[2] * 0.35);
-    const tx = triGuide.userData.texFor(`${(Math.round(sp.apart[i] * 100) / 100).toFixed(sp.ninety ? 2 : 1)} מ׳`); if (labels[i].material.map !== tx) { labels[i].material.map = tx; labels[i].material.needsUpdate = true; }
+    const tx = triGuide.userData.texFor(`${sp.square[i].toFixed(1)} מ׳`); if (labels[i].material.map !== tx) { labels[i].material.map = tx; labels[i].material.needsUpdate = true; }
+  });
+  spots.forEach((p, i) => {
+    if (!sq) {
+      const q = spots[(i + 1) % 3], dx = q[0] - p[0], dz = q[1] - p[1], L = Math.hypot(dx, dz);
+      const e = edges[i]; e.position.set((p[0] + q[0]) / 2, y, (p[1] + q[1]) / 2); e.scale.x = L - 0.68; e.rotation.z = -Math.atan2(dz, dx);
+      const c = triCentre(), mx = (p[0] + q[0]) / 2, mz = (p[1] + q[1]) / 2, o = norm2(mx - c[0], mz - c[1]);
+      labels[i].position.set(mx + o[0] * 0.35, 0.2, mz + o[2] * 0.35);
+      const tx = triGuide.userData.texFor(`${(Math.round(sp.apart[i] * 100) / 100).toFixed(sp.ninety ? 2 : 1)} מ׳`); if (labels[i].material.map !== tx) { labels[i].material.map = tx; labels[i].material.needsUpdate = true; }
+    }
     const on = Math.hypot(feet[i][0] - p[0], feet[i][1] - p[1]) < 0.05;
     rings[i].position.set(p[0], y, p[1]);
     rings[i].material.color.setHex(on ? 0x3f8a2e : 0xe0a93b);
   });
+  // the fourth foot's ring: it stands wherever its mirror leg's foot is
+  rings[3].visible = !!sq;
+  if (sq) { rings[3].position.set(sq[2][0], y, sq[2][1]); rings[3].material.color.copy(rings[1].material.color); }
   edges[0].material.color.setHex(ok ? 0x3f8a2e : 0x2f63b0);
 }
 // a lashing's coils (made the first time a joint needs them: free build has joints of its own)
@@ -391,8 +406,6 @@ const markerTex = {
   guy: ringTexture('#7fd0ff', '∞'),
   foot: ringTexture('#7fd0ff', '↔'),
   off: ringTexture('#ff8d8d', '✕'),
-  climb: ringTexture('#7fd0ff', '▲'),
-  harness: ringTexture('#ffc046', '⚲'),
 };
 const markerPool = [];
 function markerSprite(i) {
@@ -805,7 +818,7 @@ function collectTargets() {
     const s = markerSprite(k++);
     s.visible = true;
     s.position.set(...t.pos);
-    s.material.map = t.kind === 'hspot' ? markerTex.climb : t.kind === 'harness' ? markerTex.harness : t.kind === 'stake' || t.kind === 'anchor' || t.kind === 'tstake' || t.kind === 'tanchor' ? markerTex.stake : t.kind === 'foot' ? markerTex.foot : t.kind === 'guyOff' ? markerTex.off : (t.kind === 'guyTop' || t.kind === 'guyTie' || t.kind === 'tguyTop' || t.kind === 'tguyTie' || t.kind === 'pivot' || t.kind === 'hrope' || t.kind === 'wrope') ? markerTex.guy : markerTex.lash;
+    s.material.map = t.kind === 'stake' || t.kind === 'anchor' || t.kind === 'tstake' || t.kind === 'tanchor' ? markerTex.stake : t.kind === 'foot' ? markerTex.foot : t.kind === 'guyOff' ? markerTex.off : (t.kind === 'guyTop' || t.kind === 'guyTie' || t.kind === 'tguyTop' || t.kind === 'tguyTie' || t.kind === 'pivot' || t.kind === 'hrope' || t.kind === 'wrope') ? markerTex.guy : markerTex.lash;
     const pulse = 1 + 0.12 * Math.sin(performance.now() / 260);
     const base = 0.05;
     s.scale.setScalar(base * pulse);
@@ -822,7 +835,6 @@ function collectCubeTargets(T) {
     const p = cubeJointPos(j); if (!p) continue;
     T.push({ kind: cb.joints[j.id] ? 'clashed' : 'cjoint', id: j.id, pos: p, show: !cb.joints[j.id] });
   }
-  collectHeightTargets(T);
   if (LV.carousel && seatStage(G.stage)) collectSeatTargets(T);
   if (LV.wheel && wheelStage(G.stage)) collectWheelTargets(T);
   if (G.stage === 'unguy') eachKlaf(k => {
@@ -922,9 +934,12 @@ function onTarget(t, x, y) {
       sfx.lash();
       break;
     }
-    case 'cjoint': case 'clashed': { const msg = heightBlock(cubeJoint(t.id)); if (msg) return flashHint(msg); return openPicker(t, x, y); }
-    case 'harness': { const c = G.height.climbers.find(q => q.role === t.id); if (c) clipHarness(c); break; }
-    case 'hspot': moveClimber(t.spot); break;
+    case 'cjoint': case 'clashed': {
+      const j = cubeJoint(t.id), msg = heightBlock(j); if (msg) return flashHint(msg);
+      // up high: the nearest climber climbs over first, then the lashing picker opens
+      if (G.height?.up && highJoint(j) && !heightReach(j)) return climbTo(j, () => { const p = toScreen(t.pos); openPicker(t, p ? p[0] : x, p ? p[1] : y); });
+      return openPicker(t, x, y);
+    }
     case 'guyTie': return openPicker(t, x, y);
     case 'bjoint': case 'blashed': case 'tsj': case 'tsjd': return openPicker(t, x, y);
     case 'sjoint': case 'slashed': case 'mjoint': case 'mlashed': return openPicker(t, x, y);
@@ -1315,11 +1330,14 @@ function triLegSegs(sid) {
   let i = LEG_IDS.indexOf(sid), tw = null;
   const t = G.tri, st = triState(), sp = triSpec();
   // the giant wheel's second upright leg stands beside the first
-  if (i < 0 && sp.twin?.id === sid) { i = sp.twin.of; tw = sp.twin.offset; }
+  if (i < 0 && sp.twin?.id === sid) { i = sp.twin.of; tw = true; }
   if (i < 0 || !st || !G.build.poles[sid]) return null;
-  const o = tw ? add3(headOffset(i, st), tw, 1) : headOffset(i, st);
-  if (t.sim) { const [a, b] = t.sim.legEnds(i); return [[add3(a, o, 1), add3(b, o, 1)]]; }
-  const stand = [add3(st.legs[i].foot, o, 1), add3(st.legs[i].top, o, 1)];
+  // the fourth leg is the mirror image of leg i, across the plane through the head
+  const mir = (p, ax) => tw ? [2 * ax - p[0], p[1], p[2]] : p;
+  const o0 = headOffset(i, st), o = tw ? [-o0[0], o0[1], o0[2]] : o0;
+  if (t.sim) { const ax = t.sim.apex()[0], [a, b] = t.sim.legEnds(i); return [[add3(mir(a, ax), o, 1), add3(mir(b, ax), o, 1)]]; }
+  const L = tw ? st.twin : st.legs[i];
+  const stand = [add3(L.foot, o, 1), add3(L.top, o, 1)];
   if (t.up >= 1) return [stand];
   // on its way up: the foot walks to its place while the pole swings upright
   const lie = klafRestEnds(sid), k = ease(Math.max(0, t.up)), len = G.build.poles[sid].length;
@@ -1344,21 +1362,28 @@ function triApex() {
 }
 // where a leg is at the braces' height, and at the height it is lashed to its stake
 const triLegPoint = (i, what) => (what === 'brace' && G.tri.sim) ? G.tri.sim.bracePoint(i) : triState().legs[i][what];
+// where brace `brace` meets its k-th leg (on a four-legged tripod one brace meets the fourth leg)
+function braceAt(brace, k, st = triState(), live = st === triState() && G.tri?.sim) {
+  const L = braceLeg(st, brace, k), i = brace.legs[k];
+  if (!live) return L.brace;
+  const p = G.tri.sim.bracePoint(i);
+  return L === st.twin ? [2 * G.tri.sim.apex()[0] - p[0], p[1], p[2]] : p;
+}
 // a brace lies on the outside of its two legs
 function braceSide(brace, st) {
-  const [a, b] = brace.legs.map(i => st.legs[i].brace);
+  const [a, b] = [0, 1].map(k => braceLeg(st, brace, k).brace);
   return norm2((a[0] + b[0]) / 2 - st.apex[0], (a[2] + b[2]) / 2 - st.apex[2]);
 }
 function braceEnds(brace, len, st = triState()) {
   const live = st === triState() && G.tri?.sim;
-  const [a, b] = brace.legs.map(i => live ? G.tri.sim.bracePoint(i) : st.legs[i].brace);
+  const [a, b] = [0, 1].map(k => braceAt(brace, k, st, live));
   const mid = a.map((v, c) => (v + b[c]) / 2), d = b.map((v, c) => v - a[c]), dl = Math.hypot(...d) || 1, n = braceSide(brace, st);
   const m = add3(mid, n, GAP);
   return [add3(m, d.map(v => v / dl), -len / 2), add3(m, d.map(v => v / dl), len / 2)];
 }
 function braceJointPos(j) {
   const brace = BRACES.find(q => q.id === j.brace);
-  return add3(triLegPoint(j.leg, 'brace'), braceSide(brace, triState()), GAP / 2);
+  return add3(braceAt(brace, brace.legs.indexOf(j.leg)), braceSide(brace, triState()), GAP / 2);
 }
 function triStakePos(i) {
   const st = triState(), f = st.legs[i].foot, n = norm2(f[0] - st.apex[0], f[2] - st.apex[2]);
@@ -1463,7 +1488,8 @@ function triPlanStanding() {
 // where guy line i reaches the ground: out from the head, as far as the head is high (45°)
 function triGuyAnchor(i) {
   const st = triPlanStanding(), a = st.apex, h = a[1];
-  let d = i <= 2 ? [st.legs[i].foot[0] - a[0], st.legs[i].foot[2] - a[2]] : [0, 0];
+  const L = i <= 2 ? st.legs[i] : st.twin;
+  let d = L ? [L.foot[0] - a[0], L.foot[2] - a[2]] : [0, 0];
   // an upright leg has its foot under the head: its line goes out to the side
   if (Math.hypot(d[0], d[1]) < 0.3) d = [i === 3 ? 1 : -1, -(K()?.cfg.out || 0) * 0.15];
   const l = Math.hypot(d[0], d[1]);
@@ -2225,18 +2251,20 @@ function wheelFolderCanvas(mode) {
     dot(P(0, WH.forkHeight), '#e0a93b', 12);
     line([60, base + 4], [440, base + 4], 3, '#8a6d3b');
     text('מהצד', 250, 40);
-    text(`זקופה ${TRI90.legLengths[1].toFixed(1)} מ׳`, 160, 330, 20);
+    text(`90° ${TRI90.legLengths[1].toFixed(1)} מ׳`, 160, 330, 20);
     text(`נוטה ${TRI90.legLengths[0].toFixed(1)} מ׳`, 380, 330, 20);
     text(`כפיתת חצובה בגובה ${WH.forkHeight.toFixed(1)} מ׳`, 250, base - WH.forkHeight * S - 50, 20);
     text('→ הגלגל', 110, base - 40, 22, red);
     // from above: the three feet
     const Q = [680, 200], T = 110, pf = TRI90.planFeet([0, 0], 1).map(([x, z]) => [Q[0] - x * T, Q[1] + z * T]);
-    for (let i = 0; i < 3; i++) line(pf[i], pf[(i + 1) % 3], 3);
-    pf.forEach((p, i) => dot(p, i === 1 ? red : '#6b4423', 12));
+    // the four feet make a square: the two 90° legs on the wheel's side (red), the leaning ones behind
+    const sq = [pf[0], pf[1], [2 * Q[0] - pf[1][0], pf[1][1]], pf[2]];
+    for (let i = 0; i < 4; i++) line(sq[i], sq[(i + 1) % 4], 3);
+    sq.forEach((p, i) => dot(p, i === 1 || i === 2 ? red : '#6b4423', 12));
     text('מלמעלה', 680, 40);
     text(`${TRI90.apart[0].toFixed(2)} מ׳`, 590, 290, 20); text(`${TRI90.apart[0].toFixed(2)} מ׳`, 770, 290, 20);
     text(`${TRI90.apart[2].toFixed(1)} מ׳`, 680, pf[0][1] + 40, 20);
-    text('אדום: הרגל הזקופה, בצד של הגלגל', 680, 610, 20, red);
+    text('אדום: רגלי ה־90°, בצד של הגלגל', 680, 610, 20, red);
     return c;
   }
   if (!seat) {
@@ -2965,11 +2993,11 @@ function updateJobs(dt) {
 // Every connection above 2 m is tied by scouts who climb the structure in a harness
 // (a connection at 2 m is still tied from the ground). The real order: first every
 // connection that can be tied from the ground; then the player picks two climbers and
-// a safety person below. The climbers go up, clip their harness to a pole, and tie what
-// is within arm's reach (1.5 m); to reach more they climb along, unclip and clip again.
-// They stay up until the structure is finished, and climb down after.
-const HEIGHT = { above: 2.2, reach: 1.5, speed: 0.9, feet: 1.15 };
-const HROPES = [0, 1].map(() => { const r = new RopeViz(scene); r.show(false); return r; });
+// a safety person below. The climbers go up wearing harnesses and move freely over the
+// structure: tap a connection up high and the nearest climber climbs over to it (within
+// arm's reach, 1.5 m, they tie it right away). They stay up until the structure is
+// finished, and climb down after.
+const HEIGHT = { above: 2.2, reach: 1.5, speed: 2.4, feet: 1.15 };
 const HEIGHT_ROLES = [{ id: 'c1', he: 'מטפס ראשון' }, { id: 'c2', he: 'מטפס שני' }, { id: 'safe', he: 'אבטחה למטה' }];
 function freshHeight() { return { crew: {}, panel: false, up: false, climbers: [], safe: null, down: false }; }
 const highJoint = j => j.at[1] > HEIGHT.above;
@@ -2977,40 +3005,20 @@ const heightJoints = () => LV.cube && !LV.free ? LV.cube.joints.filter(highJoint
 const heightNeeded = () => heightJoints().length > 0;
 // every connection that can be tied from the ground is tied
 const groundDone = () => LV.cube.joints.filter(j => !highJoint(j)).every(j => G.cube.build.joints[j.id]);
-// where climbers can stand: a few spots on the frame that between them reach every high
-// connection (greedy cover over the connections themselves, so each spot is on a pole)
-let spotCache = null;
-function heightSpots() {
-  if (spotCache?.cube === LV.cube) return spotCache.spots;
-  const js = heightJoints(), left = new Set(js.map(j => j.id)), spots = [];
-  const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-  while (left.size) {
-    let best = null, bn = -1;
-    for (const c of js) { const n = js.filter(j => left.has(j.id) && d(c.at, j.at) <= HEIGHT.reach).length; if (n > bn) { bn = n; best = c; } }
-    const covers = js.filter(j => left.has(j.id) && d(best.at, j.at) <= HEIGHT.reach);
-    // the spot: the middle of what it covers, pulled onto the nearest of them
-    const mid = [0, 1, 2].map(i => covers.reduce((a, j) => a + j.at[i], 0) / covers.length);
-    const on = covers.reduce((a, j) => d(j.at, mid) < d(a.at, mid) ? j : a, covers[0]);
-    spots.push({ at: [...on.at], ids: js.filter(j => d(on.at, j.at) <= HEIGHT.reach).map(j => j.id) });
-    covers.forEach(j => left.delete(j.id));
-  }
-  spotCache = { cube: LV.cube, spots };
-  return spots;
-}
 const cubeMid = () => [0, 0, (LV.cube.span ?? LV.cube.depth) / 2];
-// where a climber's feet are when working at a spot: a little below and outside it
-function spotFeet(sp) {
-  const c = cubeMid(), n = norm2(sp.at[0] - c[0], sp.at[2] - c[2]);
-  return [sp.at[0] + n[0] * 0.3, Math.max(0.4, sp.at[1] - HEIGHT.feet), sp.at[2] + n[2] * 0.3];
+// where a climber's feet are when working at a point: a little below and outside it
+function workFeet(at) {
+  const c = cubeMid(), n = norm2(at[0] - c[0], at[2] - c[2]);
+  return [at[0] + n[0] * 0.3, Math.max(0.4, at[1] - HEIGHT.feet), at[2] + n[2] * 0.3];
 }
-const climberAt = sp => G.height.climbers.find(c => c.spot === sp && !c.path);
-// a connection can be tied when a clipped-in climber at a spot reaches it
-const heightReach = id => G.height.climbers.some(c => c.clipped && !c.path && heightSpots()[c.spot].ids.includes(id));
+const handsOf = c => [c.pos[0], c.pos[1] + HEIGHT.feet, c.pos[2]];
+const dist3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+// a connection can be tied when a climber up there, not moving, reaches it
+const heightReach = j => G.height.climbers.some(c => !c.path && !c.walk && dist3(handsOf(c), j.at) <= HEIGHT.reach);
 function heightBlock(j) {
   if (!G.height || !highJoint(j) || LV.free) return null;
   if (!groundDone()) return '<b>חיבור בגובה.</b> קודם כופתים את כל החיבורים שאפשר מהקרקע (עד 2 מ׳), ורק אז עולים לגובה';
   if (!G.height.up) return '<b>חיבור בגובה.</b> מעל 2 מ׳ כופתים רק מלמעלה: לוחצים על <b>עולים לגובה</b> ומשבצים שני מטפסים ואיש אבטחה';
-  if (!heightReach(j.id)) return '<b>אין מטפס עם רתמה במרחק יד.</b> מקישים על נקודת טיפוס (חץ כחול) ליד החיבור, ומחברים שם את הרתמה';
   return null;
 }
 const heightActor = role => G.height.crew[role] != null ? crew[G.height.crew[role]] : null;
@@ -3036,53 +3044,41 @@ function renderHeightCrew() {
       <span class="crew-role">${r.he}</span><span class="crew-who">${who != null ? CREW_NAMES[who] : '+ צופה'}</span></button>`;
   }).join('');
 }
-// up they go: each climber walks to the leg nearest a spot, climbs it, and goes to the spot
+// a path over the frame: up or down at where the climber is, then across at the new height
+const climbPath = (from, to) => [[...from], [from[0], to[1], from[2]], to];
+// up they go: each climber walks to a front corner leg and climbs it to the top
 function startClimb() {
-  const H = G.height, spots = heightSpots(), c = cubeMid();
-  // the two first spots: the one with most still to tie, then the farthest from it
-  const todo = sp => sp.ids.filter(id => !G.cube.build.joints[id]).length;
-  const order = spots.map((sp, i) => i).sort((a, b) => todo(spots[b]) - todo(spots[a]));
-  const first = order[0], second = order.slice(1).sort((a, b) => Math.hypot(...spots[b].at.map((v, k) => v - spots[first].at[k])) - Math.hypot(...spots[a].at.map((v, k) => v - spots[first].at[k])))[0] ?? first;
+  const H = G.height, c = cubeMid(), X = (LV.cube.legX ?? 0.9) + 0.25;
+  const todo = heightJoints().filter(j => !G.cube.build.joints[j.id]);
+  const top = Math.max(...heightJoints().map(j => j.at[1]));
   H.climbers = ['c1', 'c2'].map((role, n) => {
-    const sp = n ? second : first, f = spotFeet(spots[sp]);
-    const leg = [Math.sign(f[0] - c[0] || 1) * ((LV.cube.legX ?? 0.9) + 0.25), 0, f[2] < c[2] ? -0.25 : c[2] * 2 + 0.25];
-    return { role, spot: sp, clipped: false, pos: [leg[0], 0, leg[2]], path: [[leg[0], 0, leg[2]], [leg[0], f[1], leg[2]], f], walk: true, rope: HROPES[n] };
+    const sx = n ? 1 : -1, leg = [sx * X, 0, -0.25];
+    // head for the nearest connection still to tie on this side, or the top of the leg
+    const near = todo.filter(j => Math.sign(j.at[0] || sx) === sx).sort((a, b) => dist3(a.at, leg) - dist3(b.at, leg))[0];
+    const f = workFeet(near ? near.at : [sx * (X - 0.25), top, 0]);
+    return { role, pos: [...leg], path: [leg, [leg[0], f[1], leg[2]], f], walk: true };
   });
   H.up = true; H.panel = false; crewKey = '';
   sfx.tick();
-  flashHint('<b>המטפסים עולים.</b> כשהם במקום, מקישים על הרתמה של כל אחד כדי לחבר אותה לסנדה');
+  flashHint('<b>המטפסים עולים עם רתמות.</b> מקישים על חיבור למעלה: המטפס הקרוב מטפס אליו וכופת');
 }
-// a climber moves to another spot: unclip, climb along the frame, clip in again
-function moveClimber(spot) {
-  const H = G.height;
-  if (climberAt(spot)) return flashHint('מטפס כבר עובד בנקודה הזאת');
-  const free = H.climbers.filter(c => !c.path);
-  if (!free.length) return;
-  const to = heightSpots()[spot].at, c = free.reduce((a, q) => Math.hypot(...heightSpots()[q.spot].at.map((v, k) => v - to[k])) < Math.hypot(...heightSpots()[a.spot].at.map((v, k) => v - to[k])) ? q : a, free[0]);
-  const f = spotFeet(heightSpots()[spot]);
-  c.clipped = false; c.spot = spot; c.path = [[...c.pos], [c.pos[0], Math.max(c.pos[1], f[1]), c.pos[2]], [f[0], Math.max(c.pos[1], f[1]), f[2]], f];
+// tap on a connection up high: within reach, tie; otherwise the nearest free climber climbs over to it
+function climbTo(j, then) {
+  const H = G.height, free = H.climbers.filter(c => !c.path && !c.walk);
+  if (!free.length) return flashHint('המטפסים בדרך…');
+  const c = free.reduce((a, q) => dist3(handsOf(q), j.at) < dist3(handsOf(a), j.at) ? q : a, free[0]);
+  c.path = climbPath(c.pos, workFeet(j.at)); c.then = then;
   sfx.tick();
 }
-function clipHarness(c) { c.clipped = true; sfx.lash(); buzz(12); flashHint(`<b>${CREW_NAMES[G.height.crew[c.role]]} מחובר/ת ברתמה.</b> אפשר לכפות את מה שבהישג יד`); }
-function collectHeightTargets(T) {
-  const H = G.height; if (!H?.up || H.down || G.stage !== 'cube') return;
-  const spots = heightSpots();
-  for (const c of H.climbers) if (!c.path && !c.clipped) T.push({ kind: 'harness', id: c.role, pos: add3(spots[c.spot].at, [0, 0.35, 0], 1), show: true });
-  spots.forEach((sp, i) => {
-    if (climberAt(i) || H.climbers.some(c => c.spot === i)) return;
-    if (!sp.ids.some(id => !G.cube.build.joints[id])) return; // nothing left to tie there
-    T.push({ kind: 'hspot', id: 'H' + i, spot: i, pos: add3(sp.at, [0, 0.12, 0], 1), show: true });
-  });
-}
-// each frame: climbers move along their paths; harness lines; the safety person under them
+// each frame: climbers move along their paths; the safety person stands under them
 function stepHeight(dt) {
   const H = G.height;
-  if (!H?.up) { HROPES.forEach(r => r.show(false)); return; }
+  if (!H?.up) { for (const a of crew) if (a.mesh.userData.harness[0].visible) a.mesh.userData.harness.forEach(h => { h.visible = false; }); return; }
   const done = G.stage !== 'cube' || G.check || G.falling;
   if (done && !H.down) {
     // the structure is finished: everyone climbs down
     H.down = true;
-    for (const c of H.climbers) { c.clipped = false; c.path = [[...c.pos], [c.pos[0], 0, c.pos[2]]]; c.walk = false; }
+    for (const c of H.climbers) { c.then = null; c.path = [[...c.pos], [c.pos[0], 0, c.pos[2]]]; c.walk = false; }
   }
   const t = performance.now() / 1000;
   for (const c of H.climbers) {
@@ -3090,28 +3086,31 @@ function stepHeight(dt) {
     if (c.walk) {
       // walk on the ground to the foot of the leg first
       a.set(c.path[0], 0, 0, 0.3);
-      if (a.arrived()) c.walk = false; else { c.rope.show(false); continue; }
+      if (a.arrived()) c.walk = false; else continue;
     }
+    let dir = null;
     if (c.path) {
       let step = HEIGHT.speed * dt;
       while (step > 0 && c.path.length > 1) {
-        const [p, q] = c.path, d = Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]);
+        const [p, q] = c.path, d = dist3(p, q);
+        if (d > 1e-3 && Math.hypot(q[0] - p[0], q[2] - p[2]) > 0.05) dir = Math.atan2(q[0] - p[0], q[2] - p[2]);
         if (d <= step) { c.path.shift(); step -= d; c.pos = [...c.path[0]]; continue; }
         const k = step / d; c.pos = p.map((v, i) => v + (q[i] - v) * k); c.path[0] = c.pos; step = 0;
       }
-      if (c.path.length <= 1) c.path = null;
+      if (c.path.length <= 1) { c.path = null; const f = c.then; c.then = null; f?.(); }
     }
-    const sp = heightSpots()[c.spot], face = Math.atan2(sp.at[0] - c.pos[0], sp.at[2] - c.pos[2]);
     const moving = !!c.path;
-    if (H.down && !moving) { a.clear(); c.rope.show(false); continue; }
-    a.set(c.pos, face, moving ? 0.15 : 0.1, moving ? Math.PI * (0.8 + 0.15 * Math.sin(t * 14)) : 0.9, { lock: true, snap: true });
-    // the harness line: from the climber's waist to the pole above, once clipped in
-    if (c.clipped && !moving) c.rope.set([c.pos[0], c.pos[1] + 0.85, c.pos[2]], add3(sp.at, [0, 0.25, 0], 1), 0.05); else c.rope.show(false);
+    if (H.down && !moving) { a.clear(); a.mesh.userData.harness.forEach(h => { h.visible = false; }); continue; }
+    // facing: the way they climb, or in towards the structure while they work
+    const cm = cubeMid(), inward = Math.atan2(cm[0] - c.pos[0], cm[2] - c.pos[2]);
+    c.yaw = dir ?? (moving ? c.yaw ?? inward : inward);
+    a.set(c.pos, c.yaw, moving ? 0.15 : 0.1, moving ? Math.PI * (0.8 + 0.15 * Math.sin(t * 14)) : 1.6, { lock: true, snap: true });
+    a.mesh.userData.harness.forEach(h => { h.visible = c.pos[1] > 0.05; });
   }
   // the safety person stands below, between the climbers, watching them
   const s = heightActor('safe');
   if (s) {
-    if (H.down && H.climbers.every(c => !c.path)) { s.clear(); H.up = false; H.climbers.forEach(c => c.rope.show(false)); return; }
+    if (H.down && H.climbers.every(c => !c.path)) { s.clear(); H.up = false; return; }
     const mid = H.climbers.reduce((acc, c) => [acc[0] + c.pos[0] / 2, 0, acc[2] + c.pos[2] / 2], [0, 0, 0]), cm = cubeMid();
     const n = norm2(mid[0] - cm[0], mid[2] - cm[2]);
     s.set([mid[0] + n[0] * 1.2, 0, mid[2] + n[2] * 1.2], Math.atan2(-n[0], -n[2]), -0.1, 0.4);
@@ -3123,8 +3122,7 @@ function heightLine() {
   if (!groundDone()) return '<b>עבודה בגובה:</b> קודם כופתים את כל מה שאפשר מהקרקע (עד 2 מ׳). אחר כך עולים לגובה';
   if (!H.up) return H.panel ? '<b>עבודה בגובה:</b> משבצים שני מטפסים ואיש אבטחה בחלון הצוות' : '<b>עבודה בגובה:</b> מעל 2 מ׳ כופתים רק מלמעלה. לוחצים על <b>עולים לגובה</b>';
   if (H.climbers.some(c => c.path || c.walk)) return '<b>עבודה בגובה:</b> המטפסים בדרך…';
-  if (H.climbers.some(c => !c.clipped)) return '<b>עבודה בגובה:</b> מקישים על הרתמה (⚲) כדי לחבר את המטפס לסנדה';
-  return '<b>עבודה בגובה:</b> כופתים את מה שבהישג יד. כדי להגיע לעוד, מקישים על נקודת טיפוס (▲) והמטפס הקרוב עובר אליה';
+  return '<b>עבודה בגובה:</b> מקישים על חיבור למעלה: המטפס הקרוב מטפס אליו וכופת';
 }
 const heightTodo = () => heightJoints().filter(j => !G.cube.build.joints[j.id]).length;
 
@@ -4330,10 +4328,10 @@ function poleTable() {
   if (LV.wheel) {
     const len = id => RIG.slots.find(q => q.id === id).length, bl = TRI90.braceLengths;
     const rows = [
-      ['רגל זקופה (אחת בכל חצובה)', 2, m(TRI90.legLengths[1])],
+      ['רגליים ב־90° (שתיים בכל חצובה, בצד הגלגל)', 4, m(TRI90.legLengths[1])],
       ['רגליים נוטות', 4, m(TRI90.legLengths[0])],
-      ['חיזוקים מהרגל הזקופה לנוטות (בגובה כ־50 ס״מ)', 4, m(bl.B12)],
-      ['חיזוק בין שתי הנוטות', 2, m(bl.B31)],
+      ['חיזוקים בצדי הריבוע, מרגל 90° לנוטה (בגובה כ־50 ס״מ)', 4, m(bl.B12)],
+      ['חיזוק מאחור, בין שתי הנוטות', 2, m(bl.B31)],
       ['צלעות הריבועים בגלגל', 8, m(len('W.s10'))],
       ['אלכסונים (איקס בכל ריבוע)', 4, m(len('W.dA1'))],
       ['סנדות פינה בין הריבועים', 4, m(len('W.c0'))],
@@ -4433,10 +4431,10 @@ function openFolder(tab = LV.sketch ? 'sk0' : LV.wheel ? 'tri90' : LV.carousel ?
   } else if (tab === 'tri90') {
     body.appendChild(wheelFolderCanvas('tri'));
     body.insertAdjacentHTML('beforeend', `<ol>
-      <li>מניחים שלוש רגליים זו לצד זו, הראשים יחד: הרגל הזקופה (${TRI90.legLengths[1].toFixed(1)} מ׳, הקצרה) באמצע, והנוטות (${TRI90.legLengths[0].toFixed(1)} מ׳) משני צדיה.</li>
+      <li>מניחים ארבע רגליים זו לצד זו, הראשים יחד: שתי הרגליים של ה־90° (${TRI90.legLengths[1].toFixed(1)} מ׳, הקצרות) באמצע, והנוטות (${TRI90.legLengths[0].toFixed(1)} מ׳) משני הצדדים.</li>
       <li>כופתים כפיתת חצובה ${Math.round(TRI90.lashFromTop * 100)} ס״מ מתחת לראשים.</li>
-      <li>שישה צופים מקימים את החצובה. הרגל הזקופה עומדת ישר, בצד של הגלגל; כל רגל נוטה ${WH.footSide.toFixed(1)} מ׳ הצידה ו־${WH.footOut.toFixed(2)} מ׳ החוצה, הרחק מהגלגל.</li>
-      <li>חיזוק בין כל שתי רגליים בגובה כ־50 ס״מ, ובז״נט לכל רגל. שתי החצובות זהות, ${WH.apart.toFixed(1)} מ׳ בין הרגליים הזקופות. הציר נח בין שני הראשים.</li></ol>`);
+      <li>שישה צופים מקימים את החצובה. כפות הרגליים יוצרות ריבוע של ${(2 * WH.footSide).toFixed(1)} מ׳: שתי רגלי ה־90° בצד של הגלגל (מהצד הן נראות ישרות), והנוטות מאחור, הרחק מהגלגל.</li>
+      <li>חיזוקים בגובה כ־50 ס״מ בשני צדי הריבוע ומאחור (הצד של הגלגל נשאר פתוח), ובז״נט לרגליים. שתי החצובות זהות, ${WH.apart.toFixed(1)} מ׳ ביניהן לאורך הציר. הציר נח בין שני הראשים.</li></ol>`);
   } else if (tab === 'wheelF' || tab === 'wseat') {
     body.appendChild(wheelFolderCanvas(tab === 'wseat' ? 'seat' : 'wheel'));
     body.insertAdjacentHTML('beforeend', tab === 'wseat' ? `<ol>
@@ -4850,4 +4848,4 @@ restart();
 requestAnimationFrame(frame);
 
 // debug hook for automated tests
-window.__game = { get state() { return G; }, triRoles: () => triRoles(), toggleTriCrew: id => toggleTriCrew(id), pullTripod: dy => pullTripod(dy), triCrewReady: () => triCrewReady(), heightSpots: () => heightSpots(), toggleHeightCrew: r => toggleHeightCrew(r), openHeightCrew: () => openHeightCrew(), moveClimber: i => moveClimber(i), playChallenge: ch => playChallenge(ch), triApex: () => triApex(), triGuyTop: i => triGuyTop(i), triLegSegs: s => triLegSegs(s), fun, balanceFor, finish, celebrate, get parade() { return parade; }, triGuide, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, score: () => score(), standAll: () => G.klafim.forEach((k, i) => { useKlaf(i); for (const q of STAKE_JOINTS) k.build.stakeJoints[q.id] = 'parallel'; for (const q of GUYS) k.build.guyTies[q.id] = 'guy'; k.raisedOnce = true; k.sim = new KlafSim(k.build, k.cfg); k.sim.standUp(); }), WHEEL, GOND, RIG, SEAT_ROPES, liftWheel: () => liftWheel(), liftWheelSeat: () => liftWheelSeat(), SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
+window.__game = { get state() { return G; }, triRoles: () => triRoles(), toggleTriCrew: id => toggleTriCrew(id), pullTripod: dy => pullTripod(dy), triCrewReady: () => triCrewReady(), toggleHeightCrew: r => toggleHeightCrew(r), openHeightCrew: () => openHeightCrew(), climbTo: id => climbTo(cubeJoint(id)), playChallenge: ch => playChallenge(ch), triApex: () => triApex(), triGuyTop: i => triGuyTop(i), triLegSegs: s => triLegSegs(s), fun, balanceFor, finish, celebrate, get parade() { return parade; }, triGuide, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, score: () => score(), standAll: () => G.klafim.forEach((k, i) => { useKlaf(i); for (const q of STAKE_JOINTS) k.build.stakeJoints[q.id] = 'parallel'; for (const q of GUYS) k.build.guyTies[q.id] = 'guy'; k.raisedOnce = true; k.sim = new KlafSim(k.build, k.cfg); k.sim.standUp(); }), WHEEL, GOND, RIG, SEAT_ROPES, liftWheel: () => liftWheel(), liftWheelSeat: () => liftWheelSeat(), SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };

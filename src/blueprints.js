@@ -64,10 +64,9 @@ export const SIZES = {
     apart: 3.4,             // upright leg to upright leg, along the axle
     forkHeight: 2.8,        // the tripod lashing's height (where the legs cross)
     lashFromTop: 0.3,       // the tops above the lashing: the fork the axle lies in
-    footSide: 1.3,          // each leaning leg's foot: this far to the side of the upright one,
-    footOut: 1.425,         // and this far out, away from the wheel
-    uprightLength: 3.1,     // 2.8 m to the lashing, and 0.3 above
-    leanLength: 3.7,        // 3.4 m to the lashing (the leaning legs reach 1.93 m out), and 0.3 above
+    footSide: 0.9,          // the four feet make a square (Omer 11-21): each foot this far to the side of the axle,
+    footOut: 1.8,           // and the two leaning legs' feet this far out, away from the wheel (a 1.8 m square)
+    // leg lengths come from these: 2.8 m to the lashing plus 0.3 above, in 10 cm steps
     axleAbove: 0.15,        // the axle lies this far above the fork lashing
     axleOver: 0.4,          // and reaches this far past each tower
     radius: 1.5,            // axle to each corner of a square (2.1 m sides)

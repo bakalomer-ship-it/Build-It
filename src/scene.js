@@ -504,9 +504,33 @@ export function makePerson(i = 0, { noCap = false } = {}) {
   const aR = new THREE.Group(); aR.position.set(0.25, 0.5, 0);
   for (const a of [aL, aR]) { const m = new THREE.Mesh(armGeo, shirt); m.position.y = -0.2; m.castShadow = true; a.add(m); }
   torso.add(aL, aR);
+  // a full-body harness (רתמה), worn only at height (work at height, Omer 2026-11-21):
+  // orange shoulder straps, a blue chest strap, a padded belt, blue leg loops
+  const harness = [];
+  {
+    const orange = new THREE.MeshStandardMaterial({ color: 0xe0482a, roughness: 0.8 });
+    const blue = new THREE.MeshStandardMaterial({ color: 0x2f74c8, roughness: 0.8 });
+    const black = new THREE.MeshStandardMaterial({ color: 0x1d1d1d, roughness: 0.9 });
+    const metal = new THREE.MeshStandardMaterial({ color: 0xc9ccd0, roughness: 0.35, metalness: 0.8 });
+    const h = new THREE.Group();
+    const strap = (mat, x0, y0, z, x1, y1, w = 0.055) => {
+      const len = Math.hypot(x1 - x0, y1 - y0), m = new THREE.Mesh(new THREE.BoxGeometry(w, len, 0.014), mat);
+      m.position.set((x0 + x1) / 2, (y0 + y1) / 2, z); m.rotation.z = Math.atan2(x0 - x1, y1 - y0); h.add(m);
+    };
+    // front: two straps down from the shoulders; back: crossed
+    strap(orange, -0.11, 0.6, 0.165, -0.12, 0.13); strap(orange, 0.11, 0.6, 0.165, 0.12, 0.13);
+    strap(orange, -0.12, 0.6, -0.165, 0.12, 0.15); strap(orange, 0.12, 0.6, -0.165, -0.12, 0.15);
+    strap(blue, -0.15, 0.42, 0.175, 0.15, 0.42, 0.04);
+    const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.232, 0.232, 0.08, 18, 1, true), black); belt.position.y = 0.1; belt.scale.z = 0.82; h.add(belt);
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.236, 0.236, 0.035, 18, 1, true), orange); band.position.y = 0.1; band.scale.z = 0.82; h.add(band);
+    const clip = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.009, 6, 12), metal); clip.position.set(0, 0.22, 0.19); h.add(clip);
+    for (const sx of [-1, 1]) { const d = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.008, 6, 10), metal); d.position.set(sx * 0.24, 0.1, 0); d.rotation.y = Math.PI / 2; h.add(d); }
+    h.visible = false; torso.add(h); harness.push(h);
+    for (const l of [lL, lR]) { const loop = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.02, 6, 14), blue); loop.position.y = -0.06; loop.rotation.x = Math.PI / 2; loop.visible = false; l.add(loop); harness.push(loop); }
+  }
   g.add(lL, lR, torso);
   g.traverse(o => { if (o.isMesh) o.castShadow = true; });
-  g.userData = { torso, aL, aR, lL, lR };
+  g.userData = { torso, aL, aR, lL, lR, harness };
   const outer = new THREE.Group();
   outer.add(g);
   outer.userData = g.userData;

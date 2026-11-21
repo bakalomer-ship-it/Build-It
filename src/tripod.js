@@ -85,20 +85,25 @@ const along = (a, d, k) => [a[0] + d[0] * k, a[1] + d[1] * k, a[2] + d[2] * k];
 export function standing(feet, lens, spec = TRI_SPEC) {
   const s = lens.map((l, i) => legSOf(spec, i, l));
   const apex = apexOf(feet, s); if (!apex) return null;
-  const legs = feet.map((f, i) => {
+  const mk = (f, i) => {
     const foot = [f[0], r, f[1]];
     const d = sub(apex, foot), l = len3(d), dir = d.map(v => v / l);
     const sb = Math.min(s[i] - 0.3, TRI.braceHeight / Math.max(0.2, dir[1]));
     return { foot, dir, s: s[i], top: along(foot, dir, lens[i]), brace: along(foot, dir, sb), sb, stake: along(foot, dir, TRI.stakeJointHeight / Math.max(0.2, dir[1])) };
-  });
+  };
+  const legs = feet.map(mk);
   const d = (a, b) => Math.hypot(feet[a][0] - feet[b][0], feet[a][1] - feet[b][1]);
-  // a fourth leg standing side by side with one of the three (the giant wheel's second upright leg)
-  const tw = spec.twin, twin = tw ? { ...legs[tw.of], foot: along(legs[tw.of].foot, tw.offset, 1), top: along(legs[tw.of].top, tw.offset, 1) } : null;
+  // a fourth leg (the giant wheel's 90° tripod, Omer 11-21: the four feet make a square):
+  // the mirror image of one of the three across the plane through the head
+  const tw = spec.twin, twin = tw ? { ...mk([2 * apex[0] - feet[tw.of][0], feet[tw.of][1]], tw.of), mirror: true } : null;
   return { apex, legs, twin, apart: [d(0, 1), d(1, 2), d(2, 0)], height: apex[1] - r };
 }
 // does a brace of this length reach both of its legs?
+// the legs a brace joins: on a four-legged tripod brace B23 runs from the fourth leg to leg 3
+// (the square's other side), not across the square
+export const braceLeg = (st, brace, k) => st.twin?.mirror && brace.id === 'B23' && k === 0 ? st.twin : st.legs[brace.legs[k]];
 export function braceReaches(st, brace, length) {
-  const [a, b] = brace.legs.map(i => st.legs[i].brace);
+  const [a, b] = [0, 1].map(k => braceLeg(st, brace, k).brace);
   return length >= len3(sub(a, b)) + 2 * LASH_ALLOW; // מרחק כפיתה at both ends
 }
 // how close the standing tripod is to the drawing: its height and the three distances between the feet
