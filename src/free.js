@@ -11,7 +11,7 @@
 import { LASH_ALLOW } from './blueprints.js';
 
 // the grid the klaf is designed on
-export const GRID = { uMax: 2.2, vMin: -0.3, vMax: 3.5, step: 0.1 };
+export const GRID = { uMax: 3.5, vMin: -0.3, vMax: 5.0, step: 0.1 };
 
 export const FREE_LEVEL = {
   number: 0, free: true, name: 'בנייה חופשית', tutorial: false, crew: 6, ropeSpare: 6, targetTimeSec: 0,
@@ -27,7 +27,7 @@ const round3 = x => Math.round(x * 1000) / 1000;
 // direction snaps to upright or level when it is close to them.
 // The pole is as long as the drag (in 10 cm steps): the player chooses the length
 // by drawing it. A tap, with no drag, stands a pole of the last length upright.
-export const POLE_MIN = 0.5, POLE_MAX = 4.0;
+export const POLE_MIN = 0.5, POLE_MAX = 7.0;
 export function layPole(a, b, lastLength) {
   let u = snap(a[0]), v = snap(a[1]);
   if (v < 0.15 && v > -0.2) v = 0;

@@ -135,6 +135,11 @@ function freshSeat() {
 G = freshState();
 const K = () => G.klafim[G.ki];
 const z0 = () => K().cfg.z0;
+// Free build (Omer, 2026-11-21): a structure can be dragged anywhere on the plaza. Its work
+// is still computed as if it stood on the middle line; its meshes, the helpers of the current
+// structure and the crew are drawn shifted sideways by x0, and screen picking follows.
+const X0 = () => LV.free ? (K()?.cfg.x0 || 0) : 0;
+const curGroup = new THREE.Group();
 // the current structure is a tripod: the tripod station, or a tripod of free build
 const freeTri = () => !!LV.free && K()?.cfg.kind === 'tripod';
 // the giant wheel's two 90° tripods are worked on in their own stages, like klafim
@@ -213,7 +218,8 @@ for (const m of KM) {
 }
 const freeGrid = makeFreeGrid(GRID);
 freeGrid.userData.z = freeGrid.position.z;
-scene.add(freeGrid);
+scene.add(curGroup);
+curGroup.add(freeGrid);
 // the tripod's legs and braces, its stakes, and the sheet its legs are laid on
 for (const m of KM) {
   for (const id of [...LEG_IDS, ...BRACES.map(b => b.id)]) {
@@ -224,7 +230,7 @@ for (const m of KM) {
   m.triStakes = TRI_STAKES.map(() => { const s = makeStake(TRI.stakeLength); s.visible = false; scene.add(s); return s; });
 }
 const triSheets = [makeTripodSheet({ slots: TRI_SLOTS, lashV: TRI_JOINTS[0].at[1], legLength: TRI.legLength }), makeTripodSheet({ slots: TRI90.slots, lashV: TRI90.lashV, legLength: Math.max(...TRI90.legLengths) })];
-triSheets.forEach(m => scene.add(m));
+triSheets.forEach(m => curGroup.add(m));
 // guide lines for spreading the tripod: where each foot goes, and the distance between every two feet
 const triGuide = (() => {
   const g = new THREE.Group(); g.visible = false;
@@ -269,11 +275,12 @@ function drawTriGuide() {
 }
 // a lashing's coils (made the first time a joint needs them: free build has joints of its own)
 function lashMesh(id) {
-  if (!lashMeshes[id]) { const g = makeLashing(); g.visible = false; scene.add(g); lashMeshes[id] = g; }
+  if (!lashMeshes[id]) { const g = makeLashing(); g.visible = false; KM[G.ki].group.add(g); lashMeshes[id] = g; }
   return lashMeshes[id];
 }
 function useKlaf(i) {
   G.ki = i;
+  { const x = LV.free ? (G.klafim[i].cfg.x0 || 0) : 0; curGroup.position.x = x; if (KM[i].group) KM[i].group.position.x = x; }
   // free build: every klaf is its own design, and the shared plan follows the current klaf
   if (LV.free) { const pl = G.klafim[i].plan; setPlan(pl.slots, pl.joints); }
   // a level whose klafim differ (the carousel's gate and back klaf): the plan follows too
@@ -290,15 +297,21 @@ function eachKlaf(fn) {
 const CM = { poles: {}, lash: {}, sheets: {} };
 const ghost = makePoleMesh(0);
 ghost.material = ghost.material.map(m => { const c = m.clone(); c.transparent = true; c.opacity = 0.55; return c; });
-ghost.castShadow = false; ghost.visible = false; scene.add(ghost);
+ghost.castShadow = false; ghost.visible = false; curGroup.add(ghost);
 const slotGlow = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.16), new THREE.MeshBasicMaterial({ color: 0xe0a93b, transparent: true, opacity: 0.45, depthWrite: false }));
-slotGlow.rotation.x = -Math.PI / 2; slotGlow.visible = false; scene.add(slotGlow);
+slotGlow.rotation.x = -Math.PI / 2; slotGlow.visible = false; curGroup.add(slotGlow);
 
 for (const m of KM) {
   for (const j of [...JOINTS, ...STAKE_JOINTS]) { const g = makeLashing(); g.visible = false; scene.add(g); m.lash[j.id] = g; }
   for (const st of LEG_STAKES) { const s = makeStake(LEG_STAKE_LEN); s.visible = false; scene.add(s); m.stakes[st.id] = s; }
   for (const g of GUYS) { const s = makeStake(ANCHOR_LEN); s.visible = false; scene.add(s); m.stakes['A' + g.id] = s; }
   for (const g of GUYS) { m.ropes[g.id] = new RopeViz(scene); m.ropes[g.id].show(false); }
+}
+// each klaf's meshes in a group of their own, so a free-build structure can stand anywhere
+for (const m of KM) {
+  m.group = new THREE.Group(); scene.add(m.group);
+  const objs = [...Object.values(m.poles).flat(), ...Object.values(m.lash), ...Object.values(m.stakes), ...(m.triStakes || []), ...Object.values(m.ropes).flatMap(r => r.segs)];
+  for (const o of objs) m.group.add(o);
 }
 {
   // meshes for every side pole and lashing of every cube level (ids repeat between levels)
@@ -331,6 +344,7 @@ const people = {};
 // the work crew: carries poles and drives stakes
 const crew = makeCrew(scene, 8);
 const allActors = [...Object.values(people), ...crew];
+for (const a of allActors) curGroup.add(a.mesh); // the crew works on the current structure
 window.CREW = CREW;
 
 // the מדריך who runs the inspection (מסדר): a scout leader in a wide-brimmed hat
@@ -342,7 +356,7 @@ const inspector = new Actor(scene, 3, { noCap: true });
   const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.21, 0.16, 14), mat); crown.position.y = 0.075;
   hat.add(brim, crown); hat.position.y = 1.06;
   inspector.mesh.userData.torso.add(hat);
-  allActors.push(inspector);
+  allActors.push(inspector); curGroup.add(inspector.mesh);
 }
 // the inspection's buckets of water, one per klaf
 const buckets = [0, 1, 2].map(() => {
@@ -351,11 +365,11 @@ const buckets = [0, 1, 2].map(() => {
   pail.position.y = -0.5; pail.castShadow = true;
   const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.38, 5), new THREE.MeshStandardMaterial({ color: 0xd8b878, roughness: 1 }));
   rope.position.y = -0.19;
-  g.add(pail, rope); g.visible = false; scene.add(g);
+  g.add(pail, rope); g.visible = false; curGroup.add(g);
   return g;
 });
 const pushArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 0.8, 0xe2593f, 0.25, 0.16);
-pushArrow.visible = false; scene.add(pushArrow);
+pushArrow.visible = false; curGroup.add(pushArrow);
 
 // markers are drawn as camera-facing rings; taps pick the nearest one on screen
 function ringTexture(color, glyph) {
@@ -378,7 +392,7 @@ const markerPool = [];
 function markerSprite(i) {
   if (!markerPool[i]) {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: markerTex.lash, depthTest: false, transparent: true, sizeAttenuation: false }));
-    s.renderOrder = 10; scene.add(s); markerPool[i] = s;
+    s.renderOrder = 10; curGroup.add(s); markerPool[i] = s;
   }
   return markerPool[i];
 }
@@ -621,10 +635,10 @@ function stagePose(mode) {
   // narrower screens step back a little; free build's sheet is bigger than a 2×2 klaf
   // (the carousel's 5 m cube is seen from further away, aimed higher)
   const S = LV.camScale ?? 1;
-  const far = (aspect < 1.6 ? 1.25 : 1) * S * (freeKlaf() ? (mode === 'buildView' ? 1.5 : Math.max(1, LEVEL.height / 2 * 1.1)) : 1);
+  const far = (aspect < 1.6 ? 1.25 : 1) * S * (freeKlaf() ? (mode === 'buildView' ? 1.55 : Math.max(1, LEVEL.height / 2 * 1.1)) : 1);
   // Omer's reference: a fixed high three-quarter view (about 50 to 60 degrees up),
   // turned about 45 degrees so the structure is seen corner-on, through a narrow lens
-  const at = (target, dist, elev, azim) => ({ target, pos: target.clone().add(new THREE.Vector3(Math.sin(azim) * Math.cos(elev), Math.sin(elev), -Math.cos(azim) * Math.cos(elev)).multiplyScalar(dist * far)) });
+  const at = (target, dist, elev, azim) => (target.x += X0(), { target, pos: target.clone().add(new THREE.Vector3(Math.sin(azim) * Math.cos(elev), Math.sin(elev), -Math.cos(azim) * Math.cos(elev)).multiplyScalar(dist * far)) });
   const z = LV.cube && cubeStage(G.stage) ? (LV.cube.span ?? LV.cube.depth) / 2 : z0();
   if (triOn()) {
     const c = triCentre();
@@ -635,7 +649,7 @@ function stagePose(mode) {
   if (mode === 'seatView') return at(new THREE.Vector3(SEAT_C[0], 0.2, SEAT_C[1]), 6.5, 1.12, 0.6);
   if (mode === 'wheelView') return at(new THREE.Vector3(0, 1.6, WHEEL_Z), 17, 0.6, 0.42);
   if (mode === 'gondView') return at(new THREE.Vector3(WSEAT_C[0], 1.3, WSEAT_C[1]), 17, 0.62, 0.45);
-  if (mode === 'buildView') return at(new THREE.Vector3(0, 0, z + (LV.free ? 1.6 : 1.0 * S)), 16.5, 1.08, 0.5);
+  if (mode === 'buildView') return at(new THREE.Vector3(0, 0, z + (LV.free ? 2.5 : 1.0 * S)), 16.5, 1.08, 0.5);
   if (mode === 'workView') return at(new THREE.Vector3(0, 0.6 * S, z + 0.2), 15, 0.95, 0.72);
   if (mode === 'cubeView') return at(new THREE.Vector3(0, 0.9 * S, z), 17 + 4 * ((LV.cube?.bays ?? 1) - 1), 0.92, 0.78);
   return at(new THREE.Vector3(0, 0.7 * S, z + 0.4), 26, 0.98, 0.78);
@@ -709,14 +723,19 @@ resize();
 { const p = stagePose('buildView'); camera.position.copy(p.pos); controls.target.copy(p.target); camera.lookAt(p.target); }
 
 // ---------------- screen picking ----------------
+// toScreen and groundAt work in the current structure's own frame (shifted by x0 in free build)
 function toScreen(p) {
-  const v = new THREE.Vector3(...p).project(camera);
+  const v = new THREE.Vector3(p[0] + X0(), p[1], p[2]).project(camera);
   if (v.z > 1) return null;
   return [(v.x + 1) / 2 * window.innerWidth, (1 - v.y) / 2 * window.innerHeight];
 }
 const raycaster = new THREE.Raycaster();
 const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 function groundAt(x, y) {
+  const out = groundWorld(x, y); if (out) out.x -= X0();
+  return out;
+}
+function groundWorld(x, y) {
   const ndc = new THREE.Vector2(x / window.innerWidth * 2 - 1, -(y / window.innerHeight) * 2 + 1);
   raycaster.setFromCamera(ndc, camera);
   const out = new THREE.Vector3();
@@ -965,10 +984,63 @@ const poleLashed = id => JOINTS.some(j => (j.a === id || j.b === id) && G.build.
 const LASHED_MSG = '<b>הסנדה הזו כבר כפותה</b> ולא זזה. כדי להזיז אותה מתירים קודם את הכפיתות שלה';
 let moveDrag = null;
 function onRing(x, y, r = 15) { return targets.some(t => { const sp = toScreen(t.pos); return sp && Math.hypot(sp[0] - x, sp[1] - y) < r; }); }
+// ---- moving a whole structure over the plaza (Omer, 2026-11-21) ----
+// A structure lying on the ground is dragged anywhere on the plaza: by the move handle beside
+// it, by a pole that is already lashed, or (a tripod) by any of its legs.
+let wholeDrag = null;
+const canMoveWhole = () => LV.free && G.stage === 'build' && !G.sim && !(G.tri && (G.tri.up > 0 || G.tri.raising)) && !G.falling && !closeup && !decor?.active;
+function startWhole(x, y) {
+  const p = groundWorld(x, y); if (!p) return false;
+  const c = K().cfg;
+  wholeDrag = { p0: [p.x, p.z], x0: c.x0 || 0, z0: c.z0, moved: false };
+  controls.enabled = false;
+  return true;
+}
+function moveWhole(x, y) {
+  const m = wholeDrag, p = groundWorld(x, y); if (!m || !p) return;
+  if (!m.moved && Math.hypot(p.x - m.p0[0], p.z - m.p0[1]) < 0.15) return;
+  const sn = v => Math.round(v * 10) / 10, c = K().cfg;
+  // the plaza is about 30 × 26 m: a structure stays on it, lying or raised
+  const nx = Math.max(-11, Math.min(11, sn(m.x0 + p.x - m.p0[0]))), nz = Math.max(-9, Math.min(11 - (G.tri ? TRI.legLength : LEVEL.height), sn(m.z0 + p.z - m.p0[1])));
+  if (!m.moved) { m.moved = true; hideRaiseIcon(); selectPole(null); closePicker(); }
+  if (nx === (c.x0 || 0) && nz === c.z0) return;
+  c.x0 = nx; c.z0 = nz; useKlaf(G.ki);
+}
+function endWhole() {
+  const m = wholeDrag; if (!m) return; wholeDrag = null;
+  if (!camTween && !closeup) controls.enabled = true;
+  if (!m.moved) return;
+  sfx.thud(); camMode = null; setCameraMode('buildView');
+  flashHint(`המקום של <b>${K().cfg.he}</b> עודכן. אפשר לגרור שוב, או להקיש על המבנה כשהוא מוכן להרמה`);
+  refreshAll();
+}
+const moveIcon = Object.assign(document.createElement('button'), { type: 'button', id: 'move-icon', hidden: true, title: 'גררו כדי להזיז', innerHTML: '<span class="arrow">✥</span><span>גררו להזזה</span>' });
+document.body.appendChild(moveIcon);
+moveIcon.addEventListener('pointerdown', e => { e.preventDefault(); if (!canMoveWhole() || !startWhole(e.clientX, e.clientY)) return; try { moveIcon.setPointerCapture(e.pointerId); } catch { /* fine */ } });
+moveIcon.addEventListener('pointermove', e => { if (wholeDrag) moveWhole(e.clientX, e.clientY); });
+moveIcon.addEventListener('pointerup', endWhole);
+moveIcon.addEventListener('pointercancel', endWhole);
+function placeMoveIcon() {
+  const show = canMoveWhole() && !G.armed && !wholeDrag?.moved && !G.check && $('picker').hidden && !G.selected && !G.tying && $('modal').hidden;
+  moveIcon.hidden = !show; if (!show) return;
+  const p = toScreen(G.tri ? [1.5, 0, z0() - 0.6] : [-(GRID.uMax + 0.9), 0, z0() - 0.8]); if (!p) { moveIcon.hidden = true; return; }
+  moveIcon.style.left = Math.max(70, Math.min(window.innerWidth - 190, p[0])) + 'px';
+  moveIcon.style.top = Math.max(70, Math.min(window.innerHeight - 120, p[1])) + 'px';
+}
+canvas.addEventListener('pointerdown', e => {
+  if (!LV.free || !canMoveWhole() || G.armed || !freeTri()) return;
+  const sid = pickPole(e.clientX, e.clientY); if (!sid) return;
+  if (startWhole(e.clientX, e.clientY)) { try { canvas.setPointerCapture(e.pointerId); } catch { /* fine */ } }
+});
+canvas.addEventListener('pointermove', e => { if (wholeDrag) moveWhole(e.clientX, e.clientY); });
+canvas.addEventListener('pointerup', endWhole);
+canvas.addEventListener('pointercancel', endWhole);
 canvas.addEventListener('pointerdown', e => {
   if (decor?.active || !freeKlaf() || G.stage !== 'build' || G.armed || G.falling || closeup || G.sim) return;
   if (onRing(e.clientX, e.clientY)) return; // right on a ring: that press ties a lashing
   const sid = pickPole(e.clientX, e.clientY); if (!sid || G.carrying[sid]) return;
+  // a lashed pole doesn't move on its own: it takes the whole klaf with it
+  if (poleLashed(sid)) { if (startWhole(e.clientX, e.clientY)) { try { canvas.setPointerCapture(e.pointerId); } catch { /* fine */ } } return; }
   const a = toKlaf(e.clientX, e.clientY); if (!a) return;
   moveDrag = { sid, a, from: [...slotById(sid).centre], moved: false, locked: poleLashed(sid) };
   controls.enabled = false;
@@ -1068,7 +1140,7 @@ function freeSync(slots) {
 // Another structure of the same sandbox, a klaf or a tripod (Omer, 2026-11-20): it is
 // built on the ground a little further back, and raised in its turn after all are built.
 // A lying tripod's legs reach 4.5 m back, so the one after it starts further away.
-const freeGap = (prev, kind) => prev.kind === 'tripod' ? 5.2 : kind === 'tripod' ? 3.2 : 2.4;
+const freeGap = (prev, kind) => prev.kind === 'tripod' ? 5.2 : (prev.frontDist || 2) + (kind === 'tripod' ? 1.2 : 0.4);
 function nameFree() {
   const n = { klaf: 0, tripod: 0 };
   for (const k of LV.klafim) { const kind = k.kind || 'klaf'; n[kind]++; k.he = `${kind === 'tripod' ? 'חצובה' : 'קלף'} ${n[kind]}`; k.short = (kind === 'tripod' ? 'ח' : '') + n[kind]; }
@@ -1084,18 +1156,7 @@ function addFreeKlaf(kind = 'klaf') {
   KM[n].blueprint.visible = false;
   STAGES = stageList(); makeChips();
   goStage(`build:${n}`);
-  flashHint(`<b>${cfg.he}</b> ${kind === 'tripod' ? 'תיבנה' : 'ייבנה'} ${(cfg.z0 - prev.z0).toFixed(1)} מ׳ מאחורי ה${prev.he}. אפשר לקרב ולהרחיק`);
-}
-// placing a klaf: nearer to the one before it, or further away (only while it lies on the ground)
-function moveFreeKlaf(d) {
-  const cfg = K().cfg, prev = LV.klafim[G.ki - 1]; if (!prev || G.sim || G.tri?.up > 0) return;
-  const gap = Math.max(1.0, Math.min(8.0, Math.round((cfg.z0 - prev.z0 + d) * 10) / 10));
-  const shift = prev.z0 + gap - cfg.z0;
-  // the klafim behind it move with it
-  for (let i = G.ki; i < LV.klafim.length; i++) { if (G.klafim[i].sim || G.klafim[i].tri?.up > 0) return flashHint('מבנה שכבר הורם לא זז'); }
-  for (let i = G.ki; i < LV.klafim.length; i++) LV.klafim[i].z0 = Math.round((LV.klafim[i].z0 + shift) * 10) / 10;
-  camMode = null; setCameraMode('buildView');
-  sfx.tick(); flashHint(`<b>${cfg.he}</b> · ${gap.toFixed(1)} מ׳ מאחורי ה${prev.he}`);
+  flashHint(`<b>${cfg.he}</b> ${kind === 'tripod' ? 'תיבנה' : 'ייבנה'} ${(cfg.z0 - prev.z0).toFixed(1)} מ׳ מאחורי ה${prev.he}. גררו את <b>✥</b> כדי למקם אותו בכל מקום במגרש`);
 }
 function freeHint(nPoles, nJ) {
   const b = G.build;
@@ -2598,7 +2659,7 @@ const jobs = [];
 const driverPool = [];
 function getDriver() {
   let d = driverPool.find(m => !m.userData.used);
-  if (!d) { d = makeDriver(); scene.add(d); driverPool.push(d); }
+  if (!d) { d = makeDriver(); curGroup.add(d); driverPool.push(d); }
   d.userData.used = true; d.visible = true;
   return d;
 }
@@ -2744,7 +2805,6 @@ function refreshActions() {
   const nextLabel = () => nx.id === 'build' ? `המשך לבניית ה${of}` : nx.id === 'spread' ? (of ? `המשך להקמת ה${of}` : 'המשך להקמה')
     : nx.id === 'stakes' ? (G.stage !== 'build' && of ? `המשך להרמת ה${of}` : of ? `המשך לבז״נטים, ${of}` : 'המשך לבז״נטים') : nx.id === 'check' ? 'למסדר המדריך' : nx.id === 'cube' ? 'המשך לחיבור הקובייה' : `המשך ל${nx.he}`;
   if (LV.free && G.stage === 'build') {
-    if (G.ki > 0 && !G.sim && !(G.tri?.up > 0)) { add('◀ לקרב', () => moveFreeKlaf(-0.2), false); add('להרחיק ▶', () => moveFreeKlaf(0.2), false); }
     if (stageDone('build') && nx.id !== 'build' && LV.klafim.length < MAX_KLAFIM) add('+ עוד מבנה', () => showModal('<h2>מה מוסיפים למגרש?</h2><p>בונים אותו על הקרקע מאחורי האחרון. אחרי שהכול בנוי מרימים את המבנים אחד אחרי השני.</p>',
       [['קלף', () => { closeModal(); addFreeKlaf('klaf'); }, true], ['חצובה', () => { closeModal(); addFreeKlaf('tripod'); }, true], ['ביטול', closeModal]]), false);
   }
@@ -3361,7 +3421,7 @@ function useHint(s) {
 function restart() {
   closeModal();
   clearJobs();
-  if (LV.free) { LV.klafim.length = 1; Object.assign(LV.klafim[0], { z0: 0, he: freeFirst === 'tripod' ? 'חצובה' : 'קלף', kind: freeFirst }); delete LV.klafim[0].short; setPlan([], []); freeCfg(LV.klafim[0], []); G && (G.armed = null); controls.enabled = true; STAGES = stageList(); makeChips(); }
+  if (LV.free) { LV.klafim.length = 1; Object.assign(LV.klafim[0], { z0: 0, x0: 0, he: freeFirst === 'tripod' ? 'חצובה' : 'קלף', kind: freeFirst }); delete LV.klafim[0].short; setPlan([], []); freeCfg(LV.klafim[0], []); G && (G.armed = null); controls.enabled = true; STAGES = stageList(); makeChips(); }
   if (LV.tripod) setPlan(TRI_SLOTS, TRI_JOINTS);
   G = freshState();
   // each klaf's drawing on the ground, at its size (the carousel's 5 m klafim need a bigger sheet)
@@ -3386,6 +3446,7 @@ function restart() {
   if (LV.cube) { for (const side of [-1, 1]) drawSideSheet(CM.sheets[side], LV.cube, side, LV.klafim.map(k => k.he)); drawTopSheet(CM.sheets[0], LV.cube, LV.klafim.map(k => k.he)); }
   $('timer').textContent = '0:00';
   drawPlaza();
+  camMode = null; // a new level: always aim the camera afresh
   goStage(STAGES[0].key);
   refreshAll();
   startChallenge();
@@ -3808,11 +3869,11 @@ function record(dt) {
 const markMat = new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.9, depthTest: false });
 const marks = [];
 function mark(i) {
-  if (!marks[i]) { marks[i] = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.025, 8, 28), markMat); marks[i].renderOrder = 10; scene.add(marks[i]); }
+  if (!marks[i]) { marks[i] = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.025, 8, 28), markMat); marks[i].renderOrder = 10; curGroup.add(marks[i]); }
   return marks[i];
 }
 const ghostMat = new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.5, depthWrite: false });
-const ghostPoles = [...Array(12).keys()].map(() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1, 10), ghostMat); m.visible = false; scene.add(m); return m; });
+const ghostPoles = [...Array(12).keys()].map(() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1, 10), ghostMat); m.visible = false; curGroup.add(m); return m; });
 function startReplay() {
   if (rec.length < 2 || !G.falling.t0) { collapseCard(); return; }
   const t0 = Math.max(rec[0].t, G.falling.t0 - REPLAY.before);
@@ -4385,7 +4446,7 @@ function frame(now) {
   updateCamera(dt);
   hintTimer += dt;
   if (hintTimer > 0.25) { hintTimer = 0; refreshHint(); $('timer').textContent = timerText(); $('tray-count').textContent = G.challenge ? '' : rigStage(G.stage) ? `${rigPart().filter(s => G.wheel.build.poles[s.id]).length}/${rigPart().length} ב${G.stage === 'gond' ? 'מושב' : 'גלגל'}` : G.stage === 'seat' ? `${SEAT.slots.filter(s => G.seat.build.poles[s.id]).length}/${SEAT.slots.length} במושב` : G.stage === 'hang' ? (mastOn() ? 'התורן במקום' : 'חסר תורן') : G.stage === 'cube' ? `${LV.cube.slots.filter(s => G.cube.build.poles[s.id]).length}/${LV.cube.slots.length} בקובייה` : `${SLOTS.filter(s => G.build.poles[s.id]).length}/${SLOTS.length || 6} על השרטוט`; }
-  decor?.tick(now / 1000); placeRaiseIcon();
+  decor?.tick(now / 1000); placeRaiseIcon(); placeMoveIcon();
   fun.tick(dt, camera, toScreen); balanceTick(dt, now / 1000); stepParade(dt);
   fun.preRender(camera);
   renderer.render(scene, camera);
