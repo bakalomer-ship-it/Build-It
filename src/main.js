@@ -696,7 +696,7 @@ function stagePose(mode) {
   // narrower screens step back a little; free build's sheet is bigger than a 2×2 klaf
   // (the carousel's 5 m cube is seen from further away, aimed higher)
   const S = LV.camScale ?? 1;
-  const far = (aspect < 1.6 ? 1.25 : 1) * S * (freeKlaf() ? (mode === 'buildView' ? 1.55 : Math.max(1, LEVEL.height / 2 * 1.1)) : 1);
+  const far = (aspect < 1.6 ? 1.25 : 1) * S * (freeKlaf() && mode !== 'cubeView' ? (mode === 'buildView' ? 1.55 : Math.max(1, LEVEL.height / 2 * 1.1)) : 1);
   // Omer's reference: a fixed high three-quarter view (about 50 to 60 degrees up),
   // turned about 45 degrees so the structure is seen corner-on, through a narrow lens
   const at = (target, dist, elev, azim) => (target.x += X0(), { target, pos: target.clone().add(new THREE.Vector3(Math.sin(azim) * Math.cos(elev), Math.sin(elev), -Math.cos(azim) * Math.cos(elev)).multiplyScalar(dist * far)) });
@@ -712,7 +712,7 @@ function stagePose(mode) {
   if (mode === 'gondView') return at(new THREE.Vector3(WSEAT_C[0], 1.3, WSEAT_C[1]), 17, 0.62, 0.45);
   if (mode === 'buildView') return at(new THREE.Vector3(0, 0, z + (LV.free ? 2.5 : 1.0 * S)), 16.5, 1.08, 0.5);
   if (mode === 'workView') return at(new THREE.Vector3(0, 0.6 * S, z + 0.2), 15, 0.95, 0.72);
-  if (mode === 'cubeView') return at(new THREE.Vector3(0, 0.9 * S, z), 17 + 4 * ((LV.cube?.bays ?? 1) - 1) + (LV.cube?.free ? 2.5 * Math.max(0, LV.cube.span - 2) : 0), 0.92, 0.78);
+  if (mode === 'cubeView') return at(new THREE.Vector3(0, 0.9 * S, z), 17 + 4 * ((LV.cube?.bays ?? 1) - 1) + (LV.cube?.free ? 2.5 * Math.max(0, LV.cube.span - 2) + 2 * Math.max(0, LV.cube.height - 2) : 0), 0.92, 0.78);
   return at(new THREE.Vector3(0, 0.7 * S, z + 0.4), 26, 0.98, 0.78);
 }
 function setCameraMode(mode) {
@@ -942,9 +942,11 @@ function onTap(x, y) {
   // sandbox: a tap on the klaf itself, not right on a lashing, is for the klaf (move, raise)
   if (t && LV.free && G.stage === 'build' && t.kind === 'lashed' && !onRing(x, y) && pickPole(x, y)) t = null;
   if (t) return onTarget(t, x, y);
-  if (LV.free && G.stage === 'cube' && !pickPole(x, y)) {
-    const slot = nearestCubeSlot(x, y);
-    if (slot) { G.lastLength = slot.length; placePole(slot); flashHint(`<b>${slot.he}</b>, ${slot.length.toFixed(1)} מ׳. הקישו על הטבעות כדי לכפות אותה`); refreshAll(); return; }
+  if (LV.free && G.stage === 'cube') {
+    // a tap nearer a suggested line than a pole already put in puts a pole on that line
+    const near = {}, slot = nearestCubeSlot(x, y, near), sid = pickPole(x, y);
+    const poleD = sid ? Math.min(...cubeSegs(sid).map(([a, b]) => { const A = toScreen(a), B = toScreen(b); return A && B ? distToSeg(x, y, A, B) : 1e9; })) : 1e9;
+    if (slot && near.d < poleD) { G.lastLength = slot.length; placePole(slot); flashHint(`<b>${slot.he}</b>, ${slot.length.toFixed(1)} מ׳. הקישו על הטבעות כדי לכפות אותה`); refreshAll(); return; }
   }
   if (G.stage === 'brace') { // a brace that was put in goes back to the pile with a tap
     const sid = pickBrace(x, y);
@@ -2597,7 +2599,7 @@ function endDrag() {
 }
 trayPole.addEventListener('pointerup', endDrag);
 trayPole.addEventListener('pointercancel', () => { drag = null; ghost.visible = false; slotGlow.visible = false; });
-function nearestCubeSlot(x, y) {
+function nearestCubeSlot(x, y, out = {}) {
   let best = null, bd = 44;
   for (const s of LV.cube.slots) {
     if (G.cube.build.poles[s.id]) continue;
@@ -2606,6 +2608,7 @@ function nearestCubeSlot(x, y) {
     const d = distToSeg(x, y, A, B);
     if (d < bd) { bd = d; best = s; }
   }
+  out.d = bd;
   return best;
 }
 function nearestSlot(x, z) {
@@ -2766,6 +2769,12 @@ function ropeUsed() {
 const ropeLeft = () => ropeTotal() - ropeUsed();
 let pileKey = '';
 function renderPile() {
+  if (LV.free && G.stage === 'cube') {
+    // joining: the poles come cut to length, one per blue line
+    if (pileKey !== 'join') { pileKey = 'join'; $('tray-pole').innerHTML = '<div class="pile-item pole-bar on" data-len="free"><span class="pile-stick" style="width:70px;background:#2f7fd8"></span><b>חיבור</b><small>הקישו על קו כחול</small></div>'; }
+    $('rope-count').innerHTML = ''; $('tray-count').textContent = '';
+    return;
+  }
   if (freeKlaf()) {
     const key = 'free' + !!G.armed;
     if (key !== pileKey) {
@@ -3310,7 +3319,7 @@ function statusText(nPoles, nJ) {
       const cb = G.cube.build;
       if (LV.cube.free) {
         const nP = LV.cube.slots.filter(s => cb.poles[s.id]).length, js = LV.cube.joints.filter(joinPlaced), nJ = js.filter(j => cb.joints[j.id]).length;
-        if (!nP) return 'הקישו על <b>קו מקווקו</b> בין הקלפים כדי להניח שם סנדת חיבור: חיבור תחתון ועליון בכל צד, איקס בכל צד ואיקס למעלה. בוחרים מה לחבר';
+        if (!nP) return 'הקישו על <b>קו כחול</b> בין הקלפים כדי להניח שם סנדת חיבור: חיבור תחתון ועליון בכל צד, איקס בכל צד ואיקס למעלה. בוחרים מה לחבר';
         return `סנדות חיבור ${nP}/${LV.cube.slots.length} · כפיתות ${nJ}/${js.length}${nJ < js.length ? ' · הקישו על <b>טבעת</b> כדי לכפות' : ' · אפשר להוסיף עוד, או לקרוא למדריך'}`;
       }
       return `סנדות בקובייה ${LV.cube.slots.filter(s => cb.poles[s.id]).length}/${LV.cube.slots.length} · כפיתות ${LV.cube.joints.filter(j => cb.joints[j.id]).length}/${LV.cube.joints.length}`;
@@ -4647,10 +4656,10 @@ function cubeJointPos(j) {
   return add3(j.at, off, 1);
 }
 // free build: every joining pole not put in yet is shown as a see-through line
-const joinGhostMat = new THREE.MeshBasicMaterial({ color: 0xf2c14e, transparent: true, opacity: 0.42, depthWrite: false });
+const joinGhostMat = new THREE.MeshBasicMaterial({ color: 0x2f7fd8, transparent: true, opacity: 0.6, depthWrite: false });
 function drawJoinGhosts() {
   const list = LV.cube?.free && G.stage === 'cube' && !G.check ? LV.cube.slots.filter(s => !G.cube.build.poles[s.id] && !G.cube.carrying[s.id]) : [];
-  while (joinGhosts.length < list.length) { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1, 8), joinGhostMat); m.renderOrder = 5; cubeGroup.add(m); joinGhosts.push(m); }
+  while (joinGhosts.length < list.length) { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 1, 8), joinGhostMat); m.renderOrder = 5; cubeGroup.add(m); joinGhosts.push(m); }
   joinGhosts.forEach((m, i) => {
     const s = list[i]; m.visible = !!s; if (!s) return;
     const [[a, b]] = cubeSegs(s.id, true, s.length);
@@ -4969,7 +4978,7 @@ function frame(now) {
   collectTargets();
   updateCamera(dt);
   hintTimer += dt;
-  if (hintTimer > 0.25) { hintTimer = 0; refreshHint(); $('timer').textContent = timerText(); $('tray-count').textContent = G.challenge ? '' : rigStage(G.stage) ? `${rigPart().filter(s => G.wheel.build.poles[s.id]).length}/${rigPart().length} ב${G.stage === 'gond' ? 'מושב' : 'גלגל'}` : G.stage === 'seat' ? `${SEAT.slots.filter(s => G.seat.build.poles[s.id]).length}/${SEAT.slots.length} במושב` : G.stage === 'hang' ? (mastOn() ? 'התורן במקום' : 'חסר תורן') : G.stage === 'cube' ? `${LV.cube.slots.filter(s => G.cube.build.poles[s.id]).length}/${LV.cube.slots.length} בקובייה` : `${SLOTS.filter(s => G.build.poles[s.id]).length}/${SLOTS.length || 6} על השרטוט`; }
+  if (hintTimer > 0.25) { hintTimer = 0; refreshHint(); $('timer').textContent = timerText(); $('tray-count').textContent = G.challenge ? '' : rigStage(G.stage) ? `${rigPart().filter(s => G.wheel.build.poles[s.id]).length}/${rigPart().length} ב${G.stage === 'gond' ? 'מושב' : 'גלגל'}` : G.stage === 'seat' ? `${SEAT.slots.filter(s => G.seat.build.poles[s.id]).length}/${SEAT.slots.length} במושב` : G.stage === 'hang' ? (mastOn() ? 'התורן במקום' : 'חסר תורן') : G.stage === 'cube' ? `${LV.cube.slots.filter(s => G.cube.build.poles[s.id]).length}/${LV.cube.slots.length} ${LV.cube.free ? "חיבורים" : "בקובייה"}` : `${SLOTS.filter(s => G.build.poles[s.id]).length}/${SLOTS.length || 6} על השרטוט`; }
   decor?.tick(now / 1000); placeRaiseIcon(); placeMoveIcon();
   fun.tick(dt, camera, toScreen); balanceTick(dt, now / 1000); stepParade(dt);
   fun.preRender(camera);
