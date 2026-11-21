@@ -154,7 +154,7 @@ export function freeRows(cfgs) {
 }
 const up10 = x => Math.ceil(x * 10 - 1e-6) / 10;
 // members: [{ z0, legL, legR }] front to back (legs are the klafim's leg slots); r: pole radius
-export function freeJoinPlan(members, r) {
+export function freeJoinPlan(members, r, tag = '') {
   const slots = [], joints = [], xs = [], legV = members.map(() => new Set());
   const top = m => Math.min(...['legL', 'legR'].map(id => m[id].centre[1] + m[id].length / 2));
   const BOT = 0.45, INSET = 0.15;
@@ -215,6 +215,11 @@ export function freeJoinPlan(members, r) {
     const need = up10(2 * Math.max(...ts.map(Math.abs)) + 2 * LASH_ALLOW);
     if (need > s.length) s.length = need;
   }
+  // every row has ids of its own (F<tag>.…), so the poles of several rows can be on the plaza together
+  const re = x => x.replace(/^F\./, `F${tag}.`);
+  for (const q of slots) q.id = re(q.id);
+  for (const j of joints) { j.id = re(j.id); j.a = re(j.a); if (j.b) j.b = re(j.b); }
+  for (const x of xs) x.ids = x.ids.map(re);
   const zA = members[0].z0, zB = members[members.length - 1].z0;
   const legX = Math.max(...members.flatMap(m => [Math.abs(m.legL.centre[0]), Math.abs(m.legR.centre[0])]));
   return { free: true, slots, joints, xs, legV: legV.map(s => [...s]), zA, zB, depth: zB - zA, span: zB - zA, bays: 1,

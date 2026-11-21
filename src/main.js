@@ -65,7 +65,8 @@ function stageList() {
   LV.klafim.forEach((k, i) => st(stagesOf(k)[0], k, i));
   LV.klafim.forEach((k, i) => stagesOf(k).slice(1).forEach(s => st(s, k, i)));
   // free build: klafim standing one behind the other can be joined (Omer, 2026-11-21)
-  if (LV.free && freeRows(LV.klafim).length) L.push({ key: 'cube', id: 'cube', k: null, he: 'חיבור הקלפים' });
+  // (every row of klafim is joined in a stage of its own)
+  if (LV.free) { const rows = freeRows(LV.klafim); rows.forEach((r, n) => L.push({ key: rows.length > 1 ? `cube:${n}` : 'cube', id: 'cube', k: null, row: n, he: rows.length > 1 ? `חיבור הקלפים, שורה ${n + 1}` : 'חיבור הקלפים' })); }
   if (LV.cube && !LV.free) {
     L.push({ key: 'cube', id: 'cube', k: null, he: 'חיבור הקלפים לקובייה' });
     L.push({ key: 'unguy', id: 'unguy', k: null, he: 'הורדת היתרים הפנימיים' });
@@ -110,6 +111,7 @@ function freshState() {
     stage: 'build', stageKey: STAGES[0].key,
     ki: 0, klafim: LV.klafim.map(freshKlaf),
     cube: LV.cube || LV.free ? { build: { poles: {}, joints: {} }, sim: null, carrying: {} } : null,
+    joins: {}, // free build: each row of joined klafim, by its klafim (G.cube is the row being worked on)
     height: LV.cube || LV.free ? freshHeight() : null, // work at height (עבודה בגובה)
     // the carousel's seat: built on the ground (build), lifted (lift 0 … 1), and hung from the mast
     seat: LV.carousel ? freshSeat() : null,
@@ -338,9 +340,9 @@ for (const m of KM) {
 const cubeGroup = new THREE.Group(); scene.add(cubeGroup);
 let cubeMeshN = 0;
 // meshes for every side pole and lashing of a cube plan (ids repeat between levels)
-function ensureCubeMeshes(plan) {
-  for (const s of plan.slots) if (!CM.poles[s.id]) { const a = makePoleMesh((cubeMeshN++ % 3) / 2); a.visible = false; cubeGroup.add(a); CM.poles[s.id] = [a]; }
-  for (const j of plan.joints) if (!CM.lash[j.id]) { const g = makeLashing(); g.visible = false; cubeGroup.add(g); CM.lash[j.id] = g; }
+function ensureCubeMeshes(plan, grp = cubeGroup) {
+  for (const s of plan.slots) if (!CM.poles[s.id]) { const a = makePoleMesh((cubeMeshN++ % 3) / 2); a.visible = false; grp.add(a); CM.poles[s.id] = [a]; }
+  for (const j of plan.joints) if (!CM.lash[j.id]) { const g = makeLashing(); g.visible = false; grp.add(g); CM.lash[j.id] = g; }
 }
 // free build: the suggested joining poles, as see-through lines
 const joinGhosts = [];
@@ -509,7 +511,8 @@ function stageDone(key) {
   const st = STAGES.find(s => s.key === key);
   if (st && st.k != null && st.k !== G.ki) { const keep = G.ki; useKlaf(st.k); const d = stageDone(st.id); useKlaf(keep); return d; }
   const id = st ? st.id : key;
-  if (id === 'cube') return !!G.cube && !!LV.cube && (LV.cube.free ? countTrue(G.cube.build.joints) > 0 : cubeComplete());
+  if (id === 'cube' && LV.free) { const r = freeRows(LV.klafim)[st?.row ?? 0], J = r && G.joins?.[r.join(',')]; return !!J && countTrue(J.build.joints) > 0; }
+  if (id === 'cube') return !!G.cube && !!LV.cube && cubeComplete();
   if (id === 'seat') return !!G.seat && seatPolesIn() && SEAT.joints.every(j => G.seat.build.joints[j.id]);
   if (id === 'hang') return !!G.seat && hangReady();
   if (id === 'wheel') return !!G.wheel && rigDone('wheel');
@@ -566,7 +569,7 @@ function goStage(key) {
     if (id === 'build' && G.sim) lowerKlaf();
     if (id !== 'build') { selectPole(null); if (!G.sim) startSim(); }
   } else if (LV.free && id === 'cube') {
-    if (!enterFreeJoin()) return;
+    if (!enterFreeJoin(st.row ?? 0)) return;
   } else if (LV.cube || LV.wheel) {
     if (LV.wheel && wheelStage(id) && !G.klafim.every((k, i) => stageDone(STAGES.find(q => q.id === 'brace' && q.k === i).key) && k.tri.up >= 1)) {
       infoCard('קודם מקימים את שתי החצובות', 'הגלגל נח על ראשי שתי החצובות. קודם מקימים כל חצובה, מעמידים את הרגליים שלה במקומן, ומוסיפים חיזוקים ובז״נטים.'); return;
@@ -610,31 +613,39 @@ function enterCube() {
 }
 // back to a klaf stage: each raised klaf stands again on its own
 function leaveCube() {
-  if (!G.cube?.sim) return;
-  G.cube.sim = null;
+  const rows = LV.free ? Object.values(G.joins || {}) : [];
+  if (!G.cube?.sim && !rows.some(J => J.sim)) return;
+  G.cube.sim = null; rows.forEach(J => { J.sim = null; });
   // (each with its own plan: free-build klafim differ)
   const keep = G.ki;
   G.klafim.forEach((k, i) => { if (k.raisedOnce && !k.tri) { useKlaf(i); k.sim = new KlafSim(k.build, k.cfg); k.sim.standUp(); } });
   useKlaf(keep);
   rec.length = 0;
 }
-function rebuildCube() { if (G.cube?.sim) { G.cube.sim = null; if (LV.free) enterFreeJoin(); else enterCube(); } }
+function rebuildCube() { if (G.cube?.sim) { G.cube.sim = null; if (LV.free) enterFreeJoin(G.cube.row ?? 0); else enterCube(); } }
 // Free build: the klafim of the longest row are joined (Omer, 2026-11-21). The plan is made
 // from where they stand and from their legs, every time the joining starts, and the
 // poles already put in that still fit it stay.
-function enterFreeJoin() {
-  const row = freeRows(LV.klafim)[0];
+const joinGroups = {};
+function enterFreeJoin(n = 0) {
+  const row = freeRows(LV.klafim)[n];
   if (!row) { infoCard('אין קלפים לחבר', 'מחברים קלפים שעומדים זה מאחורי זה באותו קו. גוררים קלף אל מאחורי קלף אחר עד שהוא נצמד לקו שלו.'); return false; }
   const ready = row.every(i => G.klafim[i].raisedOnce && stageDone(STAGES.find(s => s.id === 'anchor' && s.k === i).key));
   if (!ready) { infoCard('קודם מרימים ומעגנים את הקלפים', 'מחברים קלפים שכבר עומדים, כשהיתרים שלהם מקובעים לבז״נטים.'); return false; }
-  if (!G.cube.sim) {
+  // this row's joining: kept by which klafim are in it, so its poles stay while other rows are worked on
+  const key = row.join(','), J = G.joins[key] ??= { build: { poles: {}, joints: {} }, sim: null, carrying: {}, height: freshHeight(), plan: null, tag: row[0] };
+  if (G.cube !== J && G.cube?.height) G.cube.height = G.height; // (the climbers of the row left behind stay with it)
+  G.cube = J; G.height = J.height; J.row = n; J.stageKey = STAGES.find(s => s.id === 'cube' && s.row === n)?.key;
+  if (J.plan) LV.cube = J.plan;
+  if (!J.sim) {
     clearJobs();
-    const plan = freeJoinPlan(row.map(i => { const sl = G.klafim[i].plan.slots; return { z0: LV.klafim[i].z0, legL: sl.find(q => q.id === 'legL'), legR: sl.find(q => q.id === 'legR') }; }), LEVEL.poleRadius);
+    const plan = freeJoinPlan(row.map(i => { const sl = G.klafim[i].plan.slots; return { z0: LV.klafim[i].z0, legL: sl.find(q => q.id === 'legL'), legR: sl.find(q => q.id === 'legR') }; }), LEVEL.poleRadius, J.tag);
     plan.members = row; plan.x0 = LV.klafim[row[0]].x0 || 0;
-    if (LV.cube?.free) for (const id in G.cube.build.poles) if (!plan.slots.some(q => q.id === id)) delete G.cube.build.poles[id];
-    if (LV.cube?.free) for (const id in G.cube.build.joints) if (!plan.joints.some(q => q.id === id)) delete G.cube.build.joints[id];
-    LV.cube = plan;
-    ensureCubeMeshes(plan);
+    for (const id in J.build.poles) if (!plan.slots.some(q => q.id === id)) delete J.build.poles[id];
+    for (const id in J.build.joints) if (!plan.joints.some(q => q.id === id)) delete J.build.joints[id];
+    LV.cube = J.plan = plan;
+    const grp = joinGroups[J.tag] ??= (() => { const g = new THREE.Group(); scene.add(g); return g; })();
+    ensureCubeMeshes(plan, grp);
     // the legs need a point at every height a side pole is lashed to them; each klaf's sim is built with its own plan
     row.forEach((i, n) => { LV.klafim[i].extraLegV = plan.legV[n]; });
     const ks = row.map(i => ({ build: G.klafim[i].build, cfg: G.klafim[i].cfg, i }));
@@ -1314,11 +1325,12 @@ function finishFree() {
   G.result = { stars: 0, free: true };
   sfx.ok();
   let nP = 0, nJ = 0, metres = 0, high = 0, nK = 0, nT = 0;
-  const joined = LV.cube?.free && G.cube?.sim && countTrue(G.cube.build.joints) > 0 ? LV.cube.members.length : 0;
+  const rowsJ = Object.values(G.joins || {}).filter(J => J.sim && J.plan && countTrue(J.build.joints) > 0);
+  const joined = rowsJ.reduce((a, J) => a + J.plan.members.length, 0);
+  for (const J of rowsJ) { nP += countTrue(J.build.poles); nJ += countTrue(J.build.joints); metres += Object.values(J.build.poles).reduce((a, q) => a + q.length, 0); }
   eachKlaf(() => {
     const b = G.build;
     nP += SLOTS.filter(q => b.poles[q.id]).length; nJ += JOINTS.filter(j => b.joints[j.id]).length;
-    if (G.ki === 0 && joined) { const cb = G.cube.build; nP += countTrue(cb.poles); nJ += countTrue(cb.joints); metres += Object.values(cb.poles).reduce((a, q) => a + q.length, 0); }
     metres += SLOTS.reduce((a, q) => a + (b.poles[q.id]?.length || 0), 0);
     if (G.tri) {
       nT++; high = Math.max(high, triState()?.height || 0);
@@ -1335,7 +1347,7 @@ function finishFree() {
     <ul class="inspect">
       <li class="ok">${many ? 'עמדו' : nT ? 'עמדה' : 'עמד'} בדחיפות מכל הכיוונים</li>
       <li class="ok">${many ? 'החזיקו את הדלי והמשקל' : nT ? 'נשאה את המשקל על הראש' : 'החזיק את דלי המים'}</li>
-      ${joined ? `<li class="ok">${joined} קלפים מחוברים עמדו כמבנה אחד</li>` : ''}
+      ${joined ? `<li class="ok">${rowsJ.length > 1 ? `${rowsJ.length} שורות של קלפים מחוברים עמדו, כל שורה כמבנה אחד` : `${joined} קלפים מחוברים עמדו כמבנה אחד`}</li>` : ''}
     </ul>
     <div class="score-grid">
       <span>גובה</span><b>${high.toFixed(1)} מ׳</b>
@@ -2386,7 +2398,7 @@ const cubeSlot = id => LV.cube?.slots.find(s => s.id === id);
 function jointLabel(t) {
   if (t.kind === 'cjoint' || t.kind === 'clashed') {
     const j = cubeJoint(t.id), name = id => cubeSlot(id).he.replace(/ \(.*\)/, '');
-    return j.b ? `${name(j.a)} × ${name(j.b)}` : `${name(j.a)} × רגל ה${LV.klafim[j.klaf].he}`;
+    return j.b ? `${name(j.a)} × ${name(j.b)}` : `${name(j.a)} × רגל ה${LV.klafim[LV.cube.members?.[j.klaf] ?? j.klaf].he}`;
   }
   if (t.kind === 'bjoint' || t.kind === 'blashed') { const j = BRACE_JOINTS.find(q => q.id === t.id); return `חיזוק × ${TRI_SLOTS[j.leg].he}`; }
   if (t.kind === 'sjoint' || t.kind === 'slashed') { const j = seatJoint(t.id); return `${seatSlot(j.a).he} × ${seatSlot(j.b).he}`; }
@@ -2625,7 +2637,7 @@ function nearestSlot(x, z) {
 
 // ---------------- pole length (finger scroll) ----------------
 // klaf poles and the cube's side poles
-const isCubePole = sid => sid.startsWith('C.') || sid.startsWith('F.');
+const isCubePole = sid => sid.startsWith('C.') || /^F\d*\./.test(sid);
 const isRigPole = sid => sid.startsWith('W.');
 const slotOf = sid => isRigPole(sid) ? rigSlot(sid) : isSeatPole(sid) ? seatSlot(sid) : isCubePole(sid) ? cubeSlot(sid) : slotById(sid);
 const polesOf = sid => isRigPole(sid) ? G.wheel.build.poles : isSeatPole(sid) ? G.seat.build.poles : isCubePole(sid) ? G.cube.build.poles : G.build.poles;
@@ -3358,27 +3370,40 @@ function startCheckFor() {
   if (LV.free) { camMode = null; setCameraMode(triOn() ? 'triView' : 'orbit'); }
   refreshAll();
 }
+// free build: the next structure in the inspection, a row of joined klafim or a structure on its own
+function nextFreeCheck() {
+  const q = G.freeQueue.shift();
+  if (q.J) {
+    G.cube = q.J; LV.cube = q.J.plan; G.height = q.J.height; G.joinDone = false;
+    useKlaf(q.J.plan.members[0]);
+    rec.length = 0;
+    q.J.sim.letGo();
+    camMode = null; setCameraMode('cubeView');
+    G.check = { t: 0, running: true, label: 'כולם עוזבים…', pushes: CUBE_PUSHES, load: [18, 20.5], end: 21, joined: true };
+    return refreshAll();
+  }
+  G.joinDone = true; useKlaf(q); return startCheckFor();
+}
+// a row whose joining is undone: its klafim stand on their own again
+function unjoin(J) {
+  J.sim = null;
+  const keep = G.ki;
+  for (const i of J.plan?.members || []) { const k = G.klafim[i]; if (k?.raisedOnce) { useKlaf(i); k.sim = new KlafSim(k.build, k.cfg); k.sim.standUp(); } }
+  useKlaf(keep);
+}
 const standsUp = k => k.tri ? k.tri.up >= 1 : k.raisedOnce && !!k.sim;
 function runCheck() {
   if (LV.tripod) return startCheckFor();
   if (LV.free) {
     // every structure is inspected, one after another, from the first
     if (!G.klafim.every(standsUp)) return infoCard('יש מבנה שעוד לא עומד', 'המסדר בודק את כל המבנים במגרש. קודם מרימים ומעגנים כל קלף ומקימים כל חצובה.');
-    // the joined klafim are inspected first, as one structure; then each other structure on its own
-    const joined = G.cube?.sim && LV.cube?.free && Object.keys(G.cube.build.joints).length ? LV.cube.members : [];
-    G.freeQueue = G.klafim.map((k, i) => i).filter(i => !joined.includes(i));
-    if (!joined.length) {
-      // nothing was lashed between the klafim: each one stands on its own again
-      if (G.cube?.sim) { leaveCube(); LV.cube = null; }
-      G.joinDone = true; useKlaf(G.freeQueue.shift()); return startCheckFor();
-    }
-    G.joinDone = false;
-    useKlaf(joined[0]);
-    rec.length = 0;
-    G.cube.sim.letGo();
-    camMode = null; setCameraMode('cubeView');
-    G.check = { t: 0, running: true, label: 'כולם עוזבים…', pushes: CUBE_PUSHES, load: [18, 20.5], end: 21, joined: true };
-    return refreshAll();
+    // each row of joined klafim is inspected first, as one structure; then each other structure on its own
+    const rows = freeRows(LV.klafim).map(r => r.join(','));
+    const joined = Object.values(G.joins).filter(J => J.sim && J.plan && countTrue(J.build.joints) > 0 && rows.includes(J.plan.members.join(',')));
+    for (const J of Object.values(G.joins)) if (J.sim && !joined.includes(J)) unjoin(J); // nothing lashed there: those klafim stand on their own
+    const inRow = new Set(joined.flatMap(J => J.plan.members));
+    G.freeQueue = [...joined.map(J => ({ J })), ...G.klafim.map((k, i) => i).filter(i => !inRow.has(i))];
+    return nextFreeCheck();
   }
   if (LV.wheel) {
     const Wh = G.wheel;
@@ -3694,7 +3719,7 @@ function score() {
     hintsAllowed, hintCost, penalty, all };
 }
 function finish() {
-  if (LV.free && G.freeQueue?.length) { G.joinDone = true; useKlaf(G.freeQueue.shift()); return startCheckFor(); } // on to the next structure
+  if (LV.free && G.freeQueue?.length) return nextFreeCheck(); // on to the next structure
   if (LV.free) return finishFree();
   if (LV.sandbox) return finishFreeTri();
   G.endedAt = G.endedAt || performance.now();
@@ -4319,7 +4344,7 @@ function collapseCard() {
   if (G.falling.cube) {
     return showModal(`<div class="eyebrow">מבחן מציאות</div><h2>${LV.wheel ? 'המגדלים קרסו' : LV.free ? (G.falling.kind === 'sway' ? 'הקלפים המחוברים נטו ונפלו' : 'הקלפים המחוברים קרסו') : G.falling.kind === 'sway' ? 'הקובייה נטתה ונפלה' : 'הקובייה קרסה'}</h2>
       <div class="rule">${e.rule}</div><p>${e.detail}</p>`, [[LV.free ? 'חזרה לחיבור הקלפים' : 'חזרה לקובייה', () => {
-      closeModal(); G.falling = null; G.check = null; G.cube.sim = null; if (G.seat) G.seat.sim = null; if (G.wheel) G.wheel.sim = null; setPolesOpacity(1); goStage('cube');
+      closeModal(); G.falling = null; G.check = null; G.cube.sim = null; if (G.seat) G.seat.sim = null; if (G.wheel) G.wheel.sim = null; setPolesOpacity(1); goStage(LV.free ? G.cube.stageKey || 'cube' : 'cube');
     }, true]]);
   }
   if (G.falling.tri) {
@@ -4666,7 +4691,33 @@ function drawJoinGhosts() {
     placeCylinder(m, a, b);
   });
 }
+// free build: every row's joining poles and lashings, each from its own build and simulation
+function drawFreeJoins() {
+  const keepC = G.cube, keepP = LV.cube, seen = new Set();
+  for (const J of Object.values(G.joins)) {
+    if (!J.plan) continue;
+    G.cube = J; LV.cube = J.plan;
+    joinGroups[J.tag].position.x = J.plan.x0;
+    for (const s of J.plan.slots) {
+      const m = CM.poles[s.id]?.[0]; if (!m) continue; seen.add(m);
+      const segs = J.build.poles[s.id] ? (J.carrying[s.id] ? carriedSegs(J.carrying[s.id]) : cubeSegs(s.id)) : null;
+      if (!segs) { m.visible = false; continue; }
+      placeCylinder(m, segs[0][0], segs[0][1]);
+    }
+    for (const j of J.plan.joints) {
+      const g = CM.lash[j.id]; if (!g) continue; seen.add(g);
+      if (!J.build.joints[j.id] || !cubeJointReachable(j, J.plan, J.build.poles) || J.carrying[j.a] || (j.b && J.carrying[j.b])) { g.visible = false; continue; }
+      placeLashing(g, cubeJointPos(j), cubeSlot(j.a).dir, j.b ? cubeSlot(j.b).dir : [0, 1, 0], cubeJointSep(j));
+      g.visible = !fadedOut();
+      coilProgress(g, j.id);
+    }
+  }
+  G.cube = keepC; LV.cube = keepP;
+  for (const sid in CM.poles) if (!seen.has(CM.poles[sid][0])) CM.poles[sid][0].visible = false;
+  for (const jid in CM.lash) if (!seen.has(CM.lash[jid])) CM.lash[jid].visible = false;
+}
 function drawCube(dt) {
+  if (LV.free) { drawFreeJoins(); drawJoinGhosts(); for (const side of [-1, 1, 0]) CM.sheets[side].visible = false; return; }
   const on = !!LV.cube;
   for (const sid in CM.poles) {
     const m = CM.poles[sid][0];
@@ -4990,4 +5041,4 @@ restart();
 requestAnimationFrame(frame);
 
 // debug hook for automated tests
-window.__game = { get state() { return G; }, onTap: (x, y) => onTap(x, y), pickTarget: (x, y) => pickTarget(x, y), pickPole: (x, y) => pickPole(x, y), nearestCubeSlot: (x, y) => nearestCubeSlot(x, y), triRoles: () => triRoles(), toggleTriCrew: id => toggleTriCrew(id), pullTripod: dy => pullTripod(dy), triCrewReady: () => triCrewReady(), toggleHeightCrew: r => toggleHeightCrew(r), openHeightCrew: () => openHeightCrew(), climbTo: id => climbTo(cubeJoint(id)), playChallenge: ch => playChallenge(ch), triApex: () => triApex(), triGuyTop: i => triGuyTop(i), triLegSegs: s => triLegSegs(s), fun, balanceFor, finish, celebrate, get parade() { return parade; }, triGuide, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, score: () => score(), standAll: () => G.klafim.forEach((k, i) => { useKlaf(i); for (const q of STAKE_JOINTS) k.build.stakeJoints[q.id] = 'parallel'; for (const q of GUYS) k.build.guyTies[q.id] = 'guy'; k.raisedOnce = true; k.sim = new KlafSim(k.build, k.cfg); k.sim.standUp(); }), WHEEL, GOND, RIG, SEAT_ROPES, liftWheel: () => liftWheel(), liftWheelSeat: () => liftWheelSeat(), SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
+window.__game = { get state() { return G; }, onTap: (x, y) => onTap(x, y), restage: () => { STAGES = stageList(); makeChips(); }, pickTarget: (x, y) => pickTarget(x, y), pickPole: (x, y) => pickPole(x, y), nearestCubeSlot: (x, y) => nearestCubeSlot(x, y), triRoles: () => triRoles(), toggleTriCrew: id => toggleTriCrew(id), pullTripod: dy => pullTripod(dy), triCrewReady: () => triCrewReady(), toggleHeightCrew: r => toggleHeightCrew(r), openHeightCrew: () => openHeightCrew(), climbTo: id => climbTo(cubeJoint(id)), playChallenge: ch => playChallenge(ch), triApex: () => triApex(), triGuyTop: i => triGuyTop(i), triLegSegs: s => triLegSegs(s), fun, balanceFor, finish, celebrate, get parade() { return parade; }, triGuide, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, score: () => score(), standAll: () => G.klafim.forEach((k, i) => { useKlaf(i); for (const q of STAKE_JOINTS) k.build.stakeJoints[q.id] = 'parallel'; for (const q of GUYS) k.build.guyTies[q.id] = 'guy'; k.raisedOnce = true; k.sim = new KlafSim(k.build, k.cfg); k.sim.standUp(); }), WHEEL, GOND, RIG, SEAT_ROPES, liftWheel: () => liftWheel(), liftWheelSeat: () => liftWheelSeat(), SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
