@@ -12,7 +12,7 @@ import { FREE_LEVEL, GRID, POLE_MIN, POLE_MAX, layPole, onSheet, idFor, slotFor,
 import { SIZES } from './blueprints.js';
 import { KlafSim, TUNING, jointReachable, guyAnchor, slotById, slotParam, slotPoint, klafToWorld } from './klafSim.js';
 import { CubeSim, cubeSlotPoint, cubeSlotParam, cubeJointReachable } from './cubeSim.js';
-import { LEVELS, CUBE_LEVEL } from './levels.js';
+import { LEVELS, CUBE_LEVEL, CUBE4_LEVEL } from './levels.js';
 import { loadSketch } from './sketch.js';
 import { CAR, SEAT, SEAT_C, MAST, MAST_JOINTS, HANG_ROPES, PIVOT, CarouselSim, CAR_TUNING, mastReaches, mastTopY, seatY, cornerAt, KLAF_XS } from './carousel.js';
 import { WH, WHEEL, GOND, RIG, SEAT_ROPES, WheelSim, WH_TUNING, AXLE_Y, WHEEL_DROP, SEAT_DROP, SEAT_C as WSEAT_C, SEAT_Y as WSEAT_Y, ropeTop, ropeFoot, rigReachable, WHEEL_Z, TRI90 } from './wheel.js';
@@ -27,7 +27,7 @@ import { sfx, buzz } from './sound.js';
 import { makeDecor } from './decor.js';
 import { makeFun } from './fun.js';
 import { makeBalance, BALANCE } from './balance.js';
-import { SPEED, FIX, CUBE_FIX, FIX_PENALTY, rng, medalOf, MEDAL_HE, MEDAL_ICON, bestOf, recordChallenge } from './challenges.js';
+import { SPEED, FIX, cubeMedals, FIX_PENALTY, rng, medalOf, MEDAL_HE, MEDAL_ICON, bestOf, recordChallenge } from './challenges.js';
 import { Actor, makeCrew, freeActors, CREW } from './crew.js';
 
 const $ = id => document.getElementById(id);
@@ -108,6 +108,7 @@ function freshState() {
     stage: 'build', stageKey: STAGES[0].key,
     ki: 0, klafim: LV.klafim.map(freshKlaf),
     cube: LV.cube ? { build: { poles: {}, joints: {} }, sim: null, carrying: {} } : null,
+    height: LV.cube && !LV.free ? freshHeight() : null, // work at height (עבודה בגובה)
     // the carousel's seat: built on the ground (build), lifted (lift 0 … 1), and hung from the mast
     seat: LV.carousel ? freshSeat() : null,
     // the giant wheel and its seat: built, lifted (0 … 1), hung on their ropes
@@ -376,6 +377,8 @@ const markerTex = {
   guy: ringTexture('#7fd0ff', '∞'),
   foot: ringTexture('#7fd0ff', '↔'),
   off: ringTexture('#ff8d8d', '✕'),
+  climb: ringTexture('#7fd0ff', '▲'),
+  harness: ringTexture('#ffc046', '⚲'),
 };
 const markerPool = [];
 function markerSprite(i) {
@@ -548,7 +551,7 @@ function goStage(key) {
   closePicker();
   $('tray').hidden = id !== 'build' && id !== 'cube' && id !== 'brace' && !seatStage(id) && !rigStage(id);
   $('rope-panel').hidden = id !== 'raise';
-  $('crew-panel').hidden = id !== 'raise';
+  $('crew-panel').hidden = id !== 'raise' && !heightPanelOn();
   if (id !== 'build' && id !== 'cube' && !seatStage(id) && !rigStage(id)) $('length-panel').hidden = true;
   // close enough to tap the small parts in stages with fine work, far and high otherwise
   setCameraMode(triOn() && id !== 'build' ? (id === 'brace' ? 'triWork' : 'triView') : id === 'build' ? 'buildView' : (id === 'stakes' || id === 'anchor' || id === 'unguy') ? 'workView' : id === 'seat' ? 'seatView' : id === 'gond' ? 'gondView' : (id === 'wheel' || id === 'wlift') ? 'wheelView' : (id === 'cube' || id === 'hang') ? 'cubeView' : 'orbit');
@@ -783,7 +786,7 @@ function collectTargets() {
     const s = markerSprite(k++);
     s.visible = true;
     s.position.set(...t.pos);
-    s.material.map = t.kind === 'stake' || t.kind === 'anchor' || t.kind === 'tstake' || t.kind === 'tanchor' ? markerTex.stake : t.kind === 'foot' ? markerTex.foot : t.kind === 'guyOff' ? markerTex.off : (t.kind === 'guyTop' || t.kind === 'guyTie' || t.kind === 'tguyTop' || t.kind === 'tguyTie' || t.kind === 'pivot' || t.kind === 'hrope' || t.kind === 'wrope') ? markerTex.guy : markerTex.lash;
+    s.material.map = t.kind === 'hspot' ? markerTex.climb : t.kind === 'harness' ? markerTex.harness : t.kind === 'stake' || t.kind === 'anchor' || t.kind === 'tstake' || t.kind === 'tanchor' ? markerTex.stake : t.kind === 'foot' ? markerTex.foot : t.kind === 'guyOff' ? markerTex.off : (t.kind === 'guyTop' || t.kind === 'guyTie' || t.kind === 'tguyTop' || t.kind === 'tguyTie' || t.kind === 'pivot' || t.kind === 'hrope' || t.kind === 'wrope') ? markerTex.guy : markerTex.lash;
     const pulse = 1 + 0.12 * Math.sin(performance.now() / 260);
     const base = 0.05;
     s.scale.setScalar(base * pulse);
@@ -800,6 +803,7 @@ function collectCubeTargets(T) {
     const p = cubeJointPos(j); if (!p) continue;
     T.push({ kind: cb.joints[j.id] ? 'clashed' : 'cjoint', id: j.id, pos: p, show: !cb.joints[j.id] });
   }
+  collectHeightTargets(T);
   if (LV.carousel && seatStage(G.stage)) collectSeatTargets(T);
   if (LV.wheel && wheelStage(G.stage)) collectWheelTargets(T);
   if (G.stage === 'unguy') eachKlaf(k => {
@@ -899,7 +903,10 @@ function onTarget(t, x, y) {
       sfx.lash();
       break;
     }
-    case 'guyTie': case 'cjoint': case 'clashed': return openPicker(t, x, y);
+    case 'cjoint': case 'clashed': { const msg = heightBlock(cubeJoint(t.id)); if (msg) return flashHint(msg); return openPicker(t, x, y); }
+    case 'harness': { const c = G.height.climbers.find(q => q.role === t.id); if (c) clipHarness(c); break; }
+    case 'hspot': moveClimber(t.spot); break;
+    case 'guyTie': return openPicker(t, x, y);
     case 'bjoint': case 'blashed': case 'tsj': case 'tsjd': return openPicker(t, x, y);
     case 'sjoint': case 'slashed': case 'mjoint': case 'mlashed': return openPicker(t, x, y);
     case 'wjoint': case 'wlashed': return openPicker(t, x, y);
@@ -1229,7 +1236,12 @@ let triCache = null;
 function triState() {
   const t = G.tri; if (!t?.feet) return null;
   const key = JSON.stringify([G.ki, t.feet, triLens()]);
-  if (!triCache || triCache.key !== key) triCache = { key, st: standing(t.feet, triLens(), triSpec()) };
+  if (!triCache || triCache.key !== key) {
+    // legs that cannot meet at the lashing (a wrong pole) still stand, drawn at the plan's lengths:
+    // the מסדר and the score judge the wrong pole
+    const sp = triSpec(), plan = sp.legLengths || LEG_IDS.map((id, i) => sp.slots[i].length);
+    triCache = { key, st: standing(t.feet, triLens(), sp) || standing(t.feet, plan, sp) || standing(triPlanFeet(), plan, sp) };
+  }
   return triCache.st;
 }
 const norm2 = (x, z) => { const l = Math.hypot(x, z) || 1; return [x / l, 0, z / l]; };
@@ -1258,7 +1270,7 @@ function triLegSegs(sid) {
 function triApex() {
   const t = G.tri;
   if (t.sim) return t.sim.apex();
-  if (t.up >= 1) return triState().apex;
+  if (t.up >= 1) return triState()?.apex ?? null;
   if (!triState()) {
     // still lying on the ground: the lashing point on the middle leg
     const slot = slotById('t2'); if (!slot || !G.build.poles.t2) return null;
@@ -1368,7 +1380,8 @@ function raiseTripod() {
   const t = G.tri; if (t.up > 0 || t.raising) return;
   if (!triGuysReady()) return infoCard('קודם יתרים ורבזים', 'מקימים חצובה כמו קלף: לכל רגל קושרים יתר במקום של כפיתת החצובה, ולכל יתר דופקים רבז. היתרים הקדמיים מושכים, והאחוריים מייצבים.');
   startClock();
-  t.feet = startFeet(triCentre()); t.raising = true;
+  t.feet = startFeet(triCentre()); t.raising = true; t.crew = {};
+  crewKey = ''; flashHint('<b>מקימים חצובה כמו קלף:</b> משבצים את הצוות בחלון הצוות, ואז מושכים בחבל');
   refreshAll();
 }
 // ---- a tripod's guy lines (Omer, 2026-11-21) ----
@@ -1445,16 +1458,63 @@ function drawTriGuys() {
   });
 }
 // the raise: two scouts on each front line pull, one holds each rear line, the rest lift the head
+// (Omer, 11-21: a tripod is raised like a klaf) one scout on each guy line, pulling on the
+// front ones and holding the rear ones, and the rest lift and steady the head
 function triRaiseCrew() {
-  const t = G.tri, list = [...TRI_CREW];
+  const t = G.tri, crewOf = t.crew || {};
   const h = triApex() || [0, 1, z0()];
-  for (const i of triGuyLegs()) {
-    const a = triGuyAnchor(i), n = norm2(a[0] - h[0], a[2] - h[2]), yaw = Math.atan2(n[0], n[2]);
-    const spots = triGuyFront(i) ? [1.3, 0.7] : [0.5];
-    for (const back of spots) { const k = list.shift(); if (!k) break; people[k].set([a[0] - n[0] * back, 0, a[2] - n[2] * back], yaw, triGuyFront(i) ? -0.35 : -0.1, 0.8); }
+  let lifter = 0;
+  triRoles().forEach((r, k) => {
+    const a = people[TRI_CREW[k]]; if (!a) return;
+    if (crewOf[r.id] == null) { a.clear(); return; }
+    if (r.guy != null) {
+      const an = triGuyAnchor(r.guy), n = norm2(an[0] - h[0], an[2] - h[2]), back = r.front ? 1.0 : 0.5;
+      a.set([an[0] - n[0] * back, 0, an[2] - n[2] * back], Math.atan2(n[0], n[2]), r.front ? -0.35 : -0.1, 0.8);
+    } else { const m = lifter++; a.set([h[0] + (m - 0.5) * 0.7, 0, h[2] + 0.6], Math.PI, 0.3, 0.7 + t.up * 1.6); }
+  });
+}
+// the raise roles: one per guy line, and lifters at the head to make the crew
+function triRoles() {
+  const roles = triGuyLegs().map(i => ({ id: TG(i), guy: i, front: triGuyFront(i) }));
+  for (let n = 0; roles.length < crewSize(); n++) roles.push({ id: 'TL' + n, lifter: true });
+  return roles;
+}
+const triRaiseMode = () => triOn() && G.stage === 'spread' && !!G.tri?.raising && G.tri.up < 1;
+function triCrewReady() {
+  const t = G.tri, roles = triRoles();
+  const missing = roles.filter(r => t.crew?.[r.id] == null).length;
+  const walking = !missing && roles.some((r, k) => !people[TRI_CREW[k]].arrived());
+  return { missing, walking, ok: !missing && !walking };
+}
+function toggleTriCrew(id) {
+  const t = G.tri; t.crew ||= {};
+  if (t.up > 0.02) return flashHint('את הצוות משבצים לפני שמתחילים למשוך');
+  if (t.crew[id] != null) delete t.crew[id];
+  else {
+    const used = new Set(Object.values(t.crew)), free = [...Array(crewSize()).keys()].filter(i => !used.has(i));
+    if (!free.length) return flashHint(`<b>כל ${crewSize()} הצופים כבר משובצים.</b> הקישו על תפקיד כדי לשחרר צופה`);
+    t.crew[id] = free[0];
   }
-  // whoever is left lifts the head from below
-  list.forEach((k, n) => people[k].set([h[0] + (n ? 0.5 : -0.5), 0, h[2] + 0.6], Math.PI, 0.3, 0.7 + t.up * 1.6));
+  sfx.tick(); crewKey = ''; renderCrew(); refreshAll();
+}
+function renderTriCrew() {
+  const t = G.tri, roles = triRoles(), used = Object.values(t.crew || {}).length;
+  $('crew-free').textContent = `${crewSize() - used} מתוך ${crewSize()} פנויים`;
+  $('crew-list').innerHTML = roles.map(r => {
+    const who = t.crew?.[r.id];
+    const role = r.lifter ? 'בראש · מרים ומייצב' : `${r.front ? 'מושכים · יתר קדמי' : 'מחזיקים · יתר אחורי'}, ${triLegName(r.guy).replace('רגל ', '')}`;
+    return `<button type="button" class="crew-row${who != null ? ' on' : ''}" data-gid="${r.id}">
+      <span class="crew-role">${role}</span><span class="crew-who">${who != null ? CREW_NAMES[who] : '+ צופה'}</span></button>`;
+  }).join('');
+}
+// a pull on the rope stands the tripod up a little more
+function pullTripod(dy) {
+  const t = G.tri, cr = triCrewReady();
+  if (t.up <= 0.001) {
+    if (cr.missing) return flashHint(`<b>צריך צוות של ${crewSize()} כדי להקים חצובה.</b> שבצו עוד ${cr.missing === 1 ? 'צופה אחד' : cr.missing + ' צופים'} בחלון הצוות`);
+    if (cr.walking) return flashHint('הצוות עוד בדרך למקומות. מושכים כשכולם במקום');
+  }
+  t.up = Math.min(1, t.up + dy * 0.0035);
 }
 function layTripod() { G.tri = freshTri(); triCache = null; G.check = null; G.result = null; }
 // six scouts, two to a leg
@@ -1510,7 +1570,6 @@ function drawTripod(dt, current = true) {
   if (!current) return;
   if (t.raising) {
     triRaiseCrew();
-    if (t.up > 0 || TRI_CREW.every(k => people[k].arrived())) t.up += dt / 1.4;
     if (t.up >= 1) { t.up = 1; t.raising = false; sfx.ok(); fun.landed(triApex()); setCameraMode('triView'); refreshAll(); }
   } else if (up && !G.check && !G.falling) {
     st.legs.forEach((L, i) => {
@@ -1583,7 +1642,7 @@ function triStatus(nPoles, nJ) {
   switch (G.stage) {
     case 'build': return `רגליים ${nPoles}/3 · כפיתה סביב שלוש הרגליים ${nJ}/1` + (LV.free ? (G.armed ? ' · <b>הקישו על קו בשרטוט</b> כדי להניח את הרגל' : nPoles === 3 && nJ ? ' · הכול כפות: <b>הקישו על החצובה</b> כדי להקים אותה' : ' · בחרו אורך בערימה') : '');
     case 'spread': {
-      if (t.raising) return 'הצוות מקים את החצובה…';
+      if (t.raising) { const cr = triCrewReady(); return cr.missing ? `<b>צוות הקמה:</b> משבצים ${crewSize()} צופים בחלון הצוות, על כל יתר ובראש` : cr.walking && t.up <= 0 ? 'הצוות הולך למקומות…' : '<b>מושכים בחבל</b> (גוררים למטה) כדי להקים את החצובה'; }
       if (t.up < 1) {
         const L = triGuyLegs(), g = t.guys, top = L.filter(i => g.top[TG(i)]).length, hit = L.filter(i => (g.hits[TG(i)] || 0) >= ANCHOR_HITS).length;
         if (top < L.length || hit < L.length) return `יתרים על הרגליים ${top}/${L.length} · רבזים ${hit}/${L.length} · קושרים יתר לכל רגל במקום של כפיתת החצובה, ודופקים לו רבז`;
@@ -2630,9 +2689,12 @@ function crewReady() {
 let crewKey = '';
 function renderCrew() {
   const b = G.build; if (!b) return;
-  const key = JSON.stringify([b.crew, b.guyTop, G.ki, LV.number]);
+  const key = JSON.stringify([b.crew, b.guyTop, G.ki, LV.number, G.height?.panel, G.height?.crew, triOn() && G.tri?.crew, triOn() && G.tri?.raising]);
   if (key === crewKey) return;
   crewKey = key;
+  $('crew-panel').querySelector('.tray-title').textContent = heightPanelOn() ? 'עבודה בגובה' : triRaiseMode() ? 'צוות הקמת החצובה' : 'צוות ההרמה';
+  if (heightPanelOn()) return renderHeightCrew();
+  if (triRaiseMode()) return renderTriCrew();
   $('crew-free').textContent = `${freeCrew().length} מתוך ${crewSize()} פנויים`;
   $('crew-list').innerHTML = crewRoles().map(g => {
     const who = b.crew[g.id], ready = g.lifter || b.guyTop[g.id];
@@ -2640,16 +2702,18 @@ function renderCrew() {
       <span class="crew-role">${crewRole(g)}</span><span class="crew-who">${who != null ? CREW_NAMES[who] : ready ? '+ צופה' : 'יתר לא כפות'}</span></button>`;
   }).join('');
 }
-$('crew-list').addEventListener('click', e => { const r = e.target.closest('.crew-row'); if (r) toggleCrew(r.dataset.gid); });
+$('crew-list').addEventListener('click', e => { const r = e.target.closest('.crew-row'); if (r) (heightPanelOn() ? toggleHeightCrew : triRaiseMode() ? toggleTriCrew : toggleCrew)(r.dataset.gid); });
 
 // ---------------- rope pull ----------------
 {
   const pad = $('rp-pad'); let on = false, lastY = 0, ropeOff = 0, lastCreak = 0;
   pad.addEventListener('pointerdown', e => { sfx.unlock(); startClock(); on = true; lastY = e.clientY; pad.setPointerCapture(e.pointerId); });
   pad.addEventListener('pointermove', e => {
-    if (!on || !G.sim || G.falling) return;
+    if (!on || G.falling) return;
     const dy = e.clientY - lastY; lastY = e.clientY;
     if (dy <= 0) return;
+    if (triRaiseMode()) { pullTripod(dy); ropeOff += dy; $('rp-rope').style.backgroundPosition = `0 ${ropeOff}px`; const now = performance.now(); if (now - lastCreak > 200) { lastCreak = now; sfx.creak(Math.min(1, dy / 12)); } return; }
+    if (!G.sim) return;
     if (!G.sim.canPull()) { flashHint('המושכים מושכים ב<b>יתרים הקדמיים</b>: כפתו אותם קודם לראש הקלף'); return; }
     if (G.sim.angle() < 8) {
       const cr = crewReady();
@@ -2836,6 +2900,173 @@ function updateJobs(dt) {
   }
 }
 
+// ---------------- work at height (עבודה בגובה, Omer 2026-11-21) ----------------
+// Every connection above 2 m is tied by scouts who climb the structure in a harness
+// (a connection at 2 m is still tied from the ground). The real order: first every
+// connection that can be tied from the ground; then the player picks two climbers and
+// a safety person below. The climbers go up, clip their harness to a pole, and tie what
+// is within arm's reach (1.5 m); to reach more they climb along, unclip and clip again.
+// They stay up until the structure is finished, and climb down after.
+const HEIGHT = { above: 2.2, reach: 1.5, speed: 0.9, feet: 1.15 };
+const HROPES = [0, 1].map(() => { const r = new RopeViz(scene); r.show(false); return r; });
+const HEIGHT_ROLES = [{ id: 'c1', he: 'מטפס ראשון' }, { id: 'c2', he: 'מטפס שני' }, { id: 'safe', he: 'אבטחה למטה' }];
+function freshHeight() { return { crew: {}, panel: false, up: false, climbers: [], safe: null, down: false }; }
+const highJoint = j => j.at[1] > HEIGHT.above;
+const heightJoints = () => LV.cube && !LV.free ? LV.cube.joints.filter(highJoint) : [];
+const heightNeeded = () => heightJoints().length > 0;
+// every connection that can be tied from the ground is tied
+const groundDone = () => LV.cube.joints.filter(j => !highJoint(j)).every(j => G.cube.build.joints[j.id]);
+// where climbers can stand: a few spots on the frame that between them reach every high
+// connection (greedy cover over the connections themselves, so each spot is on a pole)
+let spotCache = null;
+function heightSpots() {
+  if (spotCache?.cube === LV.cube) return spotCache.spots;
+  const js = heightJoints(), left = new Set(js.map(j => j.id)), spots = [];
+  const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  while (left.size) {
+    let best = null, bn = -1;
+    for (const c of js) { const n = js.filter(j => left.has(j.id) && d(c.at, j.at) <= HEIGHT.reach).length; if (n > bn) { bn = n; best = c; } }
+    const covers = js.filter(j => left.has(j.id) && d(best.at, j.at) <= HEIGHT.reach);
+    // the spot: the middle of what it covers, pulled onto the nearest of them
+    const mid = [0, 1, 2].map(i => covers.reduce((a, j) => a + j.at[i], 0) / covers.length);
+    const on = covers.reduce((a, j) => d(j.at, mid) < d(a.at, mid) ? j : a, covers[0]);
+    spots.push({ at: [...on.at], ids: js.filter(j => d(on.at, j.at) <= HEIGHT.reach).map(j => j.id) });
+    covers.forEach(j => left.delete(j.id));
+  }
+  spotCache = { cube: LV.cube, spots };
+  return spots;
+}
+const cubeMid = () => [0, 0, (LV.cube.span ?? LV.cube.depth) / 2];
+// where a climber's feet are when working at a spot: a little below and outside it
+function spotFeet(sp) {
+  const c = cubeMid(), n = norm2(sp.at[0] - c[0], sp.at[2] - c[2]);
+  return [sp.at[0] + n[0] * 0.3, Math.max(0.4, sp.at[1] - HEIGHT.feet), sp.at[2] + n[2] * 0.3];
+}
+const climberAt = sp => G.height.climbers.find(c => c.spot === sp && !c.path);
+// a connection can be tied when a clipped-in climber at a spot reaches it
+const heightReach = id => G.height.climbers.some(c => c.clipped && !c.path && heightSpots()[c.spot].ids.includes(id));
+function heightBlock(j) {
+  if (!G.height || !highJoint(j) || LV.free) return null;
+  if (!groundDone()) return '<b>חיבור בגובה.</b> קודם כופתים את כל החיבורים שאפשר מהקרקע (עד 2 מ׳), ורק אז עולים לגובה';
+  if (!G.height.up) return '<b>חיבור בגובה.</b> מעל 2 מ׳ כופתים רק מלמעלה: לוחצים על <b>עולים לגובה</b> ומשבצים שני מטפסים ואיש אבטחה';
+  if (!heightReach(j.id)) return '<b>אין מטפס עם רתמה במרחק יד.</b> מקישים על נקודת טיפוס (חץ כחול) ליד החיבור, ומחברים שם את הרתמה';
+  return null;
+}
+const heightActor = role => G.height.crew[role] != null ? crew[G.height.crew[role]] : null;
+function openHeightCrew() { G.height.panel = true; crewKey = ''; renderCrew(); refreshAll(); flashHint('<b>עבודה בגובה:</b> משבצים שני מטפסים ואיש אבטחה שנשאר למטה'); }
+function toggleHeightCrew(role) {
+  const H = G.height; if (H.up) return flashHint('המטפסים כבר למעלה. הם יורדים כשהמבנה גמור');
+  if (H.crew[role] != null) delete H.crew[role];
+  else {
+    const used = new Set(Object.values(H.crew)), free = crew.map((a, i) => i).filter(i => !used.has(i) && !crew[i].busy);
+    if (!free.length) return flashHint('אין צופה פנוי');
+    H.crew[role] = free[0];
+  }
+  sfx.tick(); crewKey = ''; renderCrew();
+  if (HEIGHT_ROLES.every(r => H.crew[r.id] != null)) startClimb();
+  refreshAll();
+}
+function renderHeightCrew() {
+  const H = G.height;
+  $('crew-free').textContent = H.up ? 'למעלה עד סוף הבנייה' : `${HEIGHT_ROLES.filter(r => H.crew[r.id] == null).length} תפקידים פנויים`;
+  $('crew-list').innerHTML = HEIGHT_ROLES.map(r => {
+    const who = H.crew[r.id];
+    return `<button type="button" class="crew-row${who != null ? ' on' : ''}" data-gid="${r.id}">
+      <span class="crew-role">${r.he}</span><span class="crew-who">${who != null ? CREW_NAMES[who] : '+ צופה'}</span></button>`;
+  }).join('');
+}
+// up they go: each climber walks to the leg nearest a spot, climbs it, and goes to the spot
+function startClimb() {
+  const H = G.height, spots = heightSpots(), c = cubeMid();
+  // the two first spots: the one with most still to tie, then the farthest from it
+  const todo = sp => sp.ids.filter(id => !G.cube.build.joints[id]).length;
+  const order = spots.map((sp, i) => i).sort((a, b) => todo(spots[b]) - todo(spots[a]));
+  const first = order[0], second = order.slice(1).sort((a, b) => Math.hypot(...spots[b].at.map((v, k) => v - spots[first].at[k])) - Math.hypot(...spots[a].at.map((v, k) => v - spots[first].at[k])))[0] ?? first;
+  H.climbers = ['c1', 'c2'].map((role, n) => {
+    const sp = n ? second : first, f = spotFeet(spots[sp]);
+    const leg = [Math.sign(f[0] - c[0] || 1) * ((LV.cube.legX ?? 0.9) + 0.25), 0, f[2] < c[2] ? -0.25 : c[2] * 2 + 0.25];
+    return { role, spot: sp, clipped: false, pos: [leg[0], 0, leg[2]], path: [[leg[0], 0, leg[2]], [leg[0], f[1], leg[2]], f], walk: true, rope: HROPES[n] };
+  });
+  H.up = true; H.panel = false; crewKey = '';
+  sfx.tick();
+  flashHint('<b>המטפסים עולים.</b> כשהם במקום, מקישים על הרתמה של כל אחד כדי לחבר אותה לסנדה');
+}
+// a climber moves to another spot: unclip, climb along the frame, clip in again
+function moveClimber(spot) {
+  const H = G.height;
+  if (climberAt(spot)) return flashHint('מטפס כבר עובד בנקודה הזאת');
+  const free = H.climbers.filter(c => !c.path);
+  if (!free.length) return;
+  const to = heightSpots()[spot].at, c = free.reduce((a, q) => Math.hypot(...heightSpots()[q.spot].at.map((v, k) => v - to[k])) < Math.hypot(...heightSpots()[a.spot].at.map((v, k) => v - to[k])) ? q : a, free[0]);
+  const f = spotFeet(heightSpots()[spot]);
+  c.clipped = false; c.spot = spot; c.path = [[...c.pos], [c.pos[0], Math.max(c.pos[1], f[1]), c.pos[2]], [f[0], Math.max(c.pos[1], f[1]), f[2]], f];
+  sfx.tick();
+}
+function clipHarness(c) { c.clipped = true; sfx.lash(); buzz(12); flashHint(`<b>${CREW_NAMES[G.height.crew[c.role]]} מחובר/ת ברתמה.</b> אפשר לכפות את מה שבהישג יד`); }
+function collectHeightTargets(T) {
+  const H = G.height; if (!H?.up || H.down || G.stage !== 'cube') return;
+  const spots = heightSpots();
+  for (const c of H.climbers) if (!c.path && !c.clipped) T.push({ kind: 'harness', id: c.role, pos: add3(spots[c.spot].at, [0, 0.35, 0], 1), show: true });
+  spots.forEach((sp, i) => {
+    if (climberAt(i) || H.climbers.some(c => c.spot === i)) return;
+    if (!sp.ids.some(id => !G.cube.build.joints[id])) return; // nothing left to tie there
+    T.push({ kind: 'hspot', id: 'H' + i, spot: i, pos: add3(sp.at, [0, 0.12, 0], 1), show: true });
+  });
+}
+// each frame: climbers move along their paths; harness lines; the safety person under them
+function stepHeight(dt) {
+  const H = G.height;
+  if (!H?.up) { HROPES.forEach(r => r.show(false)); return; }
+  const done = G.stage !== 'cube' || G.check || G.falling;
+  if (done && !H.down) {
+    // the structure is finished: everyone climbs down
+    H.down = true;
+    for (const c of H.climbers) { c.clipped = false; c.path = [[...c.pos], [c.pos[0], 0, c.pos[2]]]; c.walk = false; }
+  }
+  const t = performance.now() / 1000;
+  for (const c of H.climbers) {
+    const a = heightActor(c.role); if (!a) continue;
+    if (c.walk) {
+      // walk on the ground to the foot of the leg first
+      a.set(c.path[0], 0, 0, 0.3);
+      if (a.arrived()) c.walk = false; else { c.rope.show(false); continue; }
+    }
+    if (c.path) {
+      let step = HEIGHT.speed * dt;
+      while (step > 0 && c.path.length > 1) {
+        const [p, q] = c.path, d = Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]);
+        if (d <= step) { c.path.shift(); step -= d; c.pos = [...c.path[0]]; continue; }
+        const k = step / d; c.pos = p.map((v, i) => v + (q[i] - v) * k); c.path[0] = c.pos; step = 0;
+      }
+      if (c.path.length <= 1) c.path = null;
+    }
+    const sp = heightSpots()[c.spot], face = Math.atan2(sp.at[0] - c.pos[0], sp.at[2] - c.pos[2]);
+    const moving = !!c.path;
+    if (H.down && !moving) { a.clear(); c.rope.show(false); continue; }
+    a.set(c.pos, face, moving ? 0.15 : 0.1, moving ? Math.PI * (0.8 + 0.15 * Math.sin(t * 14)) : 0.9, { lock: true, snap: true });
+    // the harness line: from the climber's waist to the pole above, once clipped in
+    if (c.clipped && !moving) c.rope.set([c.pos[0], c.pos[1] + 0.85, c.pos[2]], add3(sp.at, [0, 0.25, 0], 1), 0.05); else c.rope.show(false);
+  }
+  // the safety person stands below, between the climbers, watching them
+  const s = heightActor('safe');
+  if (s) {
+    if (H.down && H.climbers.every(c => !c.path)) { s.clear(); H.up = false; H.climbers.forEach(c => c.rope.show(false)); return; }
+    const mid = H.climbers.reduce((acc, c) => [acc[0] + c.pos[0] / 2, 0, acc[2] + c.pos[2] / 2], [0, 0, 0]), cm = cubeMid();
+    const n = norm2(mid[0] - cm[0], mid[2] - cm[2]);
+    s.set([mid[0] + n[0] * 1.2, 0, mid[2] + n[2] * 1.2], Math.atan2(-n[0], -n[2]), -0.1, 0.4);
+  }
+}
+const heightPanelOn = () => !!G?.height && G.stage === 'cube' && (G.height.panel || (G.height.up && !G.height.down));
+function heightLine() {
+  const H = G.height;
+  if (!groundDone()) return '<b>עבודה בגובה:</b> קודם כופתים את כל מה שאפשר מהקרקע (עד 2 מ׳). אחר כך עולים לגובה';
+  if (!H.up) return H.panel ? '<b>עבודה בגובה:</b> משבצים שני מטפסים ואיש אבטחה בחלון הצוות' : '<b>עבודה בגובה:</b> מעל 2 מ׳ כופתים רק מלמעלה. לוחצים על <b>עולים לגובה</b>';
+  if (H.climbers.some(c => c.path || c.walk)) return '<b>עבודה בגובה:</b> המטפסים בדרך…';
+  if (H.climbers.some(c => !c.clipped)) return '<b>עבודה בגובה:</b> מקישים על הרתמה (⚲) כדי לחבר את המטפס לסנדה';
+  return '<b>עבודה בגובה:</b> כופתים את מה שבהישג יד. כדי להגיע לעוד, מקישים על נקודת טיפוס (▲) והמטפס הקרוב עובר אליה';
+}
+const heightTodo = () => heightJoints().filter(j => !G.cube.build.joints[j.id]).length;
+
 // ---------------- action buttons and hints ----------------
 function refreshActions() {
   const el = $('actions'); el.innerHTML = '';
@@ -2872,6 +3103,7 @@ function refreshActions() {
   if (G.stage === 'stakes' && stageDone('stakes')) go('המשך להרמה');
   // a raised klaf must be anchored (guy lines fixed, legs lashed to their stakes) before moving on
   if (G.stage === 'anchor' && G.raisedOnce && stageDone('anchor')) go(nextLabel());
+  if (G.stage === 'cube' && heightNeeded() && groundDone() && !G.height.up && !G.height.panel) add('עולים לגובה', openHeightCrew);
   if (G.stage === 'cube' && cubeComplete()) go('המשך להורדת היתרים הפנימיים');
   if (G.stage === 'unguy' && stageDone('unguy')) go(nx.id === 'seat' ? 'המשך לבניית המושב' : nx.id === 'wheel' ? 'המשך לבניית הגלגל' : 'למסדר המדריך');
   if (G.stage === 'wheel' && stageDone('wheel')) go('המשך להרמת הגלגל');
@@ -2892,6 +3124,7 @@ function hintText() {
   if (G.falling) return G.falling.tri ? '<b>החצובה קורסת…</b>' : G.falling.cube ? '<b>המבנה קורס…</b>' : '<b>הקלף קורס…</b>';
   const nPoles = SLOTS.filter(s => b.poles[s.id]).length;
   const nJ = JOINTS.filter(j => b.joints[j.id]).length;
+  if (G.stage === 'cube' && !G.check && heightNeeded() && (G.challenge || G.height.up || G.height.panel)) return heightLine();
   if (G.challenge?.kind === 'cube' && !G.check) return '<b>קובייה לא שלמה:</b> משלימים לפי תיק המבנה ומזמינים מסדר';
   if (G.challenge?.kind === 'fix') return '<b>תקנו את המחנה:</b> משהו כאן לא בנוי לפי השרטוט. בודקים מול תיק המבנה';
   // after the first structure's tutorial: no step guidance, only where things stand
@@ -3381,14 +3614,14 @@ function celebrate(s, done) {
   const c = paradeCentre();
   const cam = new THREE.Vector3(camera.position.x - c[0], 0, camera.position.z - c[2]).normalize();
   const side = new THREE.Vector3(-cam.z, 0, cam.x);
-  const big = LV.carousel || LV.wheel ? 3.4 : LV.cube || LV.tripod ? 2.6 : 1.9;
+  const big = LV.carousel || LV.wheel || LV.frame ? 3.4 : LV.cube || LV.tripod ? 2.6 : 1.9;
   const free = crew.filter(a => !a.busy && !a.want?.sit && !a.want?.lock);
   const climber = LV.carousel || LV.wheel ? null : free.shift() || null;
   const cheer = free.slice(0, 4);
   // where the climber goes: up a leg of a klaf, onto the top of a base, or hanging from a tripod
   let base, topY;
   if (LV.tripod) { base = [c[0] + cam.x * 0.3, 0, c[2] + cam.z * 0.3]; topY = 0.35; }
-  else if (LV.cube && !LV.carousel) { base = [c[0], 0, c[2]]; topY = Math.max(0.5, c[1] + 0.02); }
+  else if (LV.cube && !LV.carousel && !LV.frame) { base = [c[0], 0, c[2]]; topY = Math.max(0.5, c[1] + 0.02); }
   else { const lt = G.sim && legTop('legL'); base = lt ? [lt[0] + cam.x * 0.28, 0, lt[2] + cam.z * 0.28] : [c[0], 0, c[2]]; topY = Math.min(1.1, Math.max(0.4, (lt?.[1] ?? 2) - 1.0)); }
   parade = { t: 0, s, done, c, cam, side, big, climber, cheer, base, topY, lit: 0, ok: s.stars >= 2 };
   fun.starsShow();
@@ -3451,7 +3684,7 @@ function sheetOf(j) {
   if (LV.tripod) return j.tri === 'head' ? 'שרטוט החצובה, בראש' : j.tri === 'stake' ? 'שרטוט החצובה, ליד הקרקע (רגל לבז״נט)' : 'שרטוט החצובה, בחיזוקים';
   if (j.seat) return j.rope ? 'שרטוט המושב, חבלי התלייה' : j.mast ? 'שרטוט המושב, התורן' : 'שרטוט המושב';
   if (j.rig) return j.rope ? 'שרטוט המושב, חבלי התלייה' : j.part === 'seat' ? 'שרטוט המושב' : j.cornerPole != null ? 'שרטוט הגלגל, סנדות הפינה' : j.axle ? 'שרטוט הגלגל, הציר' : `שרטוט הגלגל, ה${j.sq ? 'ריבוע האחורי' : 'ריבוע הקדמי'}`;
-  const band = y => LV.carousel ? (y < 2.5 ? 'גובה 0–2.5 מ׳' : 'גובה 2.5–5 מ׳') : LV.wheel ? (y < 1.4 ? 'גובה 0–1.4 מ׳' : 'גובה 1.4–3.4 מ׳') : y < 1.0 ? 'גובה 0–1 מ׳' : 'גובה 1–2 מ׳';
+  const band = y => LV.frame ? (y < 2.2 ? 'גובה 0–2 מ׳' : 'גובה 2–4 מ׳ (עבודה בגובה)') : LV.carousel ? (y < 2.5 ? 'גובה 0–2.5 מ׳' : 'גובה 2.5–5 מ׳') : LV.wheel ? (y < 1.4 ? 'גובה 0–1.4 מ׳' : 'גובה 1.4–3.4 מ׳') : y < 1.0 ? 'גובה 0–1 מ׳' : 'גובה 1–2 מ׳';
   const of = LV.klafim.length > 1 && j.klaf != null ? `, ${LV.klafim[j.klaf].he}` : '';
   if (j.cube && j.side === 0) return 'שרטוט מבט על' + (LV.cube.bays > 1 ? (j.bay % 1 ? ', בחיבור בין הקוביות' : j.bay ? ', קובייה אחורית' : ', קובייה קדמית') : '');
   if (j.cube) return `שרטוט ${j.side > 0 ? 'הצד השמאלי' : 'הצד הימני'}${LV.cube.bays > 1 ? (j.bay ? ', קובייה אחורית' : ', קובייה קדמית') : ''}, ${band(j.at[1])}`;
@@ -3480,8 +3713,8 @@ function restart() {
   G = freshState();
   // each klaf's drawing on the ground, at its size (the carousel's 5 m klafim need a bigger sheet)
   if (!LV.free && !LV.tripod) {
-    if (LV.carousel) setBlueprintSize(6.8, 2.45); else if (LV.wheel) setBlueprintSize(4.4, 1.6); else setBlueprintSize(BP_BASE.span, BP_BASE.v0);
-    LV.klafim.forEach((k, i) => { useKlaf(i); redrawBlueprint(KM[i].blueprint, JOINTS, LV.carousel ? `${k.he} · קרוסלה 5×5` : LV.wheel ? `${k.he} · גלגל ענק` : undefined); });
+    if (LV.carousel) setBlueprintSize(6.8, 2.45); else if (LV.frame) setBlueprintSize(5.6, 2.0); else if (LV.wheel) setBlueprintSize(4.4, 1.6); else setBlueprintSize(BP_BASE.span, BP_BASE.v0);
+    LV.klafim.forEach((k, i) => { useKlaf(i); redrawBlueprint(KM[i].blueprint, JOINTS, LV.frame ? `${k.he} · ${LV.name}` : LV.carousel ? `${k.he} · קרוסלה 5×5` : LV.wheel ? `${k.he} · גלגל ענק` : undefined); });
   }
   useKlaf(0);
   ridersOn = false; for (const a of crew) if (a.want?.sit || a.want?.lock) a.clear();
@@ -3711,14 +3944,14 @@ function timerText() {
   const t = fmt(elapsed()), ch = G.challenge;
   if (ch?.kind === 'speed') return `${t} · ${MEDAL_ICON[0]} ${fmt(SPEED[LV.number].medals[0])}`;
   if (ch?.kind === 'fix') return `${t} · ${MEDAL_ICON[0]} ${fmt(FIX[LV.number].medals[0])}`;
-  if (ch?.kind === 'cube') return `${t} · ${MEDAL_ICON[0]} ${fmt(CUBE_FIX.medals[0])}`;
+  if (ch?.kind === 'cube') return `${t} · ${MEDAL_ICON[0]} ${fmt(cubeMedals(ch)[0])}`;
   return t;
 }
 function playChallenge(ch) {
   closeModal();
   $('home').hidden = true; $('levels').hidden = true;
   resetPlan();
-  LV = { ...(ch.kind === 'cube' ? CUBE_LEVEL : LEVELS[ch.level - 1]), tutorial: false, challenge: ch };
+  LV = { ...(ch.kind === 'cube' ? (ch.level === 4 ? CUBE4_LEVEL : CUBE_LEVEL) : LEVELS[ch.level - 1]), tutorial: false, challenge: ch };
   STAGES = stageList(); makeChips(); restart();
 }
 // restart() calls this: a challenge starts again from the same point
@@ -3726,7 +3959,7 @@ function startChallenge() {
   const ch = LV.challenge; if (!ch) return;
   G.challenge = { ...ch, penalty: 0, calls: 0 };
   if (ch.kind === 'fix') breakCamp(G.challenge);
-  else if (ch.kind === 'cube') breakCube(G.challenge);
+  else if (ch.kind === 'cube') (ch.level === 4 ? breakCube4 : breakCube)(G.challenge);
   else flashHint(`<b>מול השעון:</b> בונים את כל המבנה ומזמינים מסדר. הזמן נספר רק אם כל הכפיתות כפותות`);
   refreshAll();
 }
@@ -3790,6 +4023,32 @@ function breakCube(ch) {
   startClock();
   flashHint('<b>קובייה לא שלמה.</b> משלימים לפי תיק המבנה ומזמינים מסדר');
 }
+// the 4×4 cube (Omer, 11-21): standing and anchored, every connection from the ground
+// tied, some connections above 2 m missing. The player goes up (work at height) and ties them.
+function breakCube4(ch) {
+  const rand = rng(Math.floor(Math.random() * 1e9));
+  const crewIds = [...GUYS.map(g => g.id), 'L1', 'L2'];
+  eachKlaf(k => {
+    const b = G.build;
+    for (const sl of SLOTS) b.poles[sl.id] = { length: sl.length };
+    for (const j of JOINTS) b.joints[j.id] = j.correct;
+    for (const st of LEG_STAKES) b.stakes[st.id] = LEG_STAKE_HITS;
+    for (const g of GUYS) { b.guyTop[g.id] = true; b.anchors[g.id] = ANCHOR_HITS; b.guyTies[g.id] = 'guy'; }
+    for (const sj of STAKE_JOINTS) b.stakeJoints[sj.id] = sj.correct;
+    crewIds.forEach((id, n) => { b.crew[id] = n; });
+    k.raisedOnce = true;
+    k.sim = new KlafSim(b, k.cfg); k.sim.standUp();
+  });
+  const high = LV.cube.joints.filter(highJoint).map(j => j.id).sort(() => rand() - 0.5);
+  ch.missing = high.slice(0, 5 + Math.floor(rand() * 3));
+  const cb = G.cube.build;
+  for (const sl of LV.cube.slots) cb.poles[sl.id] = { length: sl.length };
+  for (const j of LV.cube.joints) if (!ch.missing.includes(j.id)) cb.joints[j.id] = j.correct;
+  useKlaf(0);
+  goStage('cube');
+  startClock();
+  flashHint('<b>עבודה בגובה.</b> משלימים לפי תיק המבנה ומזמינים מסדר');
+}
 function faultsLeft() {
   let n = 0;
   eachKlaf(() => {
@@ -3822,13 +4081,13 @@ function fixCheck() {
 onWin = s => {
   const ch = G.challenge;
   if (ch?.kind !== 'speed' && ch?.kind !== 'cube') return '';
-  const medals = ch.kind === 'cube' ? CUBE_FIX.medals : SPEED[LV.number].medals;
+  const medals = ch.kind === 'cube' ? cubeMedals(ch) : SPEED[LV.number].medals;
   const sec = s.sec, med = medalOf(sec, medals), best = recordChallenge(ch, sec);
   if (med >= 0) fun.confetti(40);
   return `<div class="ch-result">${med >= 0 ? `${MEDAL_ICON[med]} <b>מדליית ${MEDAL_HE[med]}</b>` : 'בלי מדליה הפעם'} · ${fmt(sec)}${best ? ' · <b>שיא חדש!</b>' : ''}</div>`;
 };
 function challengeRow(ch, label, sub) {
-  const best = bestOf(ch), m = best != null ? medalOf(best, ch.kind === 'cube' ? CUBE_FIX.medals : (ch.kind === 'speed' ? SPEED : FIX)[ch.level].medals) : -1;
+  const best = bestOf(ch), m = best != null ? medalOf(best, ch.kind === 'cube' ? cubeMedals(ch) : (ch.kind === 'speed' ? SPEED : FIX)[ch.level].medals) : -1;
   return `<button type="button" class="ch-row" data-k="${ch.kind}" data-l="${ch.level}"><span class="ch-nm">${label}</span><span class="ch-sub">${sub}</span>
     <span class="ch-best">${best != null ? `${m >= 0 ? MEDAL_ICON[m] : ''} ${fmt(best)}` : 'עוד לא'}</span></button>`;
 }
@@ -3836,6 +4095,7 @@ function showChallenges() {
   showModal(`<div class="eyebrow">אתגרים קצרים</div><h2>אתגרים</h2>
     <div class="ch-grid">
       ${challengeRow({ kind: 'cube', level: 0 }, 'קובייה לא שלמה', 'משלימים ועוברים מסדר')}
+      ${challengeRow({ kind: 'cube', level: 4 }, 'עבודה בגובה: קובייה 4×4', 'עולים עם רתמות ומשלימים למעלה')}
       ${challengeRow({ kind: 'speed', level: 1 }, 'מול השעון: קלף 2×2', 'כל המבנה, כמה שיותר מהר')}
       ${challengeRow({ kind: 'speed', level: 3 }, 'מול השעון: חצובה', 'כל המבנה, כמה שיותר מהר')}
       ${challengeRow({ kind: 'fix', level: 1 }, 'תקנו את המחנה: קלף', 'מוצאים מה לא תקין')}
@@ -3999,6 +4259,7 @@ function folderTabs() {
   if (LV.tripod) return [['drawing', 'שרטוט החצובה'], ['poles', 'רשימת סנדות']];
   if (LV.wheel) return [['tri90', 'חצובה ב־90 מעלות (שתיים זהות)'], ['wheelF', 'הגלגל'], ['wseat', 'המושב'], ['poles', 'רשימת סנדות']];
   if (LV.carousel) return [['klaf0', 'קלף השער'], ['klaf1', 'הקלף האחורי'], ['sideR', 'הצד הימני'], ['sideL', 'הצד השמאלי'], ['top', 'מבט על (הגג)'], ['seat', 'המושב והתורן'], ['poles', 'רשימת סנדות']];
+  if (LV.frame) return [['klaf0', 'שרטוט הקלפים (שניים זהים)'], ['sideR', 'הצד הימני'], ['sideL', 'הצד השמאלי'], ['top', 'מבט על (הגג)'], ['poles', 'רשימת סנדות']];
   if (LV.cube) return [['drawing', 'שרטוט קלף'], ['sideR', 'שרטוט הצד הימני'], ['sideL', 'שרטוט הצד השמאלי'], ['top', 'שרטוט מבט על'], ['poles', 'רשימת סנדות']];
   return [['drawing', 'שרטוט הקלף'], ['poles', 'רשימת סנדות'], ...(LV.tutorial ? [['order', 'סדר עבודה (הדרכה)'], ['lashings', 'איזו כפיתה איפה (הדרכה)']] : [])];
 }
@@ -4022,6 +4283,20 @@ function poleTable() {
     return `<table><thead><tr><th>סנדה</th><th>כמות</th><th>אורך</th></tr></thead><tbody>
       ${rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('')}</tbody></table>
       <p class="note">ועוד 4 חבלי תלייה למושב. המידות זמניות, עד שיגיעו שרטוטים אמיתיים.</p>`;
+  }
+  if (LV.frame) {
+    const C = SIZES.cube4;
+    const rows = [
+      ['רגליים (שני הקלפים)', 4, m(C.legLength)],
+      [`רוחב תחתון, אמצעי (בגובה ${C.midHeight.toFixed(1)} מ׳) ועליון בשני הקלפים`, 6, m(C.horizontalLength)],
+      ['אלכסונים בקלפים (איקס עליון ואיקס תחתון בכל קלף)', 8, m(C.diagLength)],
+      ['חיבורים בין הקלפים (תחתון, אמצעי ועליון בכל צד)', 6, m(C.horizontalLength)],
+      ['אלכסונים לאיקסים מרחביים בצדדים (שני איקסים בכל צד)', 8, m(C.sideDiagLength)],
+      ['איקס הגג, פינה לפינה', 2, m(C.topDiagLength)],
+    ];
+    return `<table><thead><tr><th>סנדה</th><th>כמות</th><th>אורך</th></tr></thead><tbody>
+      ${rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('')}</tbody></table>
+      <p class="note">כל חיבור מעל 2 מ׳ כופתים בעבודה בגובה: שני מטפסים עם רתמות ואיש אבטחה למטה.</p>`;
   }
   if (LV.carousel) {
     const C = CAR, S = C.seat;
@@ -4091,7 +4366,7 @@ function openFolder(tab = LV.sketch ? 'sk0' : LV.wheel ? 'tri90' : LV.carousel ?
     // the carousel's two klafim have drawings of their own
     const c = document.createElement('canvas'); c.width = c.height = BP.size;
     const keep = G.ki; useKlaf(+tab.slice(4));
-    drawBlueprint(c.getContext('2d'), { joints: JOINTS, title: LV.wheel ? 'מגדל · גלגל ענק' : `${LV.klafim[+tab.slice(4)].he} · קרוסלה 5×5` });
+    drawBlueprint(c.getContext('2d'), { joints: JOINTS, title: LV.wheel ? 'מגדל · גלגל ענק' : LV.frame ? `קלף · ${LV.name}` : `${LV.klafim[+tab.slice(4)].he} · קרוסלה 5×5` });
     useKlaf(keep);
     body.appendChild(c);
   } else if (tab === 'tri90') {
@@ -4374,10 +4649,12 @@ function jointPosOf(sid, s) {
 }
 function placeActor(actor, pos, rotY, lean, reach) { actor.set(pos, rotY, lean, reach); }
 function drawGauge() {
-  $('rope-panel').hidden = G.stage !== 'raise' || !!G.falling;
-  $('crew-panel').hidden = G.stage !== 'raise' || !!G.falling;
-  if (!G.sim || G.stage !== 'raise') return;
-  const ang = G.sim.angle();
+  const tr = triRaiseMode();
+  $('rope-panel').hidden = (G.stage !== 'raise' && !tr) || !!G.falling;
+  $('crew-panel').hidden = (G.stage !== 'raise' && !heightPanelOn() && !tr) || !!G.falling;
+  if (tr) renderCrew();
+  if (!tr && (!G.sim || G.stage !== 'raise')) return;
+  const ang = tr ? G.tri.up * 90 : G.sim.angle();
   $('gauge-needle').style.transform = `rotate(${Math.max(-95, Math.min(95, ang - 90))}deg)`;
   $('gauge-val').textContent = Math.round(ang) + '°';
   $('gauge-label').textContent = ang < 6 ? 'שוכב' : ang < 82 ? 'עולה' : ang <= 97 ? 'ניצב' : 'עבר את האנך!';
@@ -4495,6 +4772,7 @@ function frame(now) {
   if (G.klafim.some(k => k.tri)) eachKlaf((k, i) => { if (k.tri) drawTripod(dt, i === cur); });
   drawTriShared(dt); drawSeat(dt); drawWheel(dt); drawTier(); drawGauge(); drawPushArrow(push); drawInspector(push);
   updateJobs(dt);
+  stepHeight(dt);
   for (const a of allActors) a.update(dt);
   collectTargets();
   updateCamera(dt);
@@ -4511,4 +4789,4 @@ restart();
 requestAnimationFrame(frame);
 
 // debug hook for automated tests
-window.__game = { get state() { return G; }, triApex: () => triApex(), triGuyTop: i => triGuyTop(i), triLegSegs: s => triLegSegs(s), fun, balanceFor, finish, celebrate, get parade() { return parade; }, triGuide, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, score: () => score(), standAll: () => G.klafim.forEach((k, i) => { useKlaf(i); for (const q of STAKE_JOINTS) k.build.stakeJoints[q.id] = 'parallel'; for (const q of GUYS) k.build.guyTies[q.id] = 'guy'; k.raisedOnce = true; k.sim = new KlafSim(k.build, k.cfg); k.sim.standUp(); }), WHEEL, GOND, RIG, SEAT_ROPES, liftWheel: () => liftWheel(), liftWheelSeat: () => liftWheelSeat(), SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };
+window.__game = { get state() { return G; }, triRoles: () => triRoles(), toggleTriCrew: id => toggleTriCrew(id), pullTripod: dy => pullTripod(dy), triCrewReady: () => triCrewReady(), heightSpots: () => heightSpots(), toggleHeightCrew: r => toggleHeightCrew(r), openHeightCrew: () => openHeightCrew(), moveClimber: i => moveClimber(i), playChallenge: ch => playChallenge(ch), triApex: () => triApex(), triGuyTop: i => triGuyTop(i), triLegSegs: s => triLegSegs(s), fun, balanceFor, finish, celebrate, get parade() { return parade; }, triGuide, BRACES, BRACE_JOINTS, TRI_STAKES, TRI_STAKE_JOINTS, TRI_STAKE_HITS, score: () => score(), standAll: () => G.klafim.forEach((k, i) => { useKlaf(i); for (const q of STAKE_JOINTS) k.build.stakeJoints[q.id] = 'parallel'; for (const q of GUYS) k.build.guyTies[q.id] = 'guy'; k.raisedOnce = true; k.sim = new KlafSim(k.build, k.cfg); k.sim.standUp(); }), WHEEL, GOND, RIG, SEAT_ROPES, liftWheel: () => liftWheel(), liftWheelSeat: () => liftWheelSeat(), SEAT, MAST_JOINTS, HANG_ROPES, liftSeat, get pickerTarget() { return picker.target; }, correctFor, ropeLeft, poleLeft, get LV() { return LV; }, rebuildCube, runCheck, rec, goStage, switchLevel, triState: () => triState(), raiseTripod: () => raiseTripod(), useKlaf, cubeSegs, cubeJointPos, enterCube, chooseLashing, openPicker, onTarget, SLOTS, JOINTS, camera, controls, toScreen, targets: () => targets };

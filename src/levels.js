@@ -4,7 +4,7 @@
 import { SIZES } from './blueprints.js';
 import { fitAllowance } from './allowance.js';
 import { LEVEL as KLAF } from './level1.js';
-import { GATE_PLAN, BACK_PLAN, JOIN, CAR, CAR_LEG_V } from './carousel.js';
+import { GATE_PLAN, BACK_PLAN, JOIN, CAR, CAR_LEG_V, CUBE4 } from './carousel.js';
 import { TRI90, WH } from './wheel.js';
 
 const K = SIZES.klaf, C = SIZES.cube;
@@ -187,3 +187,18 @@ export const CUBE_LEVEL = {
     ],
     cube: makeCube(1),
   };
+
+// The 4×4 cube (Omer, 2026-11-21): a challenge only, to show work at height. Its two
+// klafim are like the carousel's back klaf at 4 m; it starts standing with every
+// connection from the ground tied and some connections above 2 m missing.
+const C4 = SIZES.cube4;
+const C4K = { frontDist: C4.guyDistance, backDist: C4.guyDistance, pullDist: C4.guyDistance + 1.4, anchorX: { front: 1.05, back: 1.05 }, extraLegV: CUBE4.CAR_LEG_V, backGripCap: C4.backGripCap };
+export const CUBE4_LEVEL = {
+  number: 0, name: 'קובייה 4×4', tutorial: false, targetTimeSec: 20 * 60, frame: true, camScale: 1.75,
+  stockExtra: [4.0, 2.0], ropeSpare: 4, crew: 6,
+  klafim: [
+    { ...SOLO, ...C4K, he: 'קלף קדמי', short: 'א׳', plan: CUBE4.BACK_PLAN, inner: 1 },
+    { ...SOLO, ...C4K, he: 'קלף אחורי', short: 'ב׳', plan: CUBE4.BACK_PLAN, z0: C4.width, inner: -1 },
+  ],
+  cube: CUBE4.JOIN,
+};

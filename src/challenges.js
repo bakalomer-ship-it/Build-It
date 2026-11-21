@@ -17,6 +17,9 @@ export const FIX_PENALTY = 20; // seconds added for calling the מדריך while
 export const today = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 // the 2x2 cube that stands without one top connection: medal times from the start to a passed מסדר
 export const CUBE_FIX = { medals: [150, 270, 420] };
+// the 4×4 cube with connections above 2 m missing (Omer, 11-21): climbers in harnesses tie them
+export const CUBE4_FIX = { medals: [240, 420, 600] };
+export const cubeMedals = ch => (ch.level === 4 ? CUBE4_FIX : CUBE_FIX).medals;
 
 // a small seeded random (a broken camp can be replayed from its seed)
 export function rng(seed) {

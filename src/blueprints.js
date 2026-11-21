@@ -77,6 +77,18 @@ export const SIZES = {
     lowAxle: 1.7,           // the wheel is built standing on its bottom corner, the axle this high
     seat: { hang: 0.8, width: 0.6, length: 1.2, diagIn: 0.15 },
   },
+  // ---- 4×4 cube (the "work at height" challenge, Omer 2026-11-21) ----
+  // The carousel's frame at 4 m: each face a horizontal at 2 m with an X above and below.
+  // Everything above 2 m is tied by scouts who climb up in harnesses.
+  cube4: {
+    width: 4.0, legLength: 4.0, bottomHeight: 0.3, midHeight: 2.0, topHeight: 3.85,
+    horizontalLength: 4.4, lowX: [0.5, 1.8], highX: [2.2, 3.65], diagLength: 4.6,
+    gateBottomLength: 2.4, postLength: 2.1, gateDiagLength: 2.8, // (a gate klaf is not used here)
+    sideBottom: 0.38, sideMid: 2.08, sideTop: 3.77,
+    sideLowX: [0.65, 1.75], sideHighX: [2.3, 3.55],
+    sideDiagLength: 4.5, topDiagLength: 5.9,
+    guyDistance: 4.0, backGripCap: 800, stakeJointHeights: [0.15, 0.55], topSheetGap: 3.6,
+  },
   // ---- carousel (קרוסלה מחנאית) on a 5×5 cube (station 4, Omer 2026-11-18) ----
   // A cube 5 m wide, deep and high. Every face but the gate has a horizontal at
   // 2.5 m with an X above it and an X below it. The gate (the front klaf) has the
