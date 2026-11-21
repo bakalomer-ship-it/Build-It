@@ -29,26 +29,30 @@ const D = WH.apart, F = WH.forkHeight;
 // ---------------- the 90° tripods ----------------
 // lying side by side with their tops together: the upright leg (shorter) in the middle
 function tri90() {
-  const Lu = WH.uprightLength, Ll = WH.leanLength, top = Math.max(Lu, Ll);
-  // Omer (11-21): four legs, two upright side by side and two leaning; laid side by side,
-  // the uprights in the middle (t4 is the second upright: it stands beside t2)
+  // Omer (11-21): four legs whose feet make a square. The two on the wheel's side stand at
+  // 90° seen from the side (in the plane under the head, splayed apart), the two behind lean
+  // in. Laid side by side for the lashing: the leaning legs outside, the 90° legs inside.
+  const A = WH.footSide, B = WH.footOut;
+  const s90 = Math.hypot(A, F), sLean = Math.hypot(A, B, F);
+  const Lu = Math.ceil((s90 + WH.lashFromTop) * 10 - 1e-6) / 10, Ll = Math.ceil((sLean + WH.lashFromTop) * 10 - 1e-6) / 10, top = Math.max(Lu, Ll);
   const leg = (id, he, u, L) => ({ id, he, centre: [u, top - L / 2], dir: [0, 1], length: L, layer: 0, kind: 'v' });
-  const slots = [leg('t1', 'רגל נוטה ימנית', -0.21, Ll), leg('t2', 'רגל זקופה ימנית', -0.07, Lu), leg('t3', 'רגל נוטה שמאלית', 0.21, Ll), leg('t4', 'רגל זקופה שמאלית', 0.07, Lu)];
+  const slots = [leg('t1', 'רגל נוטה ימנית', -0.21, Ll), leg('t2', 'רגל ימנית ב־90°', -0.07, Lu), leg('t3', 'רגל נוטה שמאלית', 0.21, Ll), leg('t4', 'רגל שמאלית ב־90°', 0.07, Lu)];
   const joints = [{ id: 'TJ', a: 't1', b: 't3', all: slots.map(q => q.id), at: [0, top - WH.lashFromTop], correct: 'tripod' }];
   const spec = {
     slots, joints, lashV: top - WH.lashFromTop, lashFromTop: WH.lashFromTop, height: F, ninety: true,
-    twin: { id: 't4', of: 1, offset: [2 * r + 0.02, 0, 0] },
-    // c: where the upright leg stands; out: -1 for the front tripod, +1 for the back one
-    planFeet: (c, out = -1) => [[c[0] + WH.footSide, c[1] + out * WH.footOut], [c[0], c[1]], [c[0] - WH.footSide, c[1] + out * WH.footOut]],
+    twin: { id: 't4', of: 1 }, // t4 is t2's mirror image: the square's fourth corner
+    // c: the middle of the square's side on the wheel's side; out: -1 for the front tripod, +1 for the back one.
+    // Feet: t1 behind on the right, t2 on the wheel's side on the right, t3 behind on the left (t4: mirror of t2)
+    planFeet: (c, out = -1) => [[c[0] + A, c[1] + out * B], [c[0] + A, c[1]], [c[0] - A, c[1] + out * B]],
   };
   const f = spec.planFeet([0, 0]), d = (a, b) => Math.hypot(f[a][0] - f[b][0], f[a][1] - f[b][1]);
   spec.apart = [d(0, 1), d(1, 2), d(2, 0)];
-  // the braces at about 50 cm, with מרחק כפיתה at both ends, in 10 cm steps
-  const s = [Ll, Lu, Ll].map((l, i) => legSOf(spec, i, l)), hb = 0.5;
-  spec.braceLengths = Object.fromEntries(BRACES.map(b => {
-    const k = 1 - hb / F, gap = d(b.legs[0], b.legs[1]) * k;
-    return [b.id, Math.ceil((gap + 2 * LASH_ALLOW) * 10 - 1e-6) / 10];
-  }));
+  // the square's sides, for the guide: right, wheel side, left, back
+  spec.square = [B, 2 * A, B, 2 * A];
+  // the braces at about 50 cm, with מרחק כפיתה at both ends, in 10 cm steps: the right side (B12),
+  // the left side (B23, from t4 to t3) and the back (B31); the wheel's side stays open
+  const hb = 0.5, k = 1 - hb / F, bl = gap => Math.ceil((gap * k + 2 * LASH_ALLOW) * 10 - 1e-6) / 10;
+  spec.braceLengths = { B12: bl(B), B23: bl(B), B31: bl(2 * A) };
   spec.legLengths = [Ll, Lu, Ll];
   return spec;
 }
