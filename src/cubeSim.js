@@ -30,7 +30,7 @@ export class CubeSim {
     this.build = build;
     const W = this.world = new World();
     W.iterations = 4; // the load runs through many lashings in a row: solve them more than once
-    this.klafim = klafim.map(k => { const s = new KlafSim(k.build, k.cfg, W); s.standUp(); return s; });
+    this.klafim = klafim.map(k => { k.prep?.(); const s = new KlafSim(k.build, k.cfg, W); s.standUp(); return s; });
     // guy lines are real ropes: they stretch under load, so a cube without its
     // spatial Xs sways on them, while a braced cube stays put
     for (const k of this.klafim) for (const g in k.guys) if (k.guys[g].tied) k.guys[g].compliance = TUNING.cubeGuyCompliance;
