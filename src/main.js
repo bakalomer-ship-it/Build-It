@@ -12,7 +12,7 @@ import { FREE_LEVEL, GRID, POLE_MIN, POLE_MAX, layPole, onSheet, idFor, slotFor,
 import { SIZES } from './blueprints.js';
 import { KlafSim, TUNING, jointReachable, guyAnchor, slotById, slotParam, slotPoint, klafToWorld } from './klafSim.js';
 import { CubeSim, cubeSlotPoint, cubeSlotParam, cubeJointReachable } from './cubeSim.js';
-import { LEVELS, CUBE_LEVEL, CUBE4_LEVEL } from './levels.js';
+import { LEVELS, CUBE_LEVEL, CUBE4_LEVEL, CARFRAME_LEVEL } from './levels.js';
 import { loadSketch } from './sketch.js';
 import { CAR, SEAT, SEAT_C, MAST, MAST_JOINTS, HANG_ROPES, PIVOT, CarouselSim, CAR_TUNING, mastReaches, mastTopY, seatY, cornerAt, KLAF_XS } from './carousel.js';
 import { WH, WHEEL, GOND, RIG, SEAT_ROPES, WheelSim, WH_TUNING, AXLE_Y, WHEEL_DROP, SEAT_DROP, SEAT_C as WSEAT_C, SEAT_Y as WSEAT_Y, ropeTop, ropeFoot, rigReachable, WHEEL_Z, TRI90 } from './wheel.js';
@@ -27,7 +27,7 @@ import { sfx, buzz } from './sound.js';
 import { makeDecor } from './decor.js';
 import { makeFun } from './fun.js';
 import { makeBalance, BALANCE } from './balance.js';
-import { SPEED, FIX, cubeMedals, FIX_PENALTY, rng, medalOf, MEDAL_HE, MEDAL_ICON, bestOf, recordChallenge } from './challenges.js';
+import { SPEED, FIX, MISSING, cubeMedals, FIX_PENALTY, rng, medalOf, MEDAL_HE, MEDAL_ICON, bestOf, recordChallenge } from './challenges.js';
 import { Actor, makeCrew, freeActors, CREW } from './crew.js';
 
 const $ = id => document.getElementById(id);
@@ -3831,7 +3831,7 @@ function sheetOf(j) {
   if (LV.tripod) return j.tri === 'head' ? 'שרטוט החצובה, בראש' : j.tri === 'stake' ? 'שרטוט החצובה, ליד הקרקע (רגל לבז״נט)' : 'שרטוט החצובה, בחיזוקים';
   if (j.seat) return j.rope ? 'שרטוט המושב, חבלי התלייה' : j.mast ? 'שרטוט המושב, התורן' : 'שרטוט המושב';
   if (j.rig) return j.rope ? 'שרטוט המושב, חבלי התלייה' : j.part === 'seat' ? 'שרטוט המושב' : j.cornerPole != null ? 'שרטוט הגלגל, סנדות הפינה' : j.axle ? 'שרטוט הגלגל, הציר' : `שרטוט הגלגל, ה${j.sq ? 'ריבוע האחורי' : 'ריבוע הקדמי'}`;
-  const band = y => LV.frame ? (y < 2.2 ? 'גובה 0–2 מ׳' : 'גובה 2–4 מ׳ (עבודה בגובה)') : LV.carousel ? (y < 2.5 ? 'גובה 0–2.5 מ׳' : 'גובה 2.5–5 מ׳') : LV.wheel ? (y < 1.4 ? 'גובה 0–1.4 מ׳' : 'גובה 1.4–3.4 מ׳') : y < 1.0 ? 'גובה 0–1 מ׳' : 'גובה 1–2 מ׳';
+  const band = y => LV.frame ? (y < 2.2 ? 'גובה 0–2 מ׳' : `גובה 2–${LV.cube.height} מ׳ (עבודה בגובה)`) : LV.carousel ? (y < 2.5 ? 'גובה 0–2.5 מ׳' : 'גובה 2.5–5 מ׳') : LV.wheel ? (y < 1.4 ? 'גובה 0–1.4 מ׳' : 'גובה 1.4–3.4 מ׳') : y < 1.0 ? 'גובה 0–1 מ׳' : 'גובה 1–2 מ׳';
   const of = LV.klafim.length > 1 && j.klaf != null ? `, ${LV.klafim[j.klaf].he}` : '';
   if (j.cube && j.side === 0) return 'שרטוט מבט על' + (LV.cube.bays > 1 ? (j.bay % 1 ? ', בחיבור בין הקוביות' : j.bay ? ', קובייה אחורית' : ', קובייה קדמית') : '');
   if (j.cube) return `שרטוט ${j.side > 0 ? 'הצד השמאלי' : 'הצד הימני'}${LV.cube.bays > 1 ? (j.bay ? ', קובייה אחורית' : ', קובייה קדמית') : ''}, ${band(j.at[1])}`;
@@ -3861,7 +3861,7 @@ function restart() {
   G = freshState();
   // each klaf's drawing on the ground, at its size (the carousel's 5 m klafim need a bigger sheet)
   if (!LV.free && !LV.tripod) {
-    if (LV.carousel) setBlueprintSize(6.8, 2.45); else if (LV.frame) setBlueprintSize(5.6, 2.0); else if (LV.wheel) setBlueprintSize(4.4, 1.6); else setBlueprintSize(BP_BASE.span, BP_BASE.v0);
+    if (LV.carousel) setBlueprintSize(6.8, 2.45); else if (LV.frame) setBlueprintSize(...LV.bp); else if (LV.wheel) setBlueprintSize(4.4, 1.6); else setBlueprintSize(BP_BASE.span, BP_BASE.v0);
     LV.klafim.forEach((k, i) => { useKlaf(i); redrawBlueprint(KM[i].blueprint, JOINTS, LV.frame ? `${k.he} · ${LV.name}` : LV.carousel ? `${k.he} · קרוסלה 5×5` : LV.wheel ? `${k.he} · גלגל ענק` : undefined); });
   }
   useKlaf(0);
@@ -4100,7 +4100,8 @@ function playChallenge(ch) {
   closeModal();
   $('home').hidden = true; $('levels').hidden = true;
   resetPlan();
-  LV = { ...(ch.kind === 'cube' ? (ch.level === 4 ? CUBE4_LEVEL : CUBE_LEVEL) : LEVELS[ch.level - 1]), tutorial: false, challenge: ch };
+  const ml = ch.kind === 'cube' && MISSING[ch.level] ? { cube4: CUBE4_LEVEL, base: { ...LEVELS[1], number: 0 }, carframe: CARFRAME_LEVEL }[MISSING[ch.level].lv] : null;
+  LV = { ...(ml || (ch.kind === 'cube' ? CUBE_LEVEL : LEVELS[ch.level - 1])), tutorial: false, challenge: ch };
   STAGES = stageList(); makeChips(); restart();
 }
 // restart() calls this: a challenge starts again from the same point
@@ -4108,7 +4109,7 @@ function startChallenge() {
   const ch = LV.challenge; if (!ch) return;
   G.challenge = { ...ch, penalty: 0, calls: 0 };
   if (ch.kind === 'fix') breakCamp(G.challenge);
-  else if (ch.kind === 'cube') (ch.level === 4 ? breakCube4 : breakCube)(G.challenge);
+  else if (ch.kind === 'cube') (MISSING[ch.level] ? breakMissing : breakCube)(G.challenge);
   else flashHint(`<b>מול השעון:</b> בונים את כל המבנה ומזמינים מסדר. הזמן נספר רק אם כל הכפיתות כפותות`);
   refreshAll();
 }
@@ -4174,7 +4175,8 @@ function breakCube(ch) {
 }
 // the 4×4 cube (Omer, 11-21): standing and anchored, every connection from the ground
 // tied, some connections above 2 m missing. The player goes up (work at height) and ties them.
-function breakCube4(ch) {
+function breakMissing(ch) {
+  const spec = MISSING[ch.level];
   const rand = rng(Math.floor(Math.random() * 1e9));
   const crewIds = [...GUYS.map(g => g.id), 'L1', 'L2'];
   eachKlaf(k => {
@@ -4188,15 +4190,35 @@ function breakCube4(ch) {
     k.raisedOnce = true;
     k.sim = new KlafSim(b, k.cfg); k.sim.standUp();
   });
-  const high = LV.cube.joints.filter(highJoint).map(j => j.id).sort(() => rand() - 0.5);
-  ch.missing = high.slice(0, 5 + Math.floor(rand() * 3));
+  const mix = a => a.map(v => [rand(), v]).sort((p, q) => p[0] - q[0]).map(p => p[1]);
+  const J = LV.cube.joints, count = spec.n ? spec.n[0] + Math.floor(rand() * (spec.n[1] - spec.n[0] + 1)) : 0;
+  const touching = ids => J.filter(j => ids.includes(j.a) || ids.includes(j.b)).map(j => j.id);
+  let gonePoles = [];
+  if (spec.pick === 'high') ch.missing = mix(J.filter(highJoint).map(j => j.id)).slice(0, count);
+  else if (spec.pick === 'any') ch.missing = mix(J.map(j => j.id)).slice(0, count);
+  else if (spec.pick === 'mixed') {
+    const lo = mix(J.filter(j => !highJoint(j)).map(j => j.id)), hi = mix(J.filter(highJoint).map(j => j.id)), h = Math.ceil(count / 2);
+    ch.missing = [...lo.slice(0, count - h), ...hi.slice(0, h)];
+  } else if (spec.pick === 'x') {
+    // a whole איקס מרחבי: both its diagonals and every lashing on them
+    const d = mix(LV.cube.slots.filter(q => q.kind === 'd'))[0];
+    const partner = d.id.replace(/^C\.(d|x|u)([AB])/, (m, a, b) => `C.${a}${b === 'A' ? 'B' : 'A'}`);
+    gonePoles = [d.id, partner].filter(id => LV.cube.slots.some(q => q.id === id));
+    ch.missing = touching(gonePoles);
+  } else if (spec.pick === 'pole') {
+    // one pole up high (a side's top horizontal or an upper diagonal) and its lashings
+    const hiSlots = LV.cube.slots.filter(q => q.side && q.centre[1] > HEIGHT.above);
+    gonePoles = [mix(hiSlots)[0].id];
+    ch.missing = touching(gonePoles);
+  }
+  ch.gonePoles = gonePoles;
   const cb = G.cube.build;
-  for (const sl of LV.cube.slots) cb.poles[sl.id] = { length: sl.length };
-  for (const j of LV.cube.joints) if (!ch.missing.includes(j.id)) cb.joints[j.id] = j.correct;
+  for (const sl of LV.cube.slots) if (!gonePoles.includes(sl.id)) cb.poles[sl.id] = { length: sl.length };
+  for (const j of J) if (!ch.missing.includes(j.id)) cb.joints[j.id] = j.correct;
   useKlaf(0);
   goStage('cube');
   startClock();
-  flashHint('<b>עבודה בגובה.</b> משלימים לפי תיק המבנה ומזמינים מסדר');
+  flashHint(`<b>${spec.he}.</b> משהו לא שלם. משלימים לפי תיק המבנה ומזמינים מסדר`);
 }
 function faultsLeft() {
   let n = 0;
@@ -4244,7 +4266,7 @@ function showChallenges() {
   showModal(`<div class="eyebrow">אתגרים קצרים</div><h2>אתגרים</h2>
     <div class="ch-grid">
       ${challengeRow({ kind: 'cube', level: 0 }, 'קובייה לא שלמה', 'משלימים ועוברים מסדר')}
-      ${challengeRow({ kind: 'cube', level: 4 }, 'עבודה בגובה: קובייה 4×4', 'עולים עם רתמות ומשלימים למעלה')}
+      ${Object.entries(MISSING).map(([l, m]) => challengeRow({ kind: 'cube', level: +l }, m.he, m.sub)).join('')}
       ${challengeRow({ kind: 'speed', level: 1 }, 'מול השעון: קלף 2×2', 'כל המבנה, כמה שיותר מהר')}
       ${challengeRow({ kind: 'speed', level: 3 }, 'מול השעון: חצובה', 'כל המבנה, כמה שיותר מהר')}
       ${challengeRow({ kind: 'fix', level: 1 }, 'תקנו את המחנה: קלף', 'מוצאים מה לא תקין')}
@@ -4408,7 +4430,7 @@ function folderTabs() {
   if (LV.tripod) return [['drawing', 'שרטוט החצובה'], ['poles', 'רשימת סנדות']];
   if (LV.wheel) return [['tri90', 'חצובה ב־90 מעלות (שתיים זהות)'], ['wheelF', 'הגלגל'], ['wseat', 'המושב'], ['poles', 'רשימת סנדות']];
   if (LV.carousel) return [['klaf0', 'קלף השער'], ['klaf1', 'הקלף האחורי'], ['sideR', 'הצד הימני'], ['sideL', 'הצד השמאלי'], ['top', 'מבט על (הגג)'], ['seat', 'המושב והתורן'], ['poles', 'רשימת סנדות']];
-  if (LV.frame) return [['klaf0', 'שרטוט הקלפים (שניים זהים)'], ['sideR', 'הצד הימני'], ['sideL', 'הצד השמאלי'], ['top', 'מבט על (הגג)'], ['poles', 'רשימת סנדות']];
+  if (LV.frame) return [...(LV.klafim[0].plan === LV.klafim[1].plan ? [['klaf0', 'שרטוט הקלפים (שניים זהים)']] : [['klaf0', LV.klafim[0].he], ['klaf1', LV.klafim[1].he]]), ['sideR', 'הצד הימני'], ['sideL', 'הצד השמאלי'], ['top', 'מבט על (הגג)'], ['poles', 'רשימת סנדות']];
   if (LV.cube) return [['drawing', 'שרטוט קלף'], ['sideR', 'שרטוט הצד הימני'], ['sideL', 'שרטוט הצד השמאלי'], ['top', 'שרטוט מבט על'], ['poles', 'רשימת סנדות']];
   return [['drawing', 'שרטוט הקלף'], ['poles', 'רשימת סנדות'], ...(LV.tutorial ? [['order', 'סדר עבודה (הדרכה)'], ['lashings', 'איזו כפיתה איפה (הדרכה)']] : [])];
 }
@@ -4432,6 +4454,15 @@ function poleTable() {
     return `<table><thead><tr><th>סנדה</th><th>כמות</th><th>אורך</th></tr></thead><tbody>
       ${rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('')}</tbody></table>
       <p class="note">ועוד 4 חבלי תלייה למושב. המידות זמניות, עד שיגיעו שרטוטים אמיתיים.</p>`;
+  }
+  if (LV.frame && LV.klafim[0].plan !== LV.klafim[1].plan) {
+    // a frame whose klafim differ (the carousel's): every pole, by length
+    const n = {};
+    for (const k of LV.klafim) for (const q of k.plan.slots) n[q.length.toFixed(1)] = (n[q.length.toFixed(1)] || 0) + 1;
+    for (const q of LV.cube.slots) n[q.length.toFixed(1)] = (n[q.length.toFixed(1)] || 0) + 1;
+    return `<table><thead><tr><th>סנדה</th><th>כמות</th><th>אורך</th></tr></thead><tbody>
+      ${Object.keys(n).sort((a, c) => c - a).map(l => `<tr><td>סנדות של ${l} מ׳</td><td>${n[l]}</td><td>${l} מ׳</td></tr>`).join('')}</tbody></table>
+      <p class="note">כל חיבור מעל 2 מ׳ כופתים בעבודה בגובה: שני מטפסים עם רתמות ואיש אבטחה למטה.</p>`;
   }
   if (LV.frame) {
     const C = SIZES.cube4;
